@@ -1,193 +1,220 @@
-// @ts-nocheck
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
-let isSidebarDbInitialized = false;
+export const dynamic = 'force-dynamic';
 
-async function ensureSidebarSettingsTable() {
-  if (isSidebarDbInitialized) return;
+let isDbInitialized = false;
+
+async function ensureSidebarDb() {
+  if (isDbInitialized) return;
+
   try {
-    const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-    if (typeof query === 'function') {
-      await query(`
-        CREATE TABLE IF NOT EXISTS user_sidebar_settings (
-          id VARCHAR(64) PRIMARY KEY,
-          user_id VARCHAR(64),
-          user_email VARCHAR(255),
-          collapsed BOOLEAN DEFAULT false,
-          hidden_items JSONB DEFAULT '[]',
-          pinned_items JSONB DEFAULT '[]',
-          custom_order JSONB DEFAULT '[]',
-          settings JSONB DEFAULT '{}',
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_user_sidebar_settings_user ON user_sidebar_settings(user_id);
-      `);
-      isSidebarDbInitialized = true;
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_sidebar_settings (
+        user_id VARCHAR(255) PRIMARY KEY,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    // Ensure all columns exist individually before any query attempts to reference them
+    const cols = [
+      'id VARCHAR(255)',
+      'user_id VARCHAR(255)',
+      'user_email VARCHAR(255)',
+      'collapsed_sections JSONB DEFAULT \'[]\'::jsonb',
+      'collapsed JSONB DEFAULT \'[]\'::jsonb',
+      'settings JSONB DEFAULT \'{}\'::jsonb',
+      'updated_at TIMESTAMPTZ DEFAULT NOW()'
+    ];
+
+    for (const c of cols) {
+      try {
+        await query(`ALTER TABLE user_sidebar_settings ADD COLUMN IF NOT EXISTS ${c};`);
+      } catch (_) {}
     }
-  } catch (err: any) {
-    console.warn('[Sidebar Settings DB init notice]:', err.message);
+
+    try {
+      await query(`UPDATE user_sidebar_settings SET id = user_id WHERE (id IS NULL OR id = '') AND user_id IS NOT NULL;`);
+      await query(`UPDATE user_sidebar_settings SET user_id = id WHERE (user_id IS NULL OR user_id = '') AND id IS NOT NULL;`);
+      await query(`CREATE INDEX IF NOT EXISTS idx_user_sidebar_settings_id ON user_sidebar_settings (id);`);
+      await query(`CREATE INDEX IF NOT EXISTS idx_user_sidebar_settings_user_id ON user_sidebar_settings (user_id);`);
+    } catch (_) {}
+
+    isDbInitialized = true;
+  } catch (_) {
+    // Flag as initialized to prevent repeated DDL overhead
+    isDbInitialized = true;
   }
 }
 
-function getLocalSidebarSettingsPath() {
-  const dataDir = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  return path.join(dataDir, 'user_sidebar_settings.json');
-}
-
-function readLocalSidebarSettings(): Record<string, any> {
+export async function GET(req: NextRequest) {
   try {
-    const p = getLocalSidebarSettingsPath();
-    if (fs.existsSync(p)) {
-      return JSON.parse(fs.readFileSync(p, 'utf-8')) || {};
-    }
-  } catch (_) {}
-  return {};
-}
-
-function writeLocalSidebarSettings(data: Record<string, any>) {
-  try {
-    const p = getLocalSidebarSettingsPath();
-    fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (_) {}
-}
-
-const DEFAULT_SETTINGS = {
-  collapsed: false,
-  hidden_items: [],
-  pinned_items: [],
-  custom_order: [],
-  settings: {}
-};
-
-export async function GET(request: Request) {
-  try {
-    await ensureSidebarSettingsTable();
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId')?.trim() || '';
+    await ensureSidebarDb();
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId')?.trim() || searchParams.get('user_id')?.trim() || '';
     const email = searchParams.get('email')?.trim().toLowerCase() || '';
 
-    // 1. Try PostgreSQL with clean parameterized SQL (No syntax errors at LIMIT)
+    const targetKey = userId || email || 'usr_admin_1';
+
+    let settingsPayload: any = {
+      collapsedSections: [],
+      collapsed_sections: [],
+      isCollapsed: false,
+    };
+
+    // 1. Try PostgreSQL & MySQL Query
     try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function') {
-        let result: any = null;
-        if (userId && email) {
-          result = await query(
-            'SELECT * FROM user_sidebar_settings WHERE user_id = $1 OR LOWER(user_email) = $2 ORDER BY updated_at DESC LIMIT 1',
-            [userId, email]
-          );
-        } else if (userId) {
-          result = await query(
-            'SELECT * FROM user_sidebar_settings WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
-            [userId]
-          );
-        } else if (email) {
-          result = await query(
-            'SELECT * FROM user_sidebar_settings WHERE LOWER(user_email) = $1 ORDER BY updated_at DESC LIMIT 1',
-            [email]
-          );
-        } else {
-          result = await query(
-            'SELECT * FROM user_sidebar_settings ORDER BY updated_at DESC LIMIT 1'
-          );
+      const res: any = await query(`
+        SELECT * FROM user_sidebar_settings
+        WHERE ($1 != '' AND (user_id::text = $1 OR id::text = $1))
+           OR ($2 != '' AND LOWER(TRIM(COALESCE(user_email, ''))) = LOWER(TRIM($2)))
+        ORDER BY updated_at DESC
+        LIMIT 1;
+      `, [userId, email]);
+
+      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      if (row) {
+        let sections = row.collapsed_sections || row.collapsed || [];
+        if (typeof sections === 'string') {
+          try { sections = JSON.parse(sections); } catch (_) { sections = []; }
         }
 
-        const rows = result?.rows || result || [];
-        if (Array.isArray(rows) && rows.length > 0) {
-          const row = rows[0];
-          return NextResponse.json({
-            success: true,
-            settings: {
-              collapsed: !!row.collapsed,
-              hidden_items: typeof row.hidden_items === 'string' ? JSON.parse(row.hidden_items) : (row.hidden_items || []),
-              pinned_items: typeof row.pinned_items === 'string' ? JSON.parse(row.pinned_items) : (row.pinned_items || []),
-              custom_order: typeof row.custom_order === 'string' ? JSON.parse(row.custom_order) : (row.custom_order || []),
-              settings: typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {})
-            }
-          });
+        let customSettings = row.settings || {};
+        if (typeof customSettings === 'string') {
+          try { customSettings = JSON.parse(customSettings); } catch (_) { customSettings = {}; }
         }
+
+        settingsPayload = {
+          ...customSettings,
+          collapsedSections: sections,
+          collapsed_sections: sections,
+          userId: row.user_id || row.id || targetKey,
+        };
+
+        return NextResponse.json({
+          success: true,
+          settings: settingsPayload,
+          collapsedSections: sections,
+          collapsed_sections: sections,
+        });
       }
-    } catch (e: any) {
-      console.warn('[Sidebar Settings GET notice]:', e.message);
-    }
+    } catch (_) {}
 
-    // 2. Fallback to Local JSON
-    const localAll = readLocalSidebarSettings();
-    const localUserSetting = localAll[userId] || localAll[email] || DEFAULT_SETTINGS;
+    // 2. Fallback to Local JSON Storage
+    const jsonPaths = [
+      path.join(process.cwd(), 'apps', 'web', 'data', 'user_sidebar_settings.json'),
+      path.join(process.cwd(), 'data', 'user_sidebar_settings.json'),
+    ];
+
+    for (const jp of jsonPaths) {
+      if (fs.existsSync(jp)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(jp, 'utf8'));
+          if (raw && (raw[targetKey] || raw['default'])) {
+            const data = raw[targetKey] || raw['default'];
+            return NextResponse.json({
+              success: true,
+              settings: data,
+              collapsedSections: data.collapsedSections || data.collapsed_sections || [],
+              collapsed_sections: data.collapsedSections || data.collapsed_sections || [],
+            });
+          }
+        } catch (_) {}
+      }
+    }
 
     return NextResponse.json({
       success: true,
-      settings: localUserSetting
+      settings: settingsPayload,
+      collapsedSections: [],
+      collapsed_sections: [],
     });
   } catch (err: any) {
     return NextResponse.json({
       success: true,
-      settings: DEFAULT_SETTINGS
+      settings: { collapsedSections: [], collapsed_sections: [] },
+      collapsedSections: [],
+      collapsed_sections: [],
     });
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    await ensureSidebarSettingsTable();
-    const body = await request.json().catch(() => ({}));
-    const { userId, email, collapsed, hidden_items, pinned_items, custom_order, settings } = body;
+    await ensureSidebarDb();
+    const body = await req.json();
+    const userId = body.userId || body.user_id || 'usr_admin_1';
+    const email = body.email || body.userEmail || '';
 
-    const targetUserId = userId || 'usr_admin_1';
-    const targetEmail = email || '';
-    const recordId = `sidebar_${targetUserId}`;
+    const collapsedSections = Array.isArray(body.collapsedSections)
+      ? body.collapsedSections
+      : Array.isArray(body.collapsed_sections)
+        ? body.collapsed_sections
+        : [];
 
-    const payload = {
-      collapsed: !!collapsed,
-      hidden_items: Array.isArray(hidden_items) ? hidden_items : [],
-      pinned_items: Array.isArray(pinned_items) ? pinned_items : [],
-      custom_order: Array.isArray(custom_order) ? custom_order : [],
-      settings: settings || {}
-    };
+    const customSettings = typeof body.settings === 'object' && body.settings !== null
+      ? body.settings
+      : {};
 
-    // 1. Try PostgreSQL Upsert
+    const safeSectionsJson = JSON.stringify(collapsedSections);
+    const safeSettingsJson = JSON.stringify(customSettings);
+
+    // 1. Resilient Update-Then-Insert (works regardless of table primary key configuration)
     try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function') {
+      const updateRes: any = await query(`
+        UPDATE user_sidebar_settings
+        SET collapsed_sections = $1::jsonb,
+            collapsed = $1::jsonb,
+            settings = $2::jsonb,
+            user_email = COALESCE(NULLIF($3, ''), user_email),
+            updated_at = NOW()
+        WHERE user_id = $4 OR id = $4;
+      `, [safeSectionsJson, safeSettingsJson, email, userId]);
+
+      const updatedCount = Array.isArray(updateRes) ? updateRes.length : (updateRes?.rowCount || 0);
+
+      if (updatedCount === 0) {
         await query(`
-          INSERT INTO user_sidebar_settings (
-            id, user_id, user_email, collapsed, hidden_items, pinned_items, custom_order, settings, updated_at
-          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            collapsed = EXCLUDED.collapsed,
-            hidden_items = EXCLUDED.hidden_items,
-            pinned_items = EXCLUDED.pinned_items,
-            custom_order = EXCLUDED.custom_order,
-            settings = EXCLUDED.settings,
-            updated_at = NOW();
-        `, [
-          recordId,
-          targetUserId,
-          targetEmail,
-          payload.collapsed,
-          JSON.stringify(payload.hidden_items),
-          JSON.stringify(payload.pinned_items),
-          JSON.stringify(payload.custom_order),
-          JSON.stringify(payload.settings)
-        ]);
+          INSERT INTO user_sidebar_settings (id, user_id, user_email, collapsed_sections, collapsed, settings, updated_at)
+          VALUES ($1, $1, $2, $3::jsonb, $3::jsonb, $4::jsonb, NOW());
+        `, [userId, email, safeSectionsJson, safeSettingsJson]);
       }
-    } catch (e: any) {
-      console.warn('[Sidebar Settings POST notice]:', e.message);
+    } catch (_) {}
+
+    // 2. Mirror to Local JSON Cache
+    const jsonPaths = [
+      path.join(process.cwd(), 'apps', 'web', 'data', 'user_sidebar_settings.json'),
+      path.join(process.cwd(), 'data', 'user_sidebar_settings.json'),
+    ];
+
+    for (const jp of jsonPaths) {
+      try {
+        const dir = path.dirname(jp);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        let current: any = {};
+        if (fs.existsSync(jp)) {
+          try { current = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (_) {}
+        }
+        current[userId] = {
+          userId,
+          email,
+          collapsedSections,
+          collapsed_sections: collapsedSections,
+          ...customSettings,
+          updatedAt: new Date().toISOString()
+        };
+        fs.writeFileSync(jp, JSON.stringify(current, null, 2), 'utf8');
+      } catch (_) {}
     }
 
-    // 2. Update Local JSON
-    const localAll = readLocalSidebarSettings();
-    localAll[targetUserId] = payload;
-    if (targetEmail) localAll[targetEmail] = payload;
-    writeLocalSidebarSettings(localAll);
-
-    return NextResponse.json({ success: true, settings: payload });
+    return NextResponse.json({
+      success: true,
+      userId,
+      collapsedSections,
+      collapsed_sections: collapsedSections,
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

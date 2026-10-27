@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.57",
+  "version": "8.1.58",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.57",
+  "version": "8.1.58",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -24547,6 +24547,11 @@ export default function AdminStorageSettingsPage() {
       if (res.ok && data.success) {
         setSaveSuccess(data.message || 'Cleaned up orphan images.');
         if (data.diskStats) setDiskStats(data.diskStats);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zecratary_storage_settings', JSON.stringify(settings));
+          window.dispatchEvent(new CustomEvent('zecratary_storage_updated', { detail: settings }));
+          window.dispatchEvent(new Event('storage'));
+        }
         setTimeout(() => setSaveSuccess(''), 4000);
       } else {
         setSaveError(data.error || 'Failed to clean orphan images');
@@ -24575,6 +24580,11 @@ export default function AdminStorageSettingsPage() {
       if (res.ok && data.success) {
         setSaveSuccess(t('storageSettingsSaved', 'Universal storage settings saved successfully to PostgreSQL.'));
         if (data.diskStats) setDiskStats(data.diskStats);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zecratary_storage_settings', JSON.stringify(settings));
+          window.dispatchEvent(new CustomEvent('zecratary_storage_updated', { detail: settings }));
+          window.dispatchEvent(new Event('storage'));
+        }
         setTimeout(() => setSaveSuccess(''), 4000);
       } else {
         setSaveError(data.error || 'Failed to save storage settings');
@@ -47118,87 +47128,120 @@ export async function DELETE(req: Request) {
 
 ## File: `apps/web/src/app/api/admin/currencies/route.ts`
 ```typescript
-// @ts-nocheck
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+export const dynamic = 'force-dynamic';
+
 const DEFAULT_CURRENCIES = [
-  { code: 'USD', symbol: '$', name: 'US Dollar', rate: 1, is_default: true },
+  { code: 'USD', symbol: '$', name: 'US Dollar', rate: 1.0, is_default: true },
   { code: 'EUR', symbol: '€', name: 'Euro', rate: 0.92, is_default: false },
-  { code: 'THB', symbol: '฿', name: 'Thai Baht', rate: 36.5, is_default: false },
-  { code: 'GBP', symbol: '£', name: 'British Pound', rate: 0.79, is_default: false }
+  { code: 'GBP', symbol: '£', name: 'British Pound', rate: 0.79, is_default: false },
+  { code: 'THB', symbol: '฿', name: 'Thai Baht', rate: 35.5, is_default: false },
+  { code: 'JPY', symbol: '¥', name: 'Japanese Yen', rate: 150.0, is_default: false },
+  { code: 'CAD', symbol: 'CA$', name: 'Canadian Dollar', rate: 1.36, is_default: false },
+  { code: 'AUD', symbol: 'AU$', name: 'Australian Dollar', rate: 1.52, is_default: false },
 ];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    // 1. Try PostgreSQL
+    // 1. Try PostgreSQL / MySQL with safe SELECT *
     try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function') {
-        const res = await query(`
-          SELECT currencies FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;
-        `).catch(() => null);
-
-        if (res?.rows?.[0]?.currencies) {
-          const parsed = typeof res.rows[0].currencies === 'string'
-            ? JSON.parse(res.rows[0].currencies)
-            : res.rows[0].currencies;
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return NextResponse.json({ success: true, currencies: parsed });
-          }
+      const res: any = await query('SELECT * FROM admin_settings WHERE id IN (\'primary_settings\', \'1\') OR key = \'current\' LIMIT 1');
+      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      if (row) {
+        let currencies = row.currencies;
+        if (typeof currencies === 'string') {
+          try { currencies = JSON.parse(currencies); } catch (_) {}
+        }
+        if (Array.isArray(currencies) && currencies.length > 0) {
+          return NextResponse.json({
+            success: true,
+            currencies,
+            currency: row.currency || 'USD'
+          });
         }
       }
     } catch (_) {}
 
-    // 2. Try Local JSON
-    const p = path.join(process.cwd(), 'data', 'admin_settings.json');
-    if (fs.existsSync(p)) {
-      try {
-        const raw = fs.readFileSync(p, 'utf-8');
-        const data = JSON.parse(raw);
-        if (Array.isArray(data.currencies) && data.currencies.length > 0) {
-          return NextResponse.json({ success: true, currencies: data.currencies });
-        }
-      } catch (_) {}
+    // 2. Fallback to Local JSON store
+    const jsonPaths = [
+      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+      path.join(process.cwd(), 'data', 'admin_settings.json'),
+    ];
+    for (const jp of jsonPaths) {
+      if (fs.existsSync(jp)) {
+        try {
+          const fileData = JSON.parse(fs.readFileSync(jp, 'utf8'));
+          if (Array.isArray(fileData.currencies) && fileData.currencies.length > 0) {
+            return NextResponse.json({
+              success: true,
+              currencies: fileData.currencies,
+              currency: fileData.currency || 'USD'
+            });
+          }
+        } catch (_) {}
+      }
     }
 
-    return NextResponse.json({ success: true, currencies: DEFAULT_CURRENCIES });
+    return NextResponse.json({
+      success: true,
+      currencies: DEFAULT_CURRENCIES,
+      currency: 'USD'
+    });
   } catch (err: any) {
-    return NextResponse.json({ success: true, currencies: DEFAULT_CURRENCIES });
+    return NextResponse.json({
+      success: true,
+      currencies: DEFAULT_CURRENCIES,
+      currency: 'USD'
+    });
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const currencies = body.currencies || [];
+    const body = await req.json();
+    const { currencies, currency } = body;
 
-    // 1. Update PostgreSQL
+    const safeCurrencies = Array.isArray(currencies) ? currencies : DEFAULT_CURRENCIES;
+    const safeCurrency = currency || 'USD';
+
+    // 1. PostgreSQL & MySQL Persistence
     try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function') {
-        await query(`
-          INSERT INTO admin_settings (id, currencies, updated_at)
-          VALUES ('primary_settings', $1::jsonb, NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            currencies = EXCLUDED.currencies,
-            updated_at = NOW();
-        `, [JSON.stringify(currencies)]);
-      }
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currencies JSONB DEFAULT '[]'::jsonb;`);
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD';`);
+      await query(`
+        INSERT INTO admin_settings (id, currencies, currency, updated_at)
+        VALUES ('primary_settings', $1::jsonb, $2, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          currencies = EXCLUDED.currencies,
+          currency = EXCLUDED.currency,
+          updated_at = NOW();
+      `, [JSON.stringify(safeCurrencies), safeCurrency]);
     } catch (_) {}
 
-    // 2. Update Local JSON
-    const p = path.join(process.cwd(), 'data', 'admin_settings.json');
-    if (fs.existsSync(p)) {
+    // 2. Mirror to JSON files
+    const jsonPaths = [
+      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+      path.join(process.cwd(), 'data', 'admin_settings.json'),
+    ];
+    for (const jp of jsonPaths) {
       try {
-        const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        data.currencies = currencies;
-        fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+        const dir = path.dirname(jp);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        let existing: any = {};
+        if (fs.existsSync(jp)) {
+          try { existing = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (_) {}
+        }
+        existing.currencies = safeCurrencies;
+        existing.currency = safeCurrency;
+        fs.writeFileSync(jp, JSON.stringify(existing, null, 2), 'utf8');
       } catch (_) {}
     }
 
-    return NextResponse.json({ success: true, currencies });
+    return NextResponse.json({ success: true, currencies: safeCurrencies, currency: safeCurrency });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -50316,223 +50359,169 @@ export async function POST() {
 
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
-// @ts-nocheck
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_SUPPORTED_LANGUAGES = [
-  { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', isDefault: true },
-  { code: 'th', name: 'Thai', native: 'ภาษาไทย', flag: '🇹🇭', isDefault: false },
-  { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', isDefault: false },
-  { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', isDefault: false }
+const DEFAULT_LANGUAGES = [
+  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', isDefault: true, isEnabled: true },
+  { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭', isDefault: false, isEnabled: true },
+  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', isDefault: false, isEnabled: true },
+  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', isDefault: false, isEnabled: true },
 ];
 
-function readLocalSettingsFallback(): any {
-  const possiblePaths = [
-    path.join(process.cwd(), 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
-  ];
-
-  for (const fp of possiblePaths) {
-    if (fs.existsSync(fp)) {
-      try {
-        const raw = fs.readFileSync(fp, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed) return parsed;
-      } catch (_) {}
-    }
-  }
-  return null;
-}
-
-export async function GET() {
-  let supportedLanguages = DEFAULT_SUPPORTED_LANGUAGES;
-  let translations: Record<string, Record<string, string>> = {};
-  let defaultLanguage = 'en';
-  let dbLoaded = false;
-
-  // 1. Query PostgreSQL / MySQL for authoritative language configuration
+export async function GET(req: NextRequest) {
   try {
-    const adminRes = await query(
-      `SELECT supported_languages, translations, default_language, settings 
-       FROM admin_settings 
-       WHERE key = 'current' OR key = 'default' 
-       ORDER BY updated_at DESC LIMIT 1`
-    );
+    let supportedLanguages = DEFAULT_LANGUAGES;
+    let translations: Record<string, any> = {};
+    let defaultLanguage = 'en';
 
-    const rows = Array.isArray(adminRes) ? adminRes : (adminRes?.rows || []);
-    if (rows && rows.length > 0) {
-      const row = rows[0];
-      const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
-
-      if (row.supported_languages) {
-        supportedLanguages = typeof row.supported_languages === 'string' ? JSON.parse(row.supported_languages) : row.supported_languages;
-        dbLoaded = true;
-      } else if (settings?.supportedLanguages) {
-        supportedLanguages = settings.supportedLanguages;
-        dbLoaded = true;
-      }
-
-      if (row.translations) {
-        translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
-        dbLoaded = true;
-      } else if (settings?.translations) {
-        translations = settings.translations;
-        dbLoaded = true;
-      }
-
-      if (row.default_language) {
-        defaultLanguage = row.default_language;
-      } else if (settings?.defaultLanguage) {
-        defaultLanguage = settings.defaultLanguage;
-      }
-    }
-  } catch (err: any) {
-    console.warn('API Languages DB read notice:', err?.message || err);
-  }
-
-  // 2. Query dedicated app_translations table if available
-  try {
-    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations`);
-    const transRows = Array.isArray(transRes) ? transRes : (transRes?.rows || []);
-    if (transRows && transRows.length > 0) {
-      transRows.forEach((r: any) => {
-        if (r.lang_code && r.dictionary) {
-          translations[r.lang_code] = typeof r.dictionary === 'string' ? JSON.parse(r.dictionary) : r.dictionary;
-        }
-      });
-      dbLoaded = true;
-    }
-  } catch (_) {}
-
-  // 3. Fallback to local admin_settings.json if database is cold or uninitialized
-  if (!dbLoaded || Object.keys(translations).length === 0) {
-    const fileData = readLocalSettingsFallback();
-    if (fileData) {
-      const langConfig = fileData.languages || fileData;
-      if (langConfig.supportedLanguages && Array.isArray(langConfig.supportedLanguages)) {
-        supportedLanguages = langConfig.supportedLanguages;
-      }
-      if (langConfig.translations && typeof langConfig.translations === 'object') {
-        translations = { ...langConfig.translations, ...translations };
-      }
-      if (langConfig.defaultLanguage) {
-        defaultLanguage = langConfig.defaultLanguage;
-      }
-    }
-  }
-
-  return NextResponse.json({
-    success: true,
-    supportedLanguages,
-    translations,
-    defaultLanguage
-  });
-}
-
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const { supportedLanguages, translations, defaultLanguage = 'en' } = body;
-
-    // 1. Ensure database tables exist in PostgreSQL
+    // 1. Try PostgreSQL / MySQL with safe SELECT *
     try {
-      await query(`
-        CREATE TABLE IF NOT EXISTS admin_settings (
-          key VARCHAR(64) PRIMARY KEY,
-          settings JSONB,
-          supported_languages JSONB,
-          translations JSONB,
-          default_language VARCHAR(32) DEFAULT 'en',
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        )
-      `);
-
-      await query(`
-        CREATE TABLE IF NOT EXISTS app_translations (
-          lang_code VARCHAR(32) PRIMARY KEY,
-          dictionary JSONB,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        )
-      `);
+      const res: any = await query('SELECT * FROM admin_settings WHERE id IN (\'primary_settings\', \'1\') OR key = \'current\' LIMIT 1');
+      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      if (row) {
+        if (row.supported_languages) {
+          const parsed = typeof row.supported_languages === 'string'
+            ? JSON.parse(row.supported_languages)
+            : row.supported_languages;
+          if (Array.isArray(parsed) && parsed.length > 0) supportedLanguages = parsed;
+        }
+        if (row.translations) {
+          translations = typeof row.translations === 'string'
+            ? JSON.parse(row.translations)
+            : row.translations;
+        }
+        if (row.default_language) defaultLanguage = row.default_language;
+      }
     } catch (_) {}
 
-    // 2. Upsert into admin_settings
+    // 2. Hydrate from app_translations if available
     try {
-      await query(
-        `INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
-         VALUES ('current', $1, $2, $3, NOW())
-         ON CONFLICT (key) DO UPDATE SET
-           supported_languages = EXCLUDED.supported_languages,
-           translations = EXCLUDED.translations,
-           default_language = EXCLUDED.default_language,
-           updated_at = NOW()`,
-        [
-          JSON.stringify(supportedLanguages || []),
-          JSON.stringify(translations || {}),
-          String(defaultLanguage || 'en')
-        ]
-      );
-    } catch (err: any) {
-      console.warn('PostgreSQL admin_settings languages upsert notice:', err?.message || err);
-    }
+      const appTransRes: any = await query('SELECT lang_code, dictionary FROM app_translations');
+      const rows = Array.isArray(appTransRes) ? appTransRes : appTransRes?.rows || [];
+      rows.forEach((r: any) => {
+        if (r && r.lang_code) {
+          const dict = typeof r.dictionary === 'string' ? JSON.parse(r.dictionary) : r.dictionary;
+          translations[r.lang_code] = { ...(translations[r.lang_code] || {}), ...dict };
+        }
+      });
+    } catch (_) {}
 
-    // 3. Upsert individual dictionaries into app_translations
-    if (translations && typeof translations === 'object') {
-      for (const [code, dict] of Object.entries(translations)) {
-        try {
-          await query(
-            `INSERT INTO app_translations (lang_code, dictionary, updated_at)
-             VALUES ($1, $2, NOW())
-             ON CONFLICT (lang_code) DO UPDATE SET
-               dictionary = EXCLUDED.dictionary,
-               updated_at = NOW()`,
-            [code, JSON.stringify(dict)]
-          );
-        } catch (_) {}
-      }
-    }
-
-    // 4. Mirror to local admin_settings.json if writable
-    const possiblePaths = [
+    // 3. Fallback to Local JSON store
+    const jsonPaths = [
+      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
       path.join(process.cwd(), 'data', 'admin_settings.json'),
-      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json')
     ];
-    for (const fp of possiblePaths) {
-      if (fs.existsSync(fp)) {
+    for (const jp of jsonPaths) {
+      if (fs.existsSync(jp)) {
         try {
-          const raw = fs.readFileSync(fp, 'utf-8');
-          const current = JSON.parse(raw);
-          current.languages = {
-            ...(current.languages || {}),
-            supportedLanguages,
-            translations,
-            defaultLanguage
-          };
-          current.supportedLanguages = supportedLanguages;
-          current.translations = translations;
-          current.defaultLanguage = defaultLanguage;
-          fs.writeFileSync(fp, JSON.stringify(current, null, 2), 'utf-8');
+          const fileData = JSON.parse(fs.readFileSync(jp, 'utf8'));
+          if (Array.isArray(fileData.supported_languages) && fileData.supported_languages.length > 0 && supportedLanguages === DEFAULT_LANGUAGES) {
+            supportedLanguages = fileData.supported_languages;
+          }
+          if (fileData.translations && Object.keys(translations).length === 0) {
+            translations = fileData.translations;
+          }
+          if (fileData.default_language && defaultLanguage === 'en') {
+            defaultLanguage = fileData.default_language;
+          }
         } catch (_) {}
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Language settings synchronized with PostgreSQL, MySQL, and server cache.',
       supportedLanguages,
+      translations,
       defaultLanguage
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update language settings' },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    return NextResponse.json({
+      success: true,
+      supportedLanguages: DEFAULT_LANGUAGES,
+      translations: {},
+      defaultLanguage: 'en'
+    });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { supportedLanguages, translations, defaultLanguage } = body;
+
+    const safeLangs = Array.isArray(supportedLanguages) ? supportedLanguages : DEFAULT_LANGUAGES;
+    const safeTrans = translations || {};
+    const safeDefault = defaultLanguage || 'en';
+
+    // 1. PostgreSQL & MySQL Persistence
+    try {
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '[]'::jsonb;`);
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;`);
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(32) DEFAULT 'en';`);
+
+      await query(`
+        INSERT INTO admin_settings (id, supported_languages, translations, default_language, updated_at)
+        VALUES ('primary_settings', $1::jsonb, $2::jsonb, $3, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          supported_languages = EXCLUDED.supported_languages,
+          translations = EXCLUDED.translations,
+          default_language = EXCLUDED.default_language,
+          updated_at = NOW();
+      `, [JSON.stringify(safeLangs), JSON.stringify(safeTrans), safeDefault]);
+
+      await query(`
+        CREATE TABLE IF NOT EXISTS app_translations (
+          lang_code VARCHAR(16) PRIMARY KEY,
+          lang_name VARCHAR(64),
+          dictionary JSONB DEFAULT '{}'::jsonb,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+
+      for (const [code, dict] of Object.entries(safeTrans)) {
+        await query(`
+          INSERT INTO app_translations (lang_code, dictionary, updated_at)
+          VALUES ($1, $2::jsonb, NOW())
+          ON CONFLICT (lang_code) DO UPDATE SET
+            dictionary = EXCLUDED.dictionary,
+            updated_at = NOW();
+        `, [code, JSON.stringify(dict)]);
+      }
+    } catch (_) {}
+
+    // 2. Mirror to JSON files
+    const jsonPaths = [
+      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+      path.join(process.cwd(), 'data', 'admin_settings.json'),
+    ];
+    for (const jp of jsonPaths) {
+      try {
+        const dir = path.dirname(jp);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        let existing: any = {};
+        if (fs.existsSync(jp)) {
+          try { existing = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (_) {}
+        }
+        existing.supported_languages = safeLangs;
+        existing.translations = safeTrans;
+        existing.default_language = safeDefault;
+        fs.writeFileSync(jp, JSON.stringify(existing, null, 2), 'utf8');
+      } catch (_) {}
+    }
+
+    return NextResponse.json({
+      success: true,
+      supportedLanguages: safeLangs,
+      translations: safeTrans,
+      defaultLanguage: safeDefault
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -56477,121 +56466,347 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { queryMysql } from '@/lib/mysql';
+import Stripe from 'stripe';
 
 export const dynamic = 'force-dynamic';
 
-async function resolveUserFromReq(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  let rawUserId = searchParams.get('userId')?.trim() || '';
-  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
+let isDbInitialized = false;
 
-  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
-  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
+async function initWalletDb() {
+  if (isDbInitialized) return;
 
-  if (!rawUserId && !rawEmail) {
-    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user', 'zecratary_current_user'];
-    for (const cName of authCookies) {
-      const cVal = req.cookies.get(cName)?.value;
-      if (cVal) {
-        try {
-          const parsed = JSON.parse(decodeURIComponent(cVal));
-          if (parsed?.id) rawUserId = String(parsed.id);
-          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
-          if (rawUserId || rawEmail) break;
-        } catch (_) {}
-      }
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS wallet_settings (
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
+        is_enabled BOOLEAN DEFAULT true,
+        currency VARCHAR(10) DEFAULT 'USD',
+        min_topup NUMERIC(10,2) DEFAULT 5.00,
+        max_topup NUMERIC(10,2) DEFAULT 1000.00,
+        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]'::jsonb,
+        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]'::jsonb,
+        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]'::jsonb,
+        allow_site_purchases BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        user_email VARCHAR(255) NOT NULL,
+        type VARCHAR(32) NOT NULL DEFAULT 'topup',
+        amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+        balance_after NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+        gateway VARCHAR(32) DEFAULT 'stripe',
+        gateway_tx_id VARCHAR(255),
+        status VARCHAR(32) DEFAULT 'succeeded',
+        description TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
+    // Ensure all critical columns exist on wallet_transactions
+    const cols = [
+      'user_id VARCHAR(64)',
+      'user_email VARCHAR(255)',
+      'type VARCHAR(32) DEFAULT \'topup\'',
+      'amount NUMERIC(10,2) DEFAULT 0.00',
+      'balance_after NUMERIC(10,2) DEFAULT 0.00',
+      'gateway VARCHAR(32) DEFAULT \'stripe\'',
+      'gateway_tx_id VARCHAR(255)',
+      'status VARCHAR(32) DEFAULT \'succeeded\'',
+      'description TEXT',
+      'metadata JSONB DEFAULT \'{}\'::jsonb',
+      'created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()'
+    ];
+
+    for (const c of cols) {
+      try {
+        await query(`ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS ${c};`);
+      } catch (_) {}
     }
+
+    try {
+      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;`);
+      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`);
+      await query(`UPDATE users SET user_id = id WHERE (user_id IS NULL OR user_id = '') AND id IS NOT NULL;`);
+    } catch (_) {}
+
+    isDbInitialized = true;
+  } catch (err: any) {
+    console.warn('[Wallet DB init warning]:', err.message);
+  }
+}
+
+async function getStripeCredentials() {
+  let secretKey = process.env.STRIPE_SECRET_KEY || '';
+  let publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || '';
+  let currency = 'USD';
+
+  try {
+    const res: any = await query(
+      `SELECT payment_settings, currency FROM admin_settings WHERE id IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`
+    );
+    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+    if (row) {
+      const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+      if (ps?.stripe?.secretKey) secretKey = ps.stripe.secretKey;
+      if (ps?.stripe?.publishableKey) publishableKey = ps.stripe.publishableKey;
+      if (row.currency) currency = row.currency;
+      else if (ps?.currency) currency = ps.currency;
+    }
+  } catch (_) {}
+
+  return { secretKey: secretKey.trim(), publishableKey: publishableKey.trim(), currency };
+}
+
+async function fetchUserLedger(user: any, email = '', userId = '', limit = 10, offset = 0, typeFilter = 'all', search = '') {
+  const targetEmail = (user?.email || email || '').toLowerCase().trim();
+  const dbUserId = user?.id ? String(user.id).trim() : '';
+  const passedUserId = (userId && userId !== 'undefined' && userId !== 'null') ? String(userId).trim() : '';
+
+  const conditions: string[] = [];
+  const values: any[] = [];
+  const identityClauses: string[] = [];
+
+  if (targetEmail) {
+    values.push(targetEmail);
+    const idx = values.length;
+    identityClauses.push(`LOWER(TRIM(user_email)) = LOWER(TRIM($${idx}))`);
+    identityClauses.push(`LOWER(TRIM(COALESCE(metadata->>'userEmail', ''))) = LOWER(TRIM($${idx}))`);
+  }
+  if (dbUserId) {
+    values.push(dbUserId);
+    const idx = values.length;
+    identityClauses.push(`user_id::text = $${idx}`);
+    identityClauses.push(`COALESCE(metadata->>'userId', '') = $${idx}`);
+  }
+  if (passedUserId && passedUserId !== dbUserId) {
+    values.push(passedUserId);
+    const idx = values.length;
+    identityClauses.push(`user_id::text = $${idx}`);
+    identityClauses.push(`COALESCE(metadata->>'userId', '') = $${idx}`);
   }
 
-  return { userId: rawUserId, email: rawEmail };
+  if (identityClauses.length === 0) {
+    return { transactions: [], totalCount: 0, stats: { totalDeposited: 0, totalSpent: 0, totalEvents: 0 } };
+  }
+
+  conditions.push(`(${identityClauses.join(' OR ')})`);
+
+  if (typeFilter && typeFilter !== 'all') {
+    values.push(typeFilter);
+    conditions.push(`type = $${values.length}`);
+  }
+
+  if (search) {
+    values.push(`%${search}%`);
+    const sIdx = values.length;
+    conditions.push(`(LOWER(description) LIKE $${sIdx} OR LOWER(id) LIKE $${sIdx} OR LOWER(COALESCE(gateway_tx_id, '')) LIKE $${sIdx})`);
+  }
+
+  const tableWhereSql = conditions.join(' AND ');
+
+  try {
+    const countRes: any = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${tableWhereSql}`, values);
+    const countRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
+    const totalCount = parseInt(countRow?.count || '0', 10);
+
+    const pageValues = [...values, limit, offset];
+    const rowsRes: any = await query(
+      `SELECT * FROM wallet_transactions WHERE ${tableWhereSql} ORDER BY created_at DESC LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}`,
+      pageValues
+    );
+    const transactions = Array.isArray(rowsRes) ? rowsRes : rowsRes?.rows || [];
+
+    const statsRes: any = await query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN amount > 0 AND status IN ('succeeded', 'successful', 'completed', 'paid') THEN amount ELSE 0 END), 0) as total_deposited,
+        COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
+        COUNT(*) as total_events
+      FROM wallet_transactions
+      WHERE ${tableWhereSql} AND status IN ('succeeded', 'successful', 'completed', 'paid')
+    `, values);
+    const statsRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+
+    const stats = {
+      totalDeposited: parseFloat(statsRow?.total_deposited || 0),
+      totalSpent: parseFloat(statsRow?.total_spent || 0),
+      totalEvents: parseInt(statsRow?.total_events || 0, 10),
+    };
+
+    return { transactions, totalCount, stats };
+  } catch (err: any) {
+    console.warn('[fetchUserLedger notice]:', err.message);
+    return { transactions: [], totalCount: 0, stats: { totalDeposited: 0, totalSpent: 0, totalEvents: 0 } };
+  }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const { userId, email } = await resolveUserFromReq(req);
+    await initWalletDb();
+    const { searchParams } = new URL(req.url);
+    const email = searchParams.get('email')?.trim().toLowerCase() || '';
+    const userId = searchParams.get('userId')?.trim() || '';
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
+    const offset = (page - 1) * limit;
+    const search = searchParams.get('search')?.trim().toLowerCase() || '';
+    const typeFilter = searchParams.get('type')?.trim().toLowerCase() || 'all';
 
-    try {
-      await query(`
-        CREATE TABLE IF NOT EXISTS wallet_settings (
-          id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
-          is_enabled BOOLEAN DEFAULT true,
-          currency VARCHAR(10) DEFAULT 'USD',
-          min_topup NUMERIC(10,2) DEFAULT 5.00,
-          max_topup NUMERIC(10,2) DEFAULT 1000.00,
-          preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
-          bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
-          allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
-          allow_site_purchases BOOLEAN DEFAULT true,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance INT DEFAULT 100;
-      `);
-    } catch (_) {}
-
-    const settingsRows = await query(`SELECT * FROM wallet_settings WHERE id = 'current' LIMIT 1`).catch(() => []);
-    const settings = settingsRows[0] || {
+    let settings = {
       is_enabled: true,
       currency: 'USD',
       min_topup: 5.00,
-      max_topup: 1000.00
+      max_topup: 1000.00,
+      preset_amounts: [10, 25, 50, 100, 250],
+      bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
+      allowed_gateways: ['stripe', 'paypal', 'manual'],
+      allow_site_purchases: true,
     };
+
+    try {
+      const settingsRes: any = await query('SELECT * FROM wallet_settings WHERE id = $1 LIMIT 1', ['current']);
+      const row = Array.isArray(settingsRes) ? settingsRes[0] : settingsRes?.rows?.[0];
+      if (row) settings = { ...settings, ...row };
+    } catch (_) {}
 
     let user: any = null;
-    let walletBalance = 0.00;
-    let tokenBalance = 100;
+    let walletBalance = 0;
 
     if (userId || email) {
-      const userRes = await query(
-        `SELECT id, email, name, 
-                COALESCE(wallet_balance, 0) as wallet_balance,
-                COALESCE(token_balance, 0) as token_balance 
-         FROM users 
-         WHERE ($1 != '' AND (id::text = $1 OR user_id = $1)) 
-            OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
-         LIMIT 1`,
-        [userId, email]
-      );
-      if (userRes && userRes.length > 0) {
-        user = userRes[0];
-        walletBalance = parseFloat(user.wallet_balance || 0);
-        tokenBalance = Number(user.token_balance || 0);
-      }
+      try {
+        const userRes: any = await query(
+          `SELECT id, email, name, wallet_balance FROM users 
+           WHERE ($1 != '' AND (id::text = $1 OR user_id::text = $1)) 
+              OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
+           LIMIT 1`,
+          [userId, email]
+        );
+        const uRow = Array.isArray(userRes) ? userRes[0] : userRes?.rows?.[0];
+        if (uRow) {
+          user = uRow;
+          walletBalance = parseFloat(uRow.wallet_balance || 0);
+        }
+      } catch (_) {}
     }
 
-    if (!user) {
-      const firstUserRes = await query(
-        `SELECT id, email, name, 
-                COALESCE(wallet_balance, 0) as wallet_balance,
-                COALESCE(token_balance, 0) as token_balance 
-         FROM users 
-         ORDER BY created_at ASC LIMIT 1`
-      ).catch(() => []);
-      if (firstUserRes && firstUserRes.length > 0) {
-        user = firstUserRes[0];
-        walletBalance = parseFloat(user.wallet_balance || 0);
-        tokenBalance = Number(user.token_balance || 0);
-      }
-    }
-
-    const curr = settings.currency || 'USD';
-    const symbols: Record<string, string> = { 
-      USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$', THB: '฿', JPY: '¥', SGD: 'S$' 
-    };
+    const { transactions, totalCount, stats } = await fetchUserLedger(
+      user, email, userId, limit, offset, typeFilter, search
+    );
 
     return NextResponse.json({
       success: true,
       settings,
       user,
       wallet_balance: walletBalance,
-      walletBalance: walletBalance,
-      balance: walletBalance,
-      token_balance: tokenBalance,
-      tokenBalance: tokenBalance,
-      currency: curr,
-      walletSymbol: symbols[curr.toUpperCase()] || '$'
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+      transactions,
+      totalCount,
+      totalPages: Math.ceil(totalCount / limit) || 1,
+      page,
+      limit,
+      stats,
+    });
+  } catch (err: any) {
+    // Non-breaking fallback response guarantees HTTP 200 for user UI
+    return NextResponse.json({
+      success: true,
+      settings: {
+        is_enabled: true,
+        currency: 'USD',
+        min_topup: 5.00,
+        max_topup: 1000.00,
+        preset_amounts: [10, 25, 50, 100, 250],
+        bonus_rules: [],
+        allowed_gateways: ['stripe', 'paypal', 'manual'],
+        allow_site_purchases: true
+      },
+      user: null,
+      wallet_balance: 0,
+      transactions: [],
+      totalCount: 0,
+      totalPages: 1,
+      page: 1,
+      limit: 10,
+      stats: { totalDeposited: 0, totalSpent: 0, totalEvents: 0 },
+      notice: err.message
+    });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await initWalletDb();
+    const body = await req.json();
+    const action = body.action || 'topup';
+
+    if (action === 'verify_stripe_session') {
+      const sessionId = body.sessionId?.trim() || body.session_id?.trim();
+      if (!sessionId) {
+        return NextResponse.json({ success: false, error: 'Session ID is required.' }, { status: 400 });
+      }
+
+      const { secretKey } = await getStripeCredentials();
+      if (!secretKey) {
+        return NextResponse.json({ success: false, error: 'Stripe Secret Key is not configured.' }, { status: 400 });
+      }
+
+      const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+      if (!session || (session.payment_status !== 'paid' && session.status !== 'complete')) {
+        return NextResponse.json({
+          success: false,
+          error: `Stripe payment status is ${session?.payment_status || 'unpaid'}.`,
+        }, { status: 400 });
+      }
+
+      const metadata = session.metadata || {};
+      const baseAmount = parseFloat(metadata.baseAmount || String((session.amount_total || 0) / 100));
+      const bonusCredit = parseFloat(metadata.bonusCredit || '0');
+      const totalAddition = parseFloat(metadata.totalAddition || String(baseAmount + bonusCredit));
+
+      const rawEmail = metadata.userEmail || body.email || session.customer_email || session.customer_details?.email || '';
+      const targetEmail = (rawEmail !== 'undefined' && rawEmail !== 'null') ? rawEmail.toLowerCase().trim() : '';
+      const rawUserId = String(metadata.userId || body.userId || session.client_reference_id || '').trim();
+      const targetUserId = (rawUserId !== 'undefined' && rawUserId !== 'null') ? rawUserId : '';
+
+      const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const desc = bonusCredit > 0
+        ? `Wallet Top-Up: +$${baseAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} bonus)`
+        : `Wallet Top-Up: +$${baseAmount.toFixed(2)}`;
+
+      try {
+        await query(`
+          UPDATE users 
+          SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+          WHERE ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
+             OR ($3 != '' AND (id::text = $3 OR user_id::text = $3))
+        `, [totalAddition, targetEmail, targetUserId]);
+
+        await query(`
+          INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+          VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
+          ON CONFLICT (id) DO NOTHING
+        `, [
+          wtxId, targetUserId || 'usr_admin_1', targetEmail || 'admin@zecratary.com',
+          totalAddition, totalAddition, sessionId, desc,
+          JSON.stringify({ baseAmount, bonusCredit, totalAddition, sessionId })
+        ]);
+      } catch (_) {}
+
+      return NextResponse.json({
+        success: true,
+        verified: true,
+        wallet_balance: totalAddition,
+        message: `Stripe Checkout completed! Added +$${baseAmount.toFixed(2)} to your balance.`
+      });
+    }
+
+    return NextResponse.json({ success: true, message: 'Action completed' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -56601,163 +56816,95 @@ export async function GET(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/templates/route.ts`
 ```typescript
-// @ts-nocheck
-import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
-function getTemplatesFilePath() {
-  const dataDir = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  return path.join(dataDir, 'meal_templates.json');
-}
+export const dynamic = 'force-dynamic';
 
-function readLocalTemplates(): any[] {
+export async function GET(req: NextRequest) {
   try {
-    const p = getTemplatesFilePath();
-    if (fs.existsSync(p)) {
-      const raw = fs.readFileSync(p, 'utf-8');
-      return JSON.parse(raw) || [];
-    }
-  } catch (_) {}
-  return [];
-}
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId') || 'usr_admin_1';
 
-function writeLocalTemplates(items: any[]) {
-  try {
-    const p = getTemplatesFilePath();
-    fs.writeFileSync(p, JSON.stringify(items, null, 2), 'utf-8');
-  } catch (_) {}
-}
-
-export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId') || '';
-
-    // 1. Try PostgreSQL if pool configured
+    let templates: any[] = [];
     try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function') {
-        await query(`
-          CREATE TABLE IF NOT EXISTS meal_templates (
-            id VARCHAR(120) PRIMARY KEY,
-            user_id VARCHAR(120) NOT NULL,
-            created_by VARCHAR(255),
-            title VARCHAR(255) NOT NULL,
-            description TEXT,
-            category VARCHAR(120) DEFAULT 'General',
-            total_days INT DEFAULT 7,
-            meals JSONB,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE INDEX IF NOT EXISTS idx_meal_templates_user ON meal_templates(user_id);
-        `);
+      const res: any = await query(`
+        SELECT id, user_id, title, description, duration_days, is_public, days_json, created_at, updated_at
+        FROM meal_templates
+        WHERE user_id = $1 OR is_public = true
+        ORDER BY created_at DESC;
+      `, [userId]);
 
-        const sql = userId
-          ? 'SELECT * FROM meal_templates WHERE user_id = $1 ORDER BY created_at DESC'
-          : 'SELECT * FROM meal_templates ORDER BY created_at DESC';
-        const params = userId ? [userId] : [];
-        const result = await query(sql, params);
-
-        if (result && Array.isArray(result.rows)) {
-          const templates = result.rows.map(r => ({
-            id: r.id,
-            userId: r.user_id,
-            createdBy: r.created_by,
-            title: r.title,
-            description: r.description,
-            category: r.category,
-            totalDays: r.total_days || 7,
-            meals: typeof r.meals === 'string' ? JSON.parse(r.meals) : (r.meals || [])
-          }));
-          return NextResponse.json({ success: true, templates });
+      const rows = Array.isArray(res) ? res : res?.rows || [];
+      templates = rows.map((r: any) => {
+        let parsedDays: any[] = [];
+        try {
+          parsedDays = typeof r.days_json === 'string' ? JSON.parse(r.days_json) : (r.days_json || []);
+        } catch (_) {
+          parsedDays = [];
         }
-      }
+        if (!Array.isArray(parsedDays)) parsedDays = [];
+
+        return {
+          id: r.id,
+          userId: r.user_id,
+          title: r.title,
+          description: r.description,
+          durationDays: Number(r.duration_days) || (parsedDays.length > 0 ? parsedDays.length : 7),
+          isPublic: Boolean(r.is_public),
+          days: parsedDays,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at
+        };
+      });
     } catch (_) {}
 
-    // 2. Fallback to Local JSON store
-    const all = readLocalTemplates();
-    const filtered = userId ? all.filter(t => !t.userId || t.userId === userId) : all;
-    return NextResponse.json({ success: true, templates: filtered });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, templates: [], error: err.message }, { status: 200 });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    const { userId, createdBy, templates } = body;
-
-    if (!Array.isArray(templates)) {
-      return NextResponse.json({ success: false, error: 'Templates array required' }, { status: 400 });
-    }
-
-    // 1. Try PostgreSQL persistence
-    try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function' && userId) {
-        await query('DELETE FROM meal_templates WHERE user_id = $1', [userId]);
-        for (const t of templates) {
-          await query(`
-            INSERT INTO meal_templates (id, user_id, created_by, title, description, category, total_days, meals, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, CURRENT_TIMESTAMP)
-            ON CONFLICT (id) DO UPDATE SET
-              title = EXCLUDED.title,
-              description = EXCLUDED.description,
-              category = EXCLUDED.category,
-              total_days = EXCLUDED.total_days,
-              meals = EXCLUDED.meals,
-              updated_at = CURRENT_TIMESTAMP
-          `, [
-            t.id,
-            userId,
-            createdBy || userId,
-            t.title,
-            t.description || '',
-            t.category || 'General',
-            Number(t.totalDays || 7),
-            JSON.stringify(t.meals || [])
-          ]);
-        }
-      }
-    } catch (_) {}
-
-    // 2. Update local fallback JSON
-    const existing = readLocalTemplates();
-    const retained = userId ? existing.filter(i => i.userId && i.userId !== userId) : [];
-    writeLocalTemplates([...retained, ...templates]);
-
-    return NextResponse.json({ success: true, count: templates.length });
+    return NextResponse.json({ success: true, templates });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function DELETE(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
+    const body = await req.json();
+    const { id, userId, title, description, durationDays, isPublic, days } = body;
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Template ID required' }, { status: 400 });
-    }
+    const safeId = id || `tmpl_${Date.now()}`;
+    const safeUserId = userId || 'usr_admin_1';
+    const safeDaysJson = JSON.stringify(Array.isArray(days) ? days : []);
 
     try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function') {
-        await query('DELETE FROM meal_templates WHERE id = $1', [id]);
-      }
-    } catch (_) {}
+      await query(`
+        CREATE TABLE IF NOT EXISTS meal_templates (
+          id VARCHAR(255) PRIMARY KEY,
+          user_id VARCHAR(255),
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          duration_days INT DEFAULT 7,
+          is_public BOOLEAN DEFAULT false,
+          days_json TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
 
-    const existing = readLocalTemplates();
-    writeLocalTemplates(existing.filter(t => t.id !== id));
+      await query(`
+        INSERT INTO meal_templates (id, user_id, title, description, duration_days, is_public, days_json, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          duration_days = EXCLUDED.duration_days,
+          is_public = EXCLUDED.is_public,
+          days_json = EXCLUDED.days_json,
+          updated_at = NOW();
+      `, [safeId, safeUserId, title, description || '', durationDays || 7, Boolean(isPublic), safeDaysJson]);
+    } catch (dbErr: any) {
+      console.warn('[api/templates] DB commit notice:', dbErr.message);
+    }
 
-    return NextResponse.json({ success: true, id });
+    return NextResponse.json({ success: true, id: safeId });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -57696,7 +57843,6 @@ export async function GET(req: NextRequest) {
 
 ## File: `apps/web/src/app/templates/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -57707,27 +57853,62 @@ import {
   Sparkles, Check, X, BookOpen, RefreshCw, 
   CheckCircle2, AlertCircle, ChevronRight,
   Clock, Flame, Users, ExternalLink, ChefHat,
-  Eye, HardDrive, Type, Minus
+  HardDrive, Type, Minus, Calendar, Info
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage, setCurrentUser } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-interface StorageSettings {
-  provider?: string;
-  uploadDir?: string;
-  recipesJsonDir?: string;
-  publicPrefix?: string;
-  cdnUrl?: string;
+interface StorageConfig {
+  provider: 'localhost' | 'supabase';
+  localhost: {
+    uploadDir: string;
+    publicPrefix: string;
+    recipesJsonDir: string;
+    maxSizeMb: number;
+    allowedTypes?: string;
+  };
+  supabase: {
+    enabled: boolean;
+    endpoint: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    bucket: string;
+    publicUrl: string;
+  };
 }
+
+const DEFAULT_STORAGE_CONFIG: StorageConfig = {
+  provider: 'localhost',
+  localhost: {
+    uploadDir: 'apps/web/public/recipes/images',
+    publicPrefix: '/recipes/images',
+    recipesJsonDir: 'apps/web/public/recipes',
+    maxSizeMb: 10,
+    allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
+  },
+  supabase: {
+    enabled: true,
+    endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
+    region: 'us-west-1',
+    accessKeyId: 'f3e0affef5c74972a535153349eb24cc',
+    secretAccessKey: '',
+    bucket: 'recipes',
+    publicUrl: 'https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes',
+  },
+};
 
 interface TemplateMeal {
   id: string;
   dayIndex: number;
   mealType: string;
   recipeId?: string;
-  recipeName: string;
+  recipe_id?: string;
+  recipeName?: string;
+  title: string;
   image?: string;
   imageUrl?: string;
+  image_url?: string;
   time?: string;
   servings?: number;
   prepMinutes?: number;
@@ -57739,14 +57920,18 @@ interface TemplateMeal {
 
 interface MealTemplate {
   id: string;
-  userId: string;
-  createdBy?: string;
+  userId?: string;
+  user_id?: string;
   title: string;
-  description: string;
+  description?: string;
   category?: string;
-  totalDays: number;
+  totalDays?: number;
+  durationDays?: number;
+  isPublic?: boolean;
   meals: TemplateMeal[];
+  days?: { dayName?: string; meals?: any[] }[];
   createdAt?: string;
+  updatedAt?: string;
 }
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -57765,68 +57950,44 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
         id: 'm_1_0', 
         dayIndex: 0, 
         mealType: 'Dinner', 
+        title: 'Garlic Butter Chicken Breast',
         recipeName: 'Garlic Butter Chicken Breast', 
-        imageUrl: '/recipes/images/default.jpg',
+        imageUrl: 'default.jpg',
         prepMinutes: 15, 
         cookMinutes: 20, 
         servings: 2,
         ingredients: [
-          { name: 'Chicken Breast', amount: 2, unit: 'pieces' },
-          { name: 'Garlic Cloves (minced)', amount: 4, unit: 'cloves' },
-          { name: 'Butter', amount: 2, unit: 'tbsp' },
-          { name: 'Olive Oil', amount: 1, unit: 'tbsp' },
-          { name: 'Fresh Parsley', amount: 1, unit: 'handful' }
+          { name: 'Chicken Breast', amount: '2', unit: 'pieces' },
+          { name: 'Garlic Cloves (minced)', amount: '4', unit: 'cloves' },
+          { name: 'Butter', amount: '2', unit: 'tbsp' },
+          { name: 'Olive Oil', amount: '1', unit: 'tbsp' }
         ],
         instructions: [
           'Season chicken breasts generously with salt, pepper, and garlic powder.',
-          'Heat olive oil and 1 tbsp butter in a large skillet over medium-high heat.',
+          'Heat olive oil and butter in a large skillet over medium-high heat.',
           'Sear chicken for 6-8 minutes per side until golden brown and cooked through.',
-          'Add remaining butter and minced garlic; baste chicken continuously for 1-2 minutes.',
-          'Garnish with chopped parsley and serve warm.'
+          'Baste continuously with melted garlic butter and serve warm.'
         ]
       },
       { 
         id: 'm_1_1', 
         dayIndex: 1, 
         mealType: 'Dinner', 
+        title: 'Grilled Salmon with Asparagus',
         recipeName: 'Grilled Salmon with Asparagus', 
-        imageUrl: '/recipes/images/default.jpg',
+        imageUrl: 'default.jpg',
         prepMinutes: 10, 
         cookMinutes: 15, 
         servings: 2,
         ingredients: [
-          { name: 'Salmon Fillets', amount: 2, unit: 'fillets' },
-          { name: 'Fresh Asparagus', amount: 1, unit: 'bunch' },
-          { name: 'Lemon Juice', amount: 2, unit: 'tbsp' },
-          { name: 'Olive Oil', amount: 1, unit: 'tbsp' }
+          { name: 'Salmon Fillets', amount: '2', unit: 'fillets' },
+          { name: 'Fresh Asparagus', amount: '1', unit: 'bunch' },
+          { name: 'Lemon Juice', amount: '2', unit: 'tbsp' }
         ],
         instructions: [
-          'Preheat grill or grill pan to medium-high heat.',
+          'Preheat grill pan to medium-high heat.',
           'Toss asparagus with olive oil, salt, and pepper.',
-          'Season salmon with lemon juice, salt, and black pepper.',
-          'Grill salmon and asparagus for 4-5 minutes per side until salmon flakes easily.'
-        ]
-      },
-      { 
-        id: 'm_1_2', 
-        dayIndex: 2, 
-        mealType: 'Dinner', 
-        recipeName: 'Lean Beef & Broccoli Stir-Fry', 
-        imageUrl: '/recipes/images/default.jpg',
-        prepMinutes: 15, 
-        cookMinutes: 15, 
-        servings: 2,
-        ingredients: [
-          { name: 'Flank Steak (sliced thin)', amount: 300, unit: 'g' },
-          { name: 'Broccoli Florets', amount: 2, unit: 'cups' },
-          { name: 'Soy Sauce', amount: 3, unit: 'tbsp' },
-          { name: 'Sesame Oil', amount: 1, unit: 'tsp' }
-        ],
-        instructions: [
-          'Whisk soy sauce, sesame oil, and garlic in a small bowl.',
-          'Stir-fry flank steak in a hot wok for 3-4 minutes until browned.',
-          'Add broccoli florets and 2 tablespoons of water; steam for 3 minutes.',
-          'Pour sauce over mixture and toss until glossy.'
+          'Grill salmon and asparagus for 4-5 minutes per side until flaky.'
         ]
       }
     ]
@@ -57843,48 +58004,46 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
         id: 'm_2_0', 
         dayIndex: 0, 
         mealType: 'Dinner', 
+        title: 'Creamy Pesto Penne Pasta',
         recipeName: 'Creamy Pesto Penne Pasta', 
-        imageUrl: '/recipes/images/default.jpg',
+        imageUrl: 'default.jpg',
         prepMinutes: 5, 
         cookMinutes: 15, 
         servings: 4,
         ingredients: [
-          { name: 'Penne Pasta', amount: 400, unit: 'g' },
-          { name: 'Basil Pesto', amount: 1, unit: 'jar' },
-          { name: 'Heavy Cream', amount: 0.5, unit: 'cup' },
-          { name: 'Parmesan Cheese', amount: 0.5, unit: 'cup' }
+          { name: 'Penne Pasta', amount: '400', unit: 'g' },
+          { name: 'Basil Pesto', amount: '1', unit: 'jar' },
+          { name: 'Heavy Cream', amount: '0.5', unit: 'cup' }
         ],
         instructions: [
           'Boil penne pasta in salted water until al dente.',
-          'Drain pasta, reserving 1/4 cup of starchy pasta water.',
-          'Stir in basil pesto, heavy cream, and parmesan until velvety.',
-          'Season with freshly cracked pepper.'
-        ]
-      },
-      { 
-        id: 'm_2_1', 
-        dayIndex: 1, 
-        mealType: 'Dinner', 
-        recipeName: 'Quick Thai Basil Tofu Stir-Fry', 
-        imageUrl: '/recipes/images/default.jpg',
-        prepMinutes: 10, 
-        cookMinutes: 10, 
-        servings: 2,
-        ingredients: [
-          { name: 'Firm Tofu (cubed)', amount: 300, unit: 'g' },
-          { name: 'Thai Holy Basil', amount: 1, unit: 'cup' },
-          { name: 'Garlic & Chili Paste', amount: 1, unit: 'tbsp' },
-          { name: 'Soy Sauce', amount: 2, unit: 'tbsp' }
-        ],
-        instructions: [
-          'Pan-fry tofu cubes until golden crisp on all sides.',
-          'Add chili garlic paste and toss quickly.',
-          'Turn off heat, fold in fresh Thai basil leaves, and wilt naturally.'
+          'Drain pasta, reserving 1/4 cup pasta water.',
+          'Stir in basil pesto and cream until velvety and serve warm.'
         ]
       }
     ]
   }
 ];
+
+const getDefaultImageUrl = (config?: StorageConfig | null): string => {
+  if (config?.provider === 'supabase' && config.supabase?.publicUrl) {
+    const base = config.supabase.publicUrl.replace(/\/+$/, '');
+    return `${base}/default.jpg`;
+  }
+  const prefix = config?.localhost?.publicPrefix || '/recipes/images';
+  return `${prefix.replace(/\/+$/, '')}/default.jpg`;
+};
+
+const getTemplateMealsCount = (tmpl?: MealTemplate | null): number => {
+  if (!tmpl) return 0;
+  if (Array.isArray(tmpl.meals)) return tmpl.meals.length;
+  if (Array.isArray(tmpl.days)) {
+    return tmpl.days.reduce((acc: number, d: any) => {
+      return acc + (Array.isArray(d?.meals) ? d.meals.length : 0);
+    }, 0);
+  }
+  return 0;
+};
 
 export default function TemplatesPage() {
   const router = useRouter();
@@ -57892,14 +58051,7 @@ export default function TemplatesPage() {
   const [currentUser, setCurrentUserState] = useState<User | null>(null);
   const [authHydrated, setAuthHydrated] = useState<boolean>(false);
 
-  // Storage configuration loaded dynamically from /admin/storage
-  const [storageSettings, setStorageSettings] = useState<StorageSettings>({
-    provider: 'localhost',
-    uploadDir: 'apps/web/public/recipes/images',
-    recipesJsonDir: 'apps/web/public/recipes',
-    publicPrefix: '/recipes/images'
-  });
-
+  const [storageConfig, setStorageConfig] = useState<StorageConfig>(DEFAULT_STORAGE_CONFIG);
   const [templates, setTemplates] = useState<MealTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
@@ -57907,7 +58059,7 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Modal 1: Create / Edit Template
+  // Modal 1: Create / Edit Blueprint
   const [showTemplateModal, setShowTemplateModal] = useState<boolean>(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [templateTitle, setTemplateTitle] = useState<string>('');
@@ -57915,7 +58067,7 @@ export default function TemplatesPage() {
   const [templateCategory, setTemplateCategory] = useState<string>('General');
   const [templateDays, setTemplateDays] = useState<number>(7);
 
-  // Modal 2: Add Meal in Blueprint Day
+  // Modal 2: Add Meal to Day
   const [showMealModal, setShowMealModal] = useState<boolean>(false);
   const [targetDayIndex, setTargetDayIndex] = useState<number>(0);
   const [targetMealType, setTargetMealType] = useState<string>('Dinner');
@@ -57926,7 +58078,7 @@ export default function TemplatesPage() {
   const [targetNotes, setTargetNotes] = useState<string>('');
   const [selectedRecipeForMeal, setSelectedRecipeForMeal] = useState<any | null>(null);
 
-  // Modal 3: Saved Recipe Picker
+  // Modal 3: Saved Recipe Picker Modal
   const [showRecipePicker, setShowRecipePicker] = useState<boolean>(false);
   const [pickerSearch, setPickerSearch] = useState<string>('');
 
@@ -57948,7 +58100,6 @@ export default function TemplatesPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Close modals on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -57963,57 +58114,163 @@ export default function TemplatesPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Fetch active storage configuration from /api/admin/storage
   const loadStorageSettings = useCallback(async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('zecratary_storage_settings');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.provider) {
+            setStorageConfig(prev => ({ ...prev, ...parsed }));
+          }
+        }
+      } catch (_) {}
+    }
+
     try {
-      const res = await fetch('/api/admin/storage', { cache: 'no-store' });
+      const res = await fetch(`/api/admin/storage?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data?.storage_settings) {
-          setStorageSettings(data.storage_settings);
+        const settings = data?.settings || data?.storage_settings;
+        if (settings) {
+          setStorageConfig(prev => ({
+            ...prev,
+            ...settings,
+            localhost: { ...prev.localhost, ...(settings.localhost || {}) },
+            supabase: { ...prev.supabase, ...(settings.supabase || {}) }
+          }));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_storage_settings', JSON.stringify(settings));
+          }
         }
       }
     } catch (_) {}
   }, []);
 
-  // Resolve recipe image URL based on setting from /admin/storage
-  const resolveRecipeImageUrl = useCallback((img?: string) => {
-    const publicPrefix = storageSettings.publicPrefix || '/recipes/images';
-    if (!img || img === 'default.jpg' || img === '/uploads/recipes/default.jpg' || img === '/recipes/images/default.jpg') {
-      return `${publicPrefix}/default.jpg`;
+  const resolveRecipeImageUrl = useCallback((img?: string): string => {
+    const defaultImg = getDefaultImageUrl(storageConfig);
+    if (!img || img === 'default.jpg' || img === '/recipes/images/default.jpg' || img === '/uploads/recipes/default.jpg') {
+      return defaultImg;
     }
-    if (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('data:')) {
-      return img;
-    }
-    const cleanPath = img.replace(/^\/?(recipes\/images\/|uploads\/recipes\/)?/, '');
-    return `${publicPrefix}/${cleanPath}`;
-  }, [storageSettings]);
 
-  // Fetch live templates from /api/templates
+    const trimmed = img.trim();
+    if (!trimmed) return defaultImg;
+
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+      return trimmed;
+    }
+
+    const cleanFilename = trimmed.replace(/^\/?(recipes\/images\/|uploads\/recipes\/)?/, '');
+
+    if (storageConfig.provider === 'supabase' && storageConfig.supabase?.publicUrl) {
+      const base = storageConfig.supabase.publicUrl.replace(/\/+$/, '');
+      return `${base}/${cleanFilename}`;
+    }
+
+    const prefix = (storageConfig.localhost?.publicPrefix || '/recipes/images').replace(/\/+$/, '');
+    return `${prefix}/${cleanFilename}`;
+  }, [storageConfig]);
+
+  const normalizeTemplates = useCallback((rawList: any[]): MealTemplate[] => {
+    if (!Array.isArray(rawList)) return [];
+    return rawList.map((t: any) => {
+      let flatMeals: TemplateMeal[] = [];
+
+      if (Array.isArray(t.meals)) {
+        flatMeals = t.meals.map((m: any, mIdx: number) => ({
+          id: m.id || `m_${Date.now()}_${mIdx}`,
+          dayIndex: Number(m.dayIndex ?? m.day_index ?? 0),
+          mealType: m.mealType || m.meal_type || 'Dinner',
+          recipeId: m.recipeId || m.recipe_id,
+          recipe_id: m.recipe_id || m.recipeId,
+          recipeName: m.recipeName || m.title || 'Scheduled Meal',
+          title: m.title || m.recipeName || 'Scheduled Meal',
+          image: m.image || m.imageUrl || m.image_url || 'default.jpg',
+          imageUrl: m.imageUrl || m.image || m.image_url || 'default.jpg',
+          image_url: m.image_url || m.imageUrl || m.image || 'default.jpg',
+          time: m.time || '19:00',
+          servings: Number(m.servings || 4),
+          prepMinutes: Number(m.prepMinutes || m.prepTimeMinutes || 15),
+          cookMinutes: Number(m.cookMinutes || m.cookTimeMinutes || 25),
+          notes: m.notes || '',
+          ingredients: Array.isArray(m.ingredients) ? m.ingredients : [],
+          instructions: Array.isArray(m.instructions) ? m.instructions : []
+        }));
+      } else if (Array.isArray(t.days)) {
+        t.days.forEach((d: any, dIdx: number) => {
+          if (Array.isArray(d?.meals)) {
+            d.meals.forEach((m: any, mIdx: number) => {
+              flatMeals.push({
+                id: m.id || `m_${dIdx}_${mIdx}_${Date.now()}`,
+                dayIndex: dIdx,
+                mealType: m.mealType || 'Dinner',
+                recipeId: m.recipeId || m.recipe_id,
+                recipe_id: m.recipe_id || m.recipeId,
+                recipeName: m.recipeName || m.title || 'Scheduled Meal',
+                title: m.title || m.recipeName || 'Scheduled Meal',
+                image: m.image || m.imageUrl || m.image_url || 'default.jpg',
+                imageUrl: m.imageUrl || m.image || m.image_url || 'default.jpg',
+                image_url: m.image_url || m.imageUrl || m.image || 'default.jpg',
+                time: m.time || '19:00',
+                servings: Number(m.servings || 4),
+                prepMinutes: Number(m.prepMinutes || 15),
+                cookMinutes: Number(m.cookMinutes || 25),
+                notes: m.notes || '',
+                ingredients: Array.isArray(m.ingredients) ? m.ingredients : [],
+                instructions: Array.isArray(m.instructions) ? m.instructions : []
+              });
+            });
+          }
+        });
+      }
+
+      const totalDays = Number(t.totalDays || t.durationDays || t.duration_days) || 7;
+
+      return {
+        id: t.id || `tpl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        userId: t.userId || t.user_id || 'usr_admin_1',
+        title: t.title || 'Untitled Blueprint',
+        description: t.description || '',
+        category: t.category || 'General',
+        totalDays,
+        durationDays: totalDays,
+        meals: flatMeals,
+        createdAt: t.createdAt || t.created_at || new Date().toISOString()
+      };
+    });
+  }, []);
+
   const loadTemplatesData = useCallback(async (user: User | null) => {
     const targetUserId = user?.id || 'usr_admin_1';
     setLoading(true);
 
     try {
       let fetchedTemplates: MealTemplate[] = [];
-      const res = await fetch(`/api/templates?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.templates) && data.templates.length > 0) {
-          fetchedTemplates = data.templates;
+
+      try {
+        const res = await fetch(`/api/templates?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.templates) && data.templates.length > 0) {
+            fetchedTemplates = normalizeTemplates(data.templates);
+          }
         }
-      }
+      } catch (_) {}
 
       if (fetchedTemplates.length === 0 && typeof window !== 'undefined') {
         const raw = localStorage.getItem('zecratary_meal_templates');
         if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) fetchedTemplates = parsed;
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              fetchedTemplates = normalizeTemplates(parsed);
+            }
+          } catch (_) {}
         }
       }
 
       if (fetchedTemplates.length === 0) {
-        fetchedTemplates = DEFAULT_TEMPLATES;
+        fetchedTemplates = normalizeTemplates(DEFAULT_TEMPLATES);
       }
 
       setTemplates(fetchedTemplates);
@@ -58035,16 +58292,13 @@ export default function TemplatesPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedTemplateId]);
+  }, [normalizeTemplates, selectedTemplateId]);
 
-  // Robust session resolution & storage hydration
   useEffect(() => {
-    document.title = `${t('mealBlueprintsTitle', 'Meal Blueprints')} - Zecratary`;
     initAuthStorage();
     loadStorageSettings();
 
     let resolvedUser = getCurrentUser();
-
     if (!resolvedUser && typeof document !== 'undefined') {
       const match = document.cookie.match(/(?:^|;\s*)(?:zecratary_session|zecratary_current_user|currentUser)=([^;]+)/);
       if (match && match[1]) {
@@ -58068,6 +58322,14 @@ export default function TemplatesPage() {
     setAuthHydrated(true);
     loadTemplatesData(resolvedUser);
 
+    const handleStorageChange = (e?: any) => {
+      if (e?.detail) {
+        setStorageConfig(prev => ({ ...prev, ...e.detail }));
+      } else {
+        loadStorageSettings();
+      }
+    };
+
     const handleSync = () => {
       const active = getCurrentUser();
       if (active) {
@@ -58078,21 +58340,23 @@ export default function TemplatesPage() {
     };
 
     window.addEventListener('storage', handleSync);
+    window.addEventListener('focus', loadStorageSettings);
+    window.addEventListener('zecratary_storage_updated', handleStorageChange);
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
-    window.addEventListener('zecratary_storage_updated', loadStorageSettings);
 
     return () => {
       window.removeEventListener('storage', handleSync);
+      window.removeEventListener('focus', loadStorageSettings);
+      window.removeEventListener('zecratary_storage_updated', handleStorageChange);
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
-      window.removeEventListener('zecratary_storage_updated', loadStorageSettings);
     };
-  }, [loadStorageSettings, loadTemplatesData, router, t]);
+  }, [loadStorageSettings, loadTemplatesData, router]);
 
   const activeTemplate = useMemo(() => {
     return templates.find(tpl => tpl.id === selectedTemplateId) || templates[0] || null;
@@ -58119,22 +58383,20 @@ export default function TemplatesPage() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Open Full Recipe Modal without editing controls (Task 2)
   const handleOpenRecipeModal = (meal: TemplateMeal) => {
-    // 1. Search for matching recipe in savedRecipes
     const matched = savedRecipes.find(r => 
       (meal.recipeId && r.id === meal.recipeId) ||
-      (r.title && r.title.toLowerCase() === meal.recipeName.toLowerCase()) ||
-      (r.name && r.name.toLowerCase() === meal.recipeName.toLowerCase())
+      (r.title && r.title.toLowerCase() === (meal.recipeName || meal.title).toLowerCase()) ||
+      (r.name && r.name.toLowerCase() === (meal.recipeName || meal.title).toLowerCase())
     );
 
     const baseServings = Number(matched?.servings || meal.servings || 4);
 
     const fullRecipePayload = {
       id: matched?.id || meal.recipeId || meal.id,
-      title: matched?.title || matched?.name || meal.recipeName,
-      image: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image,
-      imageUrl: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image,
+      title: matched?.title || matched?.name || meal.recipeName || meal.title,
+      image: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image || 'default.jpg',
+      imageUrl: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image || 'default.jpg',
       category: matched?.category || matched?.recipeType || meal.mealType || 'Main Dish',
       prepTimeMinutes: matched?.prepTimeMinutes || meal.prepMinutes || 15,
       cookTimeMinutes: matched?.cookTimeMinutes || meal.cookMinutes || 25,
@@ -58146,18 +58408,18 @@ export default function TemplatesPage() {
         : (meal.ingredients && meal.ingredients.length > 0)
           ? meal.ingredients
           : [
-              { name: meal.recipeName, amount: baseServings, unit: 'servings' },
-              { name: 'Olive Oil or Cooking Spray', amount: 1, unit: 'tbsp' },
-              { name: 'Salt & Black Pepper', amount: 1, unit: 'pinch' }
+              { name: meal.recipeName || meal.title, amount: String(baseServings), unit: 'servings' },
+              { name: 'Olive Oil or Cooking Spray', amount: '1', unit: 'tbsp' },
+              { name: 'Salt & Black Pepper', amount: '1', unit: 'pinch' }
             ],
       instructions: (matched?.instructions && matched.instructions.length > 0)
         ? matched.instructions
         : (meal.instructions && meal.instructions.length > 0)
           ? meal.instructions
           : [
-              `Prepare all fresh ingredients for ${meal.recipeName}.`,
-              `Cook according to preference for approximately ${(meal.prepMinutes || 15) + (meal.cookMinutes || 25)} minutes.`,
-              `Season to taste and serve warm.`
+              `Prepare all fresh ingredients for ${meal.recipeName || meal.title}.`,
+              `Cook according to instructions for ${(meal.prepMinutes || 15) + (meal.cookMinutes || 25)} minutes.`,
+              `Season to taste and serve fresh.`
             ],
       notes: meal.notes || matched?.notes || ''
     };
@@ -58182,7 +58444,8 @@ export default function TemplatesPage() {
             title: templateTitle.trim(),
             description: templateDesc.trim(),
             category: templateCategory,
-            totalDays: Number(templateDays || 7)
+            totalDays: Number(templateDays || 7),
+            durationDays: Number(templateDays || 7)
           };
         }
         return tpl;
@@ -58193,17 +58456,17 @@ export default function TemplatesPage() {
       const newTpl: MealTemplate = {
         id: 'tpl_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
         userId: currentUser.id || 'usr_admin_1',
-        createdBy: currentUser.email || 'admin@zecratary.com',
         title: templateTitle.trim(),
         description: templateDesc.trim(),
         category: templateCategory,
         totalDays: Number(templateDays || 7),
+        durationDays: Number(templateDays || 7),
         meals: []
       };
       const updated = [newTpl, ...templates];
       await persistTemplatesList(updated);
       setSelectedTemplateId(newTpl.id);
-      showToast(t('blueprintSavedToast', 'Blueprint saved to database!'));
+      showToast(t('blueprintCreatedToast', 'Blueprint created successfully!'));
     }
 
     setShowTemplateModal(false);
@@ -58252,18 +58515,24 @@ export default function TemplatesPage() {
   const handleSaveMealToBlueprint = async () => {
     if (!targetDishTitle.trim() || !activeTemplate) return;
 
+    const defaultImg = getDefaultImageUrl(storageConfig);
+    const chosenImg = selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || defaultImg;
+
     const newMeal: TemplateMeal = {
       id: 'm_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
       dayIndex: targetDayIndex,
       mealType: targetMealType,
-      recipeId: selectedRecipeForMeal?.id || null,
+      recipeId: selectedRecipeForMeal?.id || undefined,
+      recipe_id: selectedRecipeForMeal?.id || undefined,
       recipeName: targetDishTitle.trim(),
-      image: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/recipes/images/default.jpg',
-      imageUrl: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/recipes/images/default.jpg',
+      title: targetDishTitle.trim(),
+      image: chosenImg,
+      imageUrl: chosenImg,
+      image_url: chosenImg,
       time: targetTime || '19:00',
       servings: Number(targetServings || 4),
-      prepMinutes: Number(selectedRecipeForMeal?.prepTimeMinutes || 15),
-      cookMinutes: Number(selectedRecipeForMeal?.cookTimeMinutes || 25),
+      prepMinutes: Number(selectedRecipeForMeal?.prepTimeMinutes || selectedRecipeForMeal?.prepMinutes || 15),
+      cookMinutes: Number(selectedRecipeForMeal?.cookTimeMinutes || selectedRecipeForMeal?.cookMinutes || 25),
       notes: targetNotes.trim(),
       ingredients: selectedRecipeForMeal?.ingredients || [],
       instructions: selectedRecipeForMeal?.instructions || []
@@ -58274,7 +58543,11 @@ export default function TemplatesPage() {
 
     await persistTemplatesList(updated);
     setShowMealModal(false);
-    showToast(t('blueprintSavedToast', 'Blueprint saved to database!'));
+    showToast(
+      (t('mealAddedToast', 'Added {title} to Day {day}!'))
+        .replace('{title}', newMeal.title)
+        .replace('{day}', String(targetDayIndex + 1))
+    );
   };
 
   const handleRemoveMealFromBlueprint = async (mealId: string) => {
@@ -58282,6 +58555,7 @@ export default function TemplatesPage() {
     const updatedMeals = (activeTemplate.meals || []).filter(m => m.id !== mealId);
     const updated = templates.map(tpl => tpl.id === activeTemplate.id ? { ...tpl, meals: updatedMeals } : tpl);
     await persistTemplatesList(updated);
+    showToast(t('mealRemovedToast', 'Meal removed from blueprint.'));
   };
 
   const handleApplyToCalendar = async () => {
@@ -58299,13 +58573,16 @@ export default function TemplatesPage() {
       return {
         id: 'plan_' + Date.now() + '_' + idx,
         userId: targetUserId,
+        user_id: targetUserId,
         createdBy: currentUser?.email || 'admin@zecratary.com',
         date: dateStr,
         recipeId: meal.recipeId || null,
-        recipeName: meal.recipeName,
-        title: meal.recipeName,
-        image: meal.image || meal.imageUrl || '/recipes/images/default.jpg',
-        imageUrl: meal.image || meal.imageUrl || '/recipes/images/default.jpg',
+        recipe_id: meal.recipeId || null,
+        recipeName: meal.recipeName || meal.title,
+        title: meal.recipeName || meal.title,
+        image: resolveRecipeImageUrl(meal.image || meal.imageUrl),
+        imageUrl: resolveRecipeImageUrl(meal.image || meal.imageUrl),
+        image_url: resolveRecipeImageUrl(meal.image || meal.imageUrl),
         mealType: meal.mealType || 'Dinner',
         time: meal.time || '19:00',
         servings: Number(meal.servings || 4),
@@ -58324,8 +58601,9 @@ export default function TemplatesPage() {
       window.dispatchEvent(new Event('zecratary_planner_updated'));
       showToast(t('templateAppliedSuccessToast', 'Meal blueprint scheduled onto your calendar!'));
       setShowApplyModal(false);
+      router.push('/planner');
     } catch (_) {
-      showToast('Error applying template to planner.', 'error');
+      showToast(t('templateAppliedErrorToast', 'Error applying template to planner.'), 'error');
     }
   };
 
@@ -58348,6 +58626,11 @@ export default function TemplatesPage() {
     );
   }, [savedRecipes, pickerSearch]);
 
+  const activeProviderLabel = storageConfig.provider === 'supabase' ? 'Supabase S3' : 'Localhost';
+  const activePrefixLabel = storageConfig.provider === 'supabase' 
+    ? (storageConfig.supabase?.publicUrl || 'Cloud CDN')
+    : (storageConfig.localhost?.publicPrefix || '/recipes/images');
+
   if (!authHydrated) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3">
@@ -58364,7 +58647,7 @@ export default function TemplatesPage() {
     <div 
       id="zecratary-templates-canvas"
       role="region"
-      aria-label={t('mealBlueprintsTitle', 'Meal Blueprints')}
+      aria-label={t('mealBlueprintsTitle', 'Meal Blueprints & Templates')}
       data-lpignore="true"
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
       style={{ 
@@ -58395,38 +58678,29 @@ export default function TemplatesPage() {
       {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-              {t('mealBlueprintsTitle', 'Meal Blueprints')}
+              {t('mealBlueprintsTitle', 'Meal Blueprints & Templates')}
             </h1>
             <span 
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] font-mono opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              title={`${t('storagePillLabel', 'Storage Directory')}: ${storageSettings.publicPrefix || '/recipes/images'}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[10px] font-mono font-bold shadow-xs"
+              style={{ 
+                backgroundColor: 'var(--color-inner-dark)', 
+                borderColor: storageConfig.provider === 'supabase' ? 'var(--color-primary)' : 'var(--color-border)',
+                color: storageConfig.provider === 'supabase' ? 'var(--color-primary)' : 'var(--color-text)'
+              }}
+              title={`${t('activeEngine', 'Active Engine')}: ${activeProviderLabel} (${activePrefixLabel})`}
             >
               <HardDrive className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
-              <span>{storageSettings.publicPrefix || '/recipes/images'}</span>
+              <span>{activeProviderLabel}: {activePrefixLabel}</span>
             </span>
           </div>
           <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('mealBlueprintsSubtitle', 'Create, customize, and apply multi-day meal planning blueprints to your calendar.')}
+            {t('mealBlueprintsSubtitle', 'Schedule and customize multi-day meal templates with dynamic images synchronized with storage settings.')}
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
-          <Link
-            href="/dashboard"
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-80"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <span>{t('goToDashboardBtn', 'Go to Dashboard')}</span>
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
-
           <button
             type="button"
             onClick={() => {
@@ -58440,7 +58714,6 @@ export default function TemplatesPage() {
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
-            title={t('reloadBtn', 'Reload')}
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
             <span>{t('reloadBtn', 'Reload')}</span>
@@ -58464,7 +58737,7 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* Main Fluid 2-Column Responsive Layout */}
+      {/* Main 2-Column Responsive Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN: BLUEPRINTS CATALOG */}
         <div className="lg:col-span-4 xl:col-span-3 space-y-4">
@@ -58473,13 +58746,7 @@ export default function TemplatesPage() {
             <input
               type="text"
               autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
               data-lpignore="true"
-              data-1p-ignore="true"
-              data-bwignore="true"
-              data-form-type="other"
               placeholder={t('searchBlueprintsPlaceholder', 'Search blueprints by title or category...')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -58500,7 +58767,8 @@ export default function TemplatesPage() {
             ) : (
               filteredTemplates.map(tpl => {
                 const isSelected = tpl.id === activeTemplate?.id;
-                const mealCount = (tpl.meals || []).length;
+                const mealCount = getTemplateMealsCount(tpl);
+
                 return (
                   <div
                     key={tpl.id}
@@ -58518,7 +58786,7 @@ export default function TemplatesPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="space-y-1 min-w-0">
                         <span className="text-[10px] font-black uppercase tracking-wider text-[var(--color-primary)]">
-                          {tpl.category || 'General'}
+                          {t(`cat${(tpl.category || 'General').replace(/[^a-zA-Z]/g, '')}`, tpl.category || 'General')}
                         </span>
                         <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text)' }}>
                           {tpl.title}
@@ -58549,8 +58817,12 @@ export default function TemplatesPage() {
                     </p>
 
                     <div className="pt-2 border-t flex items-center justify-between text-[10px] font-bold opacity-80" style={{ borderColor: 'var(--color-border)' }}>
-                      <span>{(t('totalMealsCount', '{count} Meals Planned')).replace('{count}', String(mealCount))}</span>
-                      <span className="text-emerald-400">{(t('durationDays', '{days} Days Duration')).replace('{days}', String(tpl.totalDays || 7))}</span>
+                      <span className="text-emerald-500 font-bold">
+                        {(t('totalMealsCount', '{count} Meals Total')).replace('{count}', String(mealCount))}
+                      </span>
+                      <span>
+                        {(t('durationDays', '{days} Days Duration')).replace('{days}', String(tpl.totalDays || 7))}
+                      </span>
                     </div>
                   </div>
                 );
@@ -58576,7 +58848,7 @@ export default function TemplatesPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="px-2.5 py-0.5 rounded-full border text-[10px] font-black uppercase text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
-                      {activeTemplate.category || 'General'}
+                      {t(`cat${(activeTemplate.category || 'General').replace(/[^a-zA-Z]/g, '')}`, activeTemplate.category || 'General')}
                     </span>
                     <span className="text-xs opacity-60">
                       {(t('durationDays', '{days} Days Duration')).replace('{days}', String(activeTemplate.totalDays || 7))}
@@ -58607,6 +58879,7 @@ export default function TemplatesPage() {
                 {DAY_NAMES.slice(0, activeTemplate.totalDays || 7).map((dayName, dayIdx) => {
                   const dayMeals = (activeTemplate.meals || []).filter(m => m.dayIndex === dayIdx);
                   const dayNameKey = `day${dayName}`;
+                  const localizedDayName = t(dayNameKey, dayName);
 
                   return (
                     <div 
@@ -58620,55 +58893,58 @@ export default function TemplatesPage() {
                             {dayIdx + 1}
                           </span>
                           <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                            {t(dayNameKey, dayName)}
+                            {localizedDayName}
                           </h4>
                         </div>
 
+                        {/* ADD RECIPE / DISH TO THIS DAY BUTTON */}
                         <button
                           type="button"
                           onClick={() => handleOpenAddMeal(dayIdx, 'Dinner')}
                           className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer"
                         >
                           <Plus className="h-3.5 w-3.5" />
-                          <span>{(t('addMealToDay', 'Add Dish to {day}')).replace('{day}', t(dayNameKey, dayName))}</span>
+                          <span>{(t('addMealToDay', 'Add Recipe to {day}')).replace('{day}', localizedDayName)}</span>
                         </button>
                       </div>
 
                       {dayMeals.length === 0 ? (
                         <div className="py-4 text-center text-[11px] opacity-40">
-                          {t('emptyDayDesc', 'No meals planned for this day.')}
+                          {(t('emptyDaySchedulePrompt', "No recipes scheduled for {dayName}. Click '+ Add Recipe to {dayName}' to select a dish."))
+                            .replace(/{dayName}/g, localizedDayName)}
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                           {dayMeals.map(meal => {
                             const resolvedThumb = resolveRecipeImageUrl(meal.imageUrl || meal.image);
+                            const defaultThumb = getDefaultImageUrl(storageConfig);
+
                             return (
                               <div 
                                 key={meal.id}
                                 onClick={() => handleOpenRecipeModal(meal)}
                                 className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs group cursor-pointer hover:border-[var(--color-primary)] transition-all duration-200"
                                 style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                                title={t('inspectRecipeDetails', 'Click to inspect full recipe details (Without Editing)')}
                               >
                                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                                  {/* Recipe Thumbnail (Task 1 & 3) */}
+                                  {/* Recipe Thumbnail */}
                                   <div 
                                     className="w-16 h-16 sm:w-18 sm:h-18 rounded-xl overflow-hidden shrink-0 border relative bg-slate-900/40"
                                     style={{ borderColor: 'var(--color-border)' }}
                                   >
                                     <img 
                                       src={resolvedThumb} 
-                                      alt={meal.recipeName}
+                                      alt={meal.recipeName || meal.title}
                                       referrerPolicy="no-referrer"
                                       onError={(e) => {
-                                        const target = e.target as HTMLImageElement;
-                                        target.src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                                        (e.currentTarget as HTMLImageElement).src = defaultThumb;
                                       }}
                                       className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                                     />
-                                    <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors" />
                                   </div>
 
-                                  {/* Recipe Details */}
+                                  {/* Recipe Info */}
                                   <div className="space-y-1 min-w-0 flex-1">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded border text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
@@ -58681,11 +58957,11 @@ export default function TemplatesPage() {
                                       )}
                                     </div>
                                     <h5 className="font-bold text-xs truncate group-hover:text-[var(--color-primary)] transition-colors" style={{ color: 'var(--color-text)' }}>
-                                      {meal.recipeName}
+                                      {meal.recipeName || meal.title}
                                     </h5>
                                     <div className="flex items-center gap-3 text-[10px] opacity-75 font-mono">
-                                      <span>{meal.servings || 4} serv</span>
-                                      <span>{(meal.prepMinutes || 15) + (meal.cookMinutes || 25)}m</span>
+                                      <span>{(t('servingsAbbr', '{count} serv')).replace('{count}', String(meal.servings || 4))}</span>
+                                      <span>{(t('minutesAbbr', '{count}m')).replace('{count}', String((meal.prepMinutes || 15) + (meal.cookMinutes || 25)))}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -58696,7 +58972,7 @@ export default function TemplatesPage() {
                                     type="button"
                                     onClick={() => handleRemoveMealFromBlueprint(meal.id)}
                                     className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition cursor-pointer"
-                                    title={t('removeMealTitle', 'Remove meal')}
+                                    title={t('removeMealTitle', 'Remove recipe from day')}
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </button>
@@ -58719,7 +58995,221 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* MODAL 5: FULL RECIPE CARD MODAL (READ-ONLY, WITHOUT EDITING BUTTON) - Task 2 */}
+      {/* MODAL 2: ADD RECIPE TO BLUEPRINT DAY */}
+      {showMealModal && (
+        <div 
+          onClick={() => setShowMealModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meal-modal-title"
+            data-lpignore="true"
+            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 id="meal-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+                {(t('addMealToDay', 'Add Recipe to {day}')).replace('{day}', t(`day${DAY_NAMES[targetDayIndex]}`, DAY_NAMES[targetDayIndex]))}
+              </h3>
+              <button type="button" onClick={() => setShowMealModal(false)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5">
+              {/* Button to Launch Saved Recipe Picker Modal */}
+              <button
+                type="button"
+                onClick={() => setShowRecipePicker(true)}
+                className="w-full py-2.5 px-3 rounded-xl border font-bold text-xs flex items-center justify-between cursor-pointer hover:opacity-80 transition"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+              >
+                <span className="flex items-center gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  {selectedRecipeForMeal ? (selectedRecipeForMeal.title || selectedRecipeForMeal.name) : t('selectFromSavedRecipes', 'Select from Saved Recipes Library')}
+                </span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+
+              <div>
+                <label className="block font-bold mb-1 opacity-80">{t('customDishTitleLabel', 'Dish Title *')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  placeholder={t('dishTitlePlaceholder', 'e.g. Grilled Salmon with Asparagus')}
+                  value={targetDishTitle}
+                  onChange={(e) => setTargetDishTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveMealToBlueprint();
+                    }
+                  }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-medium"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold mb-1 opacity-80">{t('mealSlotLabel', 'Meal Slot')}</label>
+                  <select
+                    value={targetMealType}
+                    onChange={(e) => setTargetMealType(e.target.value)}
+                    className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    {MEAL_SLOTS.map(s => (
+                      <option key={s} value={s}>{t(`slot${s}`, s)}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1 opacity-80">{t('servingsLabel', 'Servings')}</label>
+                  <input
+                    type="number"
+                    min="1"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    value={targetServings}
+                    onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
+                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1 opacity-80">{t('notesLabel', 'Notes / Instructions')}</label>
+                <textarea
+                  rows={2}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  placeholder={t('notesPlaceholder', 'Notes, prep reminders, or substitutions...')}
+                  value={targetNotes}
+                  onChange={(e) => setTargetNotes(e.target.value)}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none resize-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowMealModal(false)}
+                  className="px-4 py-2 border rounded-xl font-bold cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                >
+                  {t('cancelBtn', 'Cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveMealToBlueprint}
+                  disabled={!targetDishTitle.trim()}
+                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {t('addToBlueprintBtn', 'Add to Blueprint')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: SAVED RECIPES PICKER MODAL */}
+      {showRecipePicker && (
+        <div 
+          onClick={() => setShowRecipePicker(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipe-picker-title"
+            data-lpignore="true"
+            className="border rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative p-5 space-y-3 cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <div className="flex justify-between items-center border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 id="recipe-picker-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+                {t('selectFromSavedRecipes', 'Select from Saved Recipes Library')}
+              </h3>
+              <button type="button" onClick={() => setShowRecipePicker(false)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="relative">
+              <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none opacity-60" />
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                placeholder={t('searchRecipesPlaceholder', 'Search your saved recipes...')}
+                value={pickerSearch}
+                onChange={(e) => setPickerSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-2 pr-1 custom-scrollbar max-h-80">
+              {filteredPickerRecipes.length === 0 ? (
+                <div className="py-8 text-center text-xs opacity-50">
+                  {t('noRecipesFound', 'No recipes found in your saved library.')}
+                </div>
+              ) : (
+                filteredPickerRecipes.map(recipe => {
+                  const pickerThumb = resolveRecipeImageUrl(recipe.imageUrl || recipe.image);
+                  const defaultThumb = getDefaultImageUrl(storageConfig);
+
+                  return (
+                    <div
+                      key={recipe.id}
+                      onClick={() => {
+                        setSelectedRecipeForMeal(recipe);
+                        setTargetDishTitle(recipe.title || recipe.name);
+                        setTargetServings(Number(recipe.servings || 4));
+                        setTargetCookingTime((recipe.prepTimeMinutes || 15) + (recipe.cookTimeMinutes || 25));
+                        setShowRecipePicker(false);
+                      }}
+                      className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img 
+                          src={pickerThumb} 
+                          alt={recipe.title || recipe.name} 
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = defaultThumb;
+                          }}
+                          className="w-10 h-10 rounded-lg object-cover border shrink-0" 
+                          style={{ borderColor: 'var(--color-border)' }} 
+                        />
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
+                          <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
+                        </div>
+                      </div>
+                      <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: FULL RECIPE CARD MODAL (READ-ONLY, WITHOUT EDITING BUTTON) */}
       {showRecipeDetailModal && selectedRecipeForModal && (
         <div 
           onClick={() => setShowRecipeDetailModal(false)}
@@ -58745,23 +59235,21 @@ export default function TemplatesPage() {
                 alt={selectedRecipeForModal.title}
                 referrerPolicy="no-referrer"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                  (e.currentTarget as HTMLImageElement).src = getDefaultImageUrl(storageConfig);
                 }}
                 className="w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent" />
 
-              {/* Close Button Top Right */}
               <button 
                 type="button" 
                 onClick={() => setShowRecipeDetailModal(false)}
                 className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/80 transition cursor-pointer z-10 border border-white/20"
-                title={t('closeModalBtn', 'Close')}
+                title={t('closeBtn', 'Close')}
               >
                 <X className="h-4 w-4" />
               </button>
 
-              {/* Header Metadata Over Hero */}
               <div className="absolute bottom-4 left-6 right-6 space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-white tracking-wider border border-white/30" style={{ backgroundColor: 'var(--color-primary)' }}>
@@ -58769,14 +59257,14 @@ export default function TemplatesPage() {
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono text-white/90 bg-white/10 backdrop-blur-xs flex items-center gap-1 border border-white/15">
                     <Clock className="h-3 w-3" />
-                    <span>{t('prepTimeLabel', 'Prep')}: {selectedRecipeForModal.prepTimeMinutes || 15}m</span>
+                    <span>{(t('prepTimeLabel', 'Prep: {time}m')).replace('{time}', String(selectedRecipeForModal.prepTimeMinutes || 15))}</span>
                     <span className="opacity-40">•</span>
-                    <span>{t('cookTimeLabel', 'Cook')}: {selectedRecipeForModal.cookTimeMinutes || 25}m</span>
+                    <span>{(t('cookTimeLabel', 'Cook: {time}m')).replace('{time}', String(selectedRecipeForModal.cookTimeMinutes || 25))}</span>
                   </span>
                   {selectedRecipeForModal.calories && (
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono text-white/90 bg-white/10 backdrop-blur-xs flex items-center gap-1 border border-white/15">
                       <Flame className="h-3 w-3 text-orange-400" />
-                      <span>{selectedRecipeForModal.calories} kcal</span>
+                      <span>{(t('caloriesKcal', '{count} kcal')).replace('{count}', String(selectedRecipeForModal.calories))}</span>
                     </span>
                   )}
                 </div>
@@ -58787,16 +59275,15 @@ export default function TemplatesPage() {
               </div>
             </div>
 
-            {/* Interactive Tools Row: Servings Stepper & Zoom Controls */}
+            {/* Servings Stepper & Zoom Controls */}
             <div 
               className="p-3.5 border-b flex items-center justify-between gap-4 shrink-0 flex-wrap"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
             >
-              {/* Servings Stepper */}
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-bold opacity-75 flex items-center gap-1">
                   <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                  {t('servingsCountLabel', 'Servings')}:
+                  {t('servingsLabel', 'Servings')}:
                 </span>
                 <div className="flex items-center border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
                   <button
@@ -58819,11 +59306,10 @@ export default function TemplatesPage() {
                 </div>
               </div>
 
-              {/* Text Zoom Stepper */}
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-bold opacity-75 flex items-center gap-1">
                   <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                  {t('zoomLabel', 'Text Size')}:
+                  {t('textSizeLabel', 'Text Size:')}
                 </span>
                 <div className="flex items-center border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
                   <button
@@ -58845,15 +59331,15 @@ export default function TemplatesPage() {
               </div>
             </div>
 
-            {/* Scrollable Content: Ingredients & Instructions */}
+            {/* Ingredients & Instructions (Read-Only) */}
             <div 
               className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar"
               style={{ fontSize: `${(fontSizeScale / 100) * 0.75}rem` }}
             >
-              {/* Ingredients Section */}
+              {/* Ingredients */}
               <div className="space-y-3">
                 <h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-                  <span>{t('ingredientsTitle', 'Ingredients')}</span>
+                  <span>{t('ingredientsHeading', 'Ingredients')}</span>
                   <span className="text-[10px] font-normal opacity-60">({selectedRecipeForModal.ingredients?.length || 0})</span>
                 </h3>
 
@@ -58861,7 +59347,7 @@ export default function TemplatesPage() {
                   <p className="opacity-60 italic">{t('noIngredientsRecorded', 'No specific ingredients recorded for this dish.')}</p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {selectedRecipeForModal.ingredients.map((ing, idx) => {
+                    {selectedRecipeForModal.ingredients.map((ing: any, idx: number) => {
                       const isChecked = !!checkedIngredients[`ing_${idx}`];
                       const rawAmt = typeof ing.amount === 'number' ? ing.amount : parseFloat(ing.amount);
                       const scaledAmt = !isNaN(rawAmt) 
@@ -58899,17 +59385,17 @@ export default function TemplatesPage() {
                 )}
               </div>
 
-              {/* Instructions Section */}
+              {/* Instructions */}
               <div className="space-y-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-                  <span>{t('instructionsTitle', 'Step-by-Step Instructions')}</span>
+                  <span>{t('instructionsHeading', 'Step-by-Step Instructions')}</span>
                 </h3>
 
                 {(!selectedRecipeForModal.instructions || selectedRecipeForModal.instructions.length === 0) ? (
                   <p className="opacity-60 italic">{t('noInstructionsRecorded', 'No instructions recorded for this dish.')}</p>
                 ) : (
                   <div className="space-y-2.5">
-                    {selectedRecipeForModal.instructions.map((step, idx) => {
+                    {selectedRecipeForModal.instructions.map((step: any, idx: number) => {
                       const isChecked = !!checkedSteps[idx];
                       const stepText = typeof step === 'string' ? step : step.text || step.instruction;
 
@@ -58944,10 +59430,9 @@ export default function TemplatesPage() {
                 )}
               </div>
 
-              {/* Personal Notes (if present) */}
               {selectedRecipeForModal.notes && (
                 <div className="p-3 rounded-2xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold text-[10px] uppercase text-amber-400">Blueprint Notes</span>
+                  <span className="font-bold text-[10px] uppercase text-amber-400">{t('blueprintNotesLabel', 'Blueprint Notes')}</span>
                   <p className="text-xs opacity-80">{selectedRecipeForModal.notes}</p>
                 </div>
               )}
@@ -58966,11 +59451,11 @@ export default function TemplatesPage() {
                     rel="noopener noreferrer"
                     className="text-xs font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1.5"
                   >
-                    <span>{t('sourceUrlLabel', 'Original Recipe Source')}</span>
+                    <span>{t('originalRecipeSource', 'Original Recipe Source')}</span>
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                 ) : (
-                  <span className="text-[11px] opacity-40">Zecratary Blueprint Catalog</span>
+                  <span className="text-[11px] opacity-40">{t('blueprintCatalogFooter', 'Zecratary Blueprint Catalog')}</span>
                 )}
               </div>
 
@@ -58981,7 +59466,7 @@ export default function TemplatesPage() {
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   <ChefHat className="h-4 w-4" />
-                  <span>{t('cookWithAiChef', 'Cook with AI Chef')}</span>
+                  <span>{t('cookWithChefBtn', 'Cook with AI Chef')}</span>
                 </Link>
 
                 <button
@@ -58990,7 +59475,7 @@ export default function TemplatesPage() {
                   className="px-4 py-2 border rounded-xl font-bold text-xs hover:opacity-80 transition cursor-pointer"
                   style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                 >
-                  {t('closeModalBtn', 'Close')}
+                  {t('closeBtn', 'Close')}
                 </button>
               </div>
             </div>
@@ -59028,22 +59513,10 @@ export default function TemplatesPage() {
                 <input
                   type="text"
                   autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
                   data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
                   placeholder={t('blueprintTitlePlaceholder', 'e.g. High-Protein Muscle Gain...')}
                   value={templateTitle}
                   onChange={(e) => setTemplateTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleSaveTemplateModal();
-                    }
-                  }}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
@@ -59058,8 +59531,15 @@ export default function TemplatesPage() {
                     className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
-                    {['General', 'High-Protein', 'Low-Carb / Keto', 'Mediterranean', 'Family Friendly', 'Quick & Easy'].map(c => (
-                      <option key={c} value={c}>{c}</option>
+                    {[
+                      { key: 'catGeneral', val: 'General' },
+                      { key: 'catHighProtein', val: 'High-Protein' },
+                      { key: 'catLowCarb', val: 'Low-Carb / Keto' },
+                      { key: 'catMediterranean', val: 'Mediterranean' },
+                      { key: 'catFamilyFriendly', val: 'Family Friendly' },
+                      { key: 'catQuickEasy', val: 'Quick & Easy' }
+                    ].map(c => (
+                      <option key={c.val} value={c.val}>{t(c.key, c.val)}</option>
                     ))}
                   </select>
                 </div>
@@ -59084,13 +59564,7 @@ export default function TemplatesPage() {
                 <textarea
                   rows={2}
                   autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
                   data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
                   placeholder={t('blueprintDescPlaceholder', 'Short summary of this meal plan blueprint...')}
                   value={templateDesc}
                   onChange={(e) => setTemplateDesc(e.target.value)}
@@ -59118,224 +59592,6 @@ export default function TemplatesPage() {
                   {t('saveBlueprintBtn', 'Save Blueprint')}
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: ADD MEAL TO BLUEPRINT DAY */}
-      {showMealModal && (
-        <div 
-          onClick={() => setShowMealModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="meal-modal-title"
-            data-lpignore="true"
-            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 id="meal-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-                {(t('addMealToDay', 'Add Dish to {day}')).replace('{day}', t(`day${DAY_NAMES[targetDayIndex]}`, DAY_NAMES[targetDayIndex]))}
-              </h3>
-              <button type="button" onClick={() => setShowMealModal(false)} className="p-1 rounded-lg">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3.5">
-              <button
-                type="button"
-                onClick={() => setShowRecipePicker(true)}
-                className="w-full py-2.5 px-3 rounded-xl border font-bold text-xs flex items-center justify-between cursor-pointer hover:opacity-80 transition"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
-              >
-                <span className="flex items-center gap-2">
-                  <BookOpen className="h-4 w-4" />
-                  {selectedRecipeForMeal ? selectedRecipeForMeal.title : t('selectFromSavedRecipes', 'Select from Saved Recipes')}
-                </span>
-                <ChevronRight className="h-4 w-4" />
-              </button>
-
-              <div>
-                <label className="block font-bold mb-1 opacity-80">{t('customDishTitleLabel', 'Dish Title *')}</label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
-                  placeholder={t('dishTitlePlaceholder', 'e.g. Grilled Salmon with Asparagus')}
-                  value={targetDishTitle}
-                  onChange={(e) => setTargetDishTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleSaveMealToBlueprint();
-                    }
-                  }}
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-medium"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1 opacity-80">{t('mealSlotLabel', 'Meal Slot')}</label>
-                  <select
-                    value={targetMealType}
-                    onChange={(e) => setTargetMealType(e.target.value)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  >
-                    {MEAL_SLOTS.map(s => (
-                      <option key={s} value={s}>{t(`slot${s}`, s)}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1 opacity-80">{t('servingsLabel', 'Servings')}</label>
-                  <input
-                    type="number"
-                    min="1"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    value={targetServings}
-                    onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleSaveMealToBlueprint();
-                      }
-                    }}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowMealModal(false)}
-                  className="px-4 py-2 border rounded-xl font-bold cursor-pointer hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  {t('cancelBtn', 'Cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveMealToBlueprint}
-                  disabled={!targetDishTitle.trim()}
-                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  {t('saveBlueprintBtn', 'Save Blueprint')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 3: SAVED RECIPES PICKER */}
-      {showRecipePicker && (
-        <div 
-          onClick={() => setShowRecipePicker(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="recipe-picker-title"
-            data-lpignore="true"
-            className="border rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative p-5 space-y-3 cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <div className="flex justify-between items-center border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 id="recipe-picker-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-                {t('selectFromSavedRecipes', 'Select from Saved Recipes')}
-              </h3>
-              <button type="button" onClick={() => setShowRecipePicker(false)} className="p-1 rounded-lg">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="relative">
-              <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none opacity-60" />
-              <input
-                type="text"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                data-lpignore="true"
-                data-1p-ignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                placeholder={t('searchRecipesPlaceholder', 'Search saved recipes...')}
-                value={pickerSearch}
-                onChange={(e) => setPickerSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
-
-            <div className="overflow-y-auto flex-1 space-y-2 pr-1 custom-scrollbar max-h-80">
-              {filteredPickerRecipes.length === 0 ? (
-                <div className="py-8 text-center text-xs opacity-50">
-                  {t('noRecipesFound', 'No recipes found.')}
-                </div>
-              ) : (
-                filteredPickerRecipes.map(recipe => {
-                  const pickerThumb = resolveRecipeImageUrl(recipe.imageUrl || recipe.image);
-                  return (
-                    <div
-                      key={recipe.id}
-                      onClick={() => {
-                        setSelectedRecipeForMeal(recipe);
-                        setTargetDishTitle(recipe.title || recipe.name);
-                        setTargetServings(Number(recipe.servings || 4));
-                        setTargetCookingTime((recipe.prepTimeMinutes || 15) + (recipe.cookTimeMinutes || 25));
-                        setShowRecipePicker(false);
-                      }}
-                      className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <img 
-                          src={pickerThumb} 
-                          alt={recipe.title} 
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
-                          }}
-                          className="w-10 h-10 rounded-lg object-cover border shrink-0" 
-                          style={{ borderColor: 'var(--color-border)' }} 
-                        />
-                        <div className="min-w-0">
-                          <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
-                          <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
-                        </div>
-                      </div>
-                      <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
-                    </div>
-                  );
-                })
-              )}
             </div>
           </div>
         </div>
@@ -59372,9 +59628,6 @@ export default function TemplatesPage() {
                   type="date"
                   autoComplete="off"
                   data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
                   value={applyStartDate}
                   onChange={(e) => setApplyStartDate(e.target.value)}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer"
@@ -59404,7 +59657,7 @@ export default function TemplatesPage() {
                   className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  {t('confirmApplyBtn', 'Confirm & Apply to Calendar')}
+                  {t('confirmApplyBtn', 'Confirm & Apply')}
                 </button>
               </div>
             </div>
@@ -62767,6 +63020,30 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "activeEngine": "Active Engine",
+    "blueprintCreatedToast": "Blueprint created successfully!",
+    "templateAppliedErrorToast": "Error applying template to planner.",
+    "mealAddedToast": "Added {title} to Day {day}!",
+    "mealRemovedToast": "Meal removed from blueprint.",
+    "emptyDaySchedulePrompt": "No recipes scheduled for {dayName}. Click '+ Add Recipe to {dayName}' to select a dish.",
+    "inspectRecipeDetails": "Click to inspect full recipe details (Without Editing)",
+    "servingsAbbr": "{count} serv",
+    "minutesAbbr": "{count}m",
+    "notesPlaceholder": "Notes, prep reminders, or substitutions...",
+    "addToBlueprintBtn": "Add to Blueprint",
+    "caloriesKcal": "{count} kcal",
+    "textSizeLabel": "Text Size:",
+    "instructionsHeading": "Step-by-Step Instructions",
+    "blueprintNotesLabel": "Blueprint Notes",
+    "blueprintCatalogFooter": "Zecratary Blueprint Catalog",
+    "originalRecipeSource": "Original Recipe Source",
+    "cookWithChefBtn": "Cook with AI Chef",
+    "catGeneral": "General",
+    "catHighProtein": "High-Protein",
+    "catLowCarb": "Low-Carb / Keto",
+    "catMediterranean": "Mediterranean",
+    "catFamilyFriendly": "Family Friendly",
+    "catQuickEasy": "Quick & Easy",
     "viewFullRecipe": "View Full Recipe",
     "noIngredientsRecorded": "No specific ingredients recorded for this dish.",
     "noInstructionsRecorded": "No instructions recorded for this dish.",
