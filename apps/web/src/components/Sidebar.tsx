@@ -2,49 +2,67 @@
 'use client';
 
 import packageInfo from '../../package.json';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { 
-  Home, 
-  MessageSquare, 
-  UploadCloud, 
-  SquarePen, 
-  BookOpen, 
-  Book, 
-  Package, 
-  ShoppingCart, 
-  Calendar, 
-  LayoutTemplate, 
-  UserPlus, 
-  ShieldCheck, 
-  CreditCard, 
-  Tag, 
-  Utensils, 
-  Settings, 
-  Mail, 
-  LogOut, 
-  Menu, 
-  X, 
-  Wallet, 
-  Languages,
-  Cpu,
-  Moon,
-  Sun,
-  Key,
-  Coins,
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
   Bell,
   BellRing,
-  User as UserIcon,
-  Plus,
-  ChevronDown,
-  Sparkles,
-  RefreshCw,
+  Book,
+  BookOpen,
+  Calendar,
+  Check,
   CheckCircle2,
-  AlertCircle,
+  ChefHat,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Coins,
+  Cpu,
+  CreditCard,
+  Database,
   ExternalLink,
+  Flame,
+  Globe,
+  HardDrive,
+  History,
+  Home,
+  Key,
+  Landmark,
+  Languages,
   Layers,
-  HardDrive
+  LayoutDashboard,
+  LayoutTemplate,
+  LogOut,
+  Mail,
+  Menu,
+  MessageSquare,
+  Moon,
+  Package,
+  Plus,
+  Receipt,
+  RefreshCw,
+  Refrigerator,
+  Search,
+  Settings,
+  Shield,
+  ShieldCheck,
+  ShoppingCart,
+  Sliders,
+  Sparkles,
+  SquarePen,
+  Sun,
+  Tag,
+  UploadCloud,
+  User as UserIcon,
+  UserPlus,
+  Users,
+  Utensils,
+  Wallet,
+  X
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -121,6 +139,11 @@ export default function Sidebar() {
 
   const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
+  const currentUser = user;
+  // Topbar User Menu Dropdown State & Click-Outside Ref
+  const [userMenuOpen, setUserMenuOpen] = useState<boolean>(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -284,6 +307,28 @@ export default function Sidebar() {
     window.addEventListener('resize', updateLayoutTokens);
     return () => window.removeEventListener('resize', updateLayoutTokens);
   }, [isCollapsed, isOpen]);
+
+  
+  // User Menu Click Outside and Escape dismissal
+  useEffect(() => {
+    const handleOutsideOrEscape = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent && e.key === 'Escape') {
+        setUserMenuOpen(false);
+        return;
+      }
+      if (e instanceof MouseEvent && userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    if (userMenuOpen) {
+      document.addEventListener('mousedown', handleOutsideOrEscape);
+      document.addEventListener('keydown', handleOutsideOrEscape);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideOrEscape);
+      document.removeEventListener('keydown', handleOutsideOrEscape);
+    };
+  }, [userMenuOpen]);
 
   useEffect(() => {
     setMounted(true);

@@ -48,6 +48,20 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "topbarUserMenu": "User Menu",
+    "topbarAccountSettings": "Account Settings",
+    "topbarBilling": "Billing & Invoices",
+    "topbarBillingHistory": "Billing & Invoices",
+    "topbarContact": "Contact & Support",
+    "topbarLanguageSelector": "Select Interface Language",
+    "topbarPlanAdmin": "Admin Access",
+    "topbarPlanPro": "Pro Plan",
+    "topbarPlanFree": "Free Tier",
+    "topbarUnreadCount": "unread",
+    "topbarMarkAllRead": "Mark all as read",
+    "topbarViewAllNotifications": "View all notifications",
+    "topbarTokenTooltip": "AI Token Balance",
+    "topbarWalletTooltip": "Store Wallet Balance",
     "noSearchResultsTitle": "No Matching Cookbooks",
     "noSearchResultsDesc": "No cookbooks match your current search query. Try searching with different keywords.",
     "failedToCreateBook": "Failed to create cookbook. Please check your connection and try again.",
