@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.72",
+  "version": "8.1.73",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.72",
+  "version": "8.1.73",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -21272,9 +21272,10 @@ export default function AdminPaymentPage() {
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
-  Coins, Sparkles, CheckCircle2, AlertCircle, Save, RefreshCw, 
-  Plus, Trash2, Edit3, Shield, Activity, Database, 
-  CreditCard, History, Sliders, Layers, DollarSign
+  Sparkles, CheckCircle2, AlertCircle, Save, RefreshCw, 
+  Plus, Trash2, Edit3, Shield, Activity, 
+  CreditCard, History, Sliders, Layers,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -21347,6 +21348,29 @@ const DEFAULT_SETTINGS: TokenSettings = {
   packages: DEFAULT_TOKEN_PACKAGES
 };
 
+
+/**
+ * Dynamically synchronizes any token emoji/symbol in transaction descriptions
+ * with the active token symbol from /admin/token-setting.
+ */
+function formatLedgerDescription(desc: string | undefined | null, symbol: string): string {
+  if (!desc) return '—';
+  const cleanSym = symbol && !symbol.startsWith('http') && !symbol.startsWith('/') ? symbol.trim() : '🪙';
+  
+  // 1. If description has (+100 🪙) or (+100 <any_old_symbol>), replace the old symbol with cleanSym
+  let formatted = desc.replace(/(\([+-]?[\d,]+(?:\.\d+)?\s*)([^\w\s\)]+)(\))/g, `$1${cleanSym}$3`);
+  
+  // 2. If description has (+2,000) with numbers only, inject cleanSym: (+2,000 💎)
+  formatted = formatted.replace(/(\([+-]?[\d,]+(?:\.\d+)?\))(?!\s*[^\w\s\)])/g, (match) => {
+    return match.slice(0, -1) + ` ${cleanSym})`;
+  });
+
+  // 3. Replace any standalone 🪙
+  formatted = formatted.replace(/🪙/g, cleanSym);
+
+  return formatted;
+}
+
 export default function AdminTokenSettingPage() {
   const { t, locale } = useTranslation();
 
@@ -21376,9 +21400,11 @@ export default function AdminTokenSettingPage() {
   const [pkgBadge, setPkgBadge] = useState('Hot');
   const [pkgBonus, setPkgBonus] = useState<number>(50);
 
-  // Ledger filter state
+  // Ledger filter & pagination state (Default: 10 per page)
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [ledgerFilterType, setLedgerFilterType] = useState('all');
+  const [ledgerPage, setLedgerPage] = useState<number>(1);
+  const [ledgerPageSize, setLedgerPageSize] = useState<number>(10);
 
   const isFetchingRef = useRef<boolean>(false);
   const isSavingRef = useRef<boolean>(false);
@@ -21416,9 +21442,10 @@ export default function AdminTokenSettingPage() {
             });
           }
 
+          const activeSymbol = loaded.tokenSymbol || '🪙';
           setSettings({
             tokenName: loaded.tokenName || 'Foodie Token',
-            tokenSymbol: loaded.tokenSymbol || '🪙',
+            tokenSymbol: activeSymbol,
             startingBalance: loaded.startingBalance !== undefined ? loaded.startingBalance : 100,
             isEnabled: loaded.isEnabled !== undefined ? Boolean(loaded.isEnabled) : true,
             importUrlCost: loaded.importUrlCost !== undefined ? loaded.importUrlCost : 5,
@@ -21430,6 +21457,10 @@ export default function AdminTokenSettingPage() {
             planAllocations: mergedPlanAllocations,
             packages: Array.isArray(loaded.packages) && loaded.packages.length > 0 ? loaded.packages : DEFAULT_TOKEN_PACKAGES
           });
+
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_token_symbol', activeSymbol);
+          }
         }
         if (Array.isArray(data.transactions)) {
           setTransactions(data.transactions);
@@ -21463,6 +21494,11 @@ export default function AdminTokenSettingPage() {
     };
   }, [loadTokenData, tr]);
 
+  // Reset pagination page on filter/search change
+  useEffect(() => {
+    setLedgerPage(1);
+  }, [ledgerSearch, ledgerFilterType, ledgerPageSize]);
+
   // Save Settings to Database & Server File
   const handleSaveSettings = async () => {
     if (saving || isSavingRef.current) return;
@@ -21470,19 +21506,33 @@ export default function AdminTokenSettingPage() {
     isSavingRef.current = true;
     setFeedback(null);
 
+    const activeSymbol = settings.tokenSymbol.trim() || '🪙';
+    const payload = { ...settings, tokenSymbol: activeSymbol };
+
     try {
       const res = await fetch('/api/admin/token-setting', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tokenSettings: settings })
+        body: JSON.stringify({ tokenSettings: payload })
       });
 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_tokens_updated'));
-          window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+          localStorage.setItem('zecratary_token_symbol', activeSymbol);
+          localStorage.setItem('zecratary_token_name', payload.tokenName || 'Foodie Token');
+          localStorage.setItem('zecratary_token_settings', JSON.stringify(payload));
+          localStorage.setItem('zecratary_tokens_updated_at', Date.now().toString());
+
+          window.dispatchEvent(new CustomEvent('zecratary_tokens_updated', { detail: payload }));
+          window.dispatchEvent(new CustomEvent('zecratary_token_settings_updated', { detail: payload }));
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+
+          try {
+            const bc = new BroadcastChannel('zecratary_balance_channel');
+            bc.postMessage({ type: 'TOKEN_SETTINGS_UPDATED', tokenSymbol: activeSymbol, settings: payload });
+            bc.close();
+          } catch (_) {}
         }
         showToast('success', tr('toastTokenSettingsSaved', 'Token configurations saved and synchronized with PostgreSQL & MySQL!'));
       } else {
@@ -21590,39 +21640,50 @@ export default function AdminTokenSettingPage() {
     });
   }, [transactions, ledgerSearch, ledgerFilterType]);
 
+  // Paginated ledger records (Task 2)
+  const totalLedgerRecords = filteredTransactions.length;
+  const totalLedgerPages = Math.max(1, Math.ceil(totalLedgerRecords / ledgerPageSize));
+  const paginatedTransactions = useMemo(() => {
+    const start = (ledgerPage - 1) * ledgerPageSize;
+    return filteredTransactions.slice(start, start + ledgerPageSize);
+  }, [filteredTransactions, ledgerPage, ledgerPageSize]);
+
+  // Active dynamic token symbol
+  const activeTokenSymbol = settings.tokenSymbol || '🪙';
+
   return (
     <div 
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Top Header & Primary Action Bar */}
+      {/* 1. Top Header & Primary Action Bar (Task 1: Removed Synced badge, Task 3: Dynamic Emoji in Title) */}
       <div 
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
         style={{ borderColor: 'var(--color-border)' }}
       >
-        <div>
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-            <Coins className="h-6 w-6" style={{ color: 'var(--color-primary)' }} />
-            {tr('tokenSettingTitle', 'Token System & Economy Configuration')}
-          </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {tr('tokenSettingSubtitle', 'Configure platform token economy, feature consumption costs, purchasable packages, and recurring plan allocations.')}
-          </p>
+        <div className="flex items-center gap-3">
+          <div 
+            className="w-10 h-10 rounded-2xl border flex items-center justify-center text-2xl shadow-xs select-none transition-transform duration-200 shrink-0"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)' 
+            }}
+            title={`Active Token Symbol: ${activeTokenSymbol}`}
+          >
+            {activeTokenSymbol}
+          </div>
+
+          <div>
+            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              {tr('tokenSettingTitle', 'Token System & Economy Configuration')}
+            </h1>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              {tr('tokenSettingSubtitle', 'Configure platform token economy, feature consumption costs, purchasable packages, and recurring plan allocations.')}
+            </p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <div 
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
-              borderColor: 'var(--color-border)', 
-              color: 'var(--color-text)' 
-            }}
-          >
-            <Database className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-            <span>{tr('syncStatusPostgres', 'Synced with PostgreSQL & MySQL')}</span>
-          </div>
-
           <button
             type="button"
             onClick={loadTokenData}
@@ -21773,7 +21834,7 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
 
-        {/* Token Identity Section */}
+        {/* Token Identity Section (Task 3: Dynamic Live Emoji Preview) */}
         <div 
           className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -21816,24 +21877,32 @@ export default function AdminTokenSettingPage() {
               <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
                 {tr('tokenSymbolLabel', 'Token Symbol / Emoji')}
               </label>
-              <input
-                id="cfg_token_symbol"
-                name="cfg_token_symbol"
-                type="text"
-                autoComplete="off"
-                autoCorrect="off"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                spellCheck="false"
-                maxLength={4}
-                value={settings.tokenSymbol}
-                onChange={(e) => setSettings({ ...settings, tokenSymbol: e.target.value })}
-                placeholder={tr('tokenSymbolPlaceholder', 'e.g. 🪙 or 🌟')}
-                className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold text-center"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  id="cfg_token_symbol"
+                  name="cfg_token_symbol"
+                  type="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.tokenSymbol}
+                  onChange={(e) => setSettings({ ...settings, tokenSymbol: e.target.value })}
+                  placeholder={tr('tokenSymbolPlaceholder', 'e.g. 🪙, 💎, ⚡, ⭐')}
+                  className="flex-1 px-3.5 py-2.5 rounded-xl border outline-none font-bold text-center"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <div 
+                  className="w-10 h-10 shrink-0 rounded-xl border flex items-center justify-center text-xl shadow-inner select-none transition-all duration-200"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  title="Dynamic Live Preview"
+                >
+                  {activeTokenSymbol}
+                </div>
+              </div>
             </div>
 
             <div>
@@ -21913,7 +21982,7 @@ export default function AdminTokenSettingPage() {
                     className="w-16 px-2.5 py-1.5 rounded-lg border font-mono font-bold text-center outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
-                  <span className="font-bold">{settings.tokenSymbol}</span>
+                  <span className="font-bold text-sm">{activeTokenSymbol}</span>
                 </div>
               </div>
             ))}
@@ -22105,7 +22174,7 @@ export default function AdminTokenSettingPage() {
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">{settings.tokenSymbol}</span>
+                    <span className="text-xl">{activeTokenSymbol}</span>
                     <span className="text-base font-black font-mono" style={{ color: 'var(--color-text)' }}>
                       +{pkg.tokenAmount.toLocaleString()}
                     </span>
@@ -22214,7 +22283,7 @@ export default function AdminTokenSettingPage() {
                               className="w-28 px-3 py-1.5 rounded-xl border outline-none font-mono font-bold"
                               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                             />
-                            <span className="font-bold">{settings.tokenSymbol} {tr('tokensPerMonth', 'tokens/mo')}</span>
+                            <span className="font-bold">{activeTokenSymbol} {tr('tokensPerMonth', 'tokens/mo')}</span>
                           </div>
                         </td>
                       </tr>
@@ -22255,7 +22324,7 @@ export default function AdminTokenSettingPage() {
                                 className="w-28 px-3 py-1.5 rounded-xl border outline-none font-mono font-bold"
                                 style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                               />
-                              <span className="font-bold">{settings.tokenSymbol} {tr('tokensPerMonth', 'tokens/mo')}</span>
+                              <span className="font-bold">{activeTokenSymbol} {tr('tokensPerMonth', 'tokens/mo')}</span>
                             </div>
                           </td>
                         </tr>
@@ -22269,7 +22338,7 @@ export default function AdminTokenSettingPage() {
         </div>
       </div>
 
-      {/* TAB 4: TOKEN AUDIT LEDGER */}
+      {/* TAB 4: TOKEN AUDIT LEDGER (Task 2: Pagination with default 10/page) */}
       <div 
         role="region"
         aria-label="Token Transaction Audit Ledger"
@@ -22287,7 +22356,8 @@ export default function AdminTokenSettingPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Filter by Type */}
             <select
               value={ledgerFilterType}
               onChange={(e) => setLedgerFilterType(e.target.value)}
@@ -22300,6 +22370,28 @@ export default function AdminTokenSettingPage() {
               <option value="grants">{tr('filterGrants', 'Grants & Signups')}</option>
             </select>
 
+            {/* Rows Per Page Selector (Default: 10) */}
+            <div 
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('perPage', 'Rows:')}
+              </span>
+              <select
+                value={ledgerPageSize}
+                onChange={(e) => setLedgerPageSize(Number(e.target.value))}
+                className="bg-transparent text-xs font-bold outline-none cursor-pointer"
+                style={{ color: 'var(--color-text)' }}
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+
+            {/* Clear Ledger Action */}
             <button
               type="button"
               onClick={handleClearLedger}
@@ -22310,6 +22402,7 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
 
+        {/* Ledger Table Container */}
         <div 
           className="border rounded-3xl overflow-hidden shadow-xl transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -22330,14 +22423,14 @@ export default function AdminTokenSettingPage() {
                 </tr>
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                {filteredTransactions.length === 0 ? (
+                {paginatedTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
                       {tr('noLedgerRecords', 'No recent token transactions recorded.')}
                     </td>
                   </tr>
                 ) : (
-                  filteredTransactions.map((tx) => {
+                  paginatedTransactions.map((tx) => {
                     const isPositive = tx.amount > 0;
                     return (
                       <tr key={tx.id} className="transition" style={{ borderColor: 'var(--color-border)' }}>
@@ -22359,7 +22452,7 @@ export default function AdminTokenSettingPage() {
                         </td>
 
                         <td className="px-5 py-4 font-mono font-black" style={{ color: isPositive ? 'var(--color-emerald, #10b981)' : '#ef4444' }}>
-                          {isPositive ? `+${tx.amount}` : tx.amount} {settings.tokenSymbol}
+                          {isPositive ? `+${tx.amount}` : tx.amount} {activeTokenSymbol}
                         </td>
 
                         <td className="px-5 py-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
@@ -22371,7 +22464,7 @@ export default function AdminTokenSettingPage() {
                         </td>
 
                         <td className="px-5 py-4 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                          {tx.description}
+                          {formatLedgerDescription(tx.description, activeTokenSymbol)}
                         </td>
                       </tr>
                     );
@@ -22379,6 +22472,87 @@ export default function AdminTokenSettingPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* Ledger Pagination Bar (Task 2) */}
+        <div 
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 px-1 text-xs"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          <div className="font-mono text-xs font-semibold">
+            {totalLedgerRecords > 0 ? (
+              <>
+                {tr('showingRecords', 'Showing')}{' '}
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {(ledgerPage - 1) * ledgerPageSize + 1}
+                </strong>
+                {' - '}
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {Math.min(ledgerPage * ledgerPageSize, totalLedgerRecords)}
+                </strong>
+                {' '}{tr('ofTotal', 'of')}{' '}
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {totalLedgerRecords}
+                </strong>
+                {' '}{tr('records', 'transactions')}
+              </>
+            ) : (
+              <span>0 {tr('records', 'transactions')}</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={ledgerPage <= 1}
+              onClick={() => setLedgerPage(1)}
+              className="px-2.5 py-1.5 rounded-xl border font-bold text-xs transition disabled:opacity-30 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title={tr('firstPage', 'First Page')}
+            >
+              «
+            </button>
+
+            <button
+              type="button"
+              disabled={ledgerPage <= 1}
+              onClick={() => setLedgerPage(prev => Math.max(1, prev - 1))}
+              className="p-1.5 rounded-xl border transition disabled:opacity-30 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title={tr('prevPage', 'Previous Page')}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+
+            <span 
+              className="px-3.5 py-1.5 rounded-xl font-mono font-bold border shadow-xs text-xs"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            >
+              {tr('page', 'Page')} {ledgerPage} / {totalLedgerPages}
+            </span>
+
+            <button
+              type="button"
+              disabled={ledgerPage >= totalLedgerPages}
+              onClick={() => setLedgerPage(prev => Math.min(totalLedgerPages, prev + 1))}
+              className="p-1.5 rounded-xl border transition disabled:opacity-30 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title={tr('nextPage', 'Next Page')}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              disabled={ledgerPage >= totalLedgerPages}
+              onClick={() => setLedgerPage(totalLedgerPages)}
+              className="px-2.5 py-1.5 rounded-xl border font-bold text-xs transition disabled:opacity-30 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title={tr('lastPage', 'Last Page')}
+            >
+              »
+            </button>
           </div>
         </div>
       </div>
@@ -51117,54 +51291,94 @@ export async function GET() {
   let currencySymbol = '$';
 
   try {
-    // 1. Fetch system settings for dynamic currency
-    const sysRes: any = await query(`
-      SELECT currency, currency_symbol FROM system_settings LIMIT 1
+    // 1. Fetch system currency adaptively from admin_settings without strict column locks
+    const adminRes: any = await query(`
+      SELECT * FROM admin_settings WHERE id::text = 'primary_settings' OR id::text = '1' OR id::text = 'current' LIMIT 1
     `).catch(() => null);
-    const sysRow = Array.isArray(sysRes) ? sysRes[0] : sysRes?.rows?.[0];
-    if (sysRow?.currency) currency = sysRow.currency;
-    if (sysRow?.currency_symbol) currencySymbol = sysRow.currency_symbol;
+
+    const adminRow = Array.isArray(adminRes) ? adminRes[0] : (adminRes as any)?.rows?.[0];
+    if (adminRow) {
+      if (adminRow.currency) currency = adminRow.currency;
+      if (adminRow.currency_symbol) currencySymbol = adminRow.currency_symbol;
+      
+      if (adminRow.settings && typeof adminRow.settings === 'object') {
+        if (adminRow.settings.currency) currency = adminRow.settings.currency;
+        if (adminRow.settings.currencySymbol) currencySymbol = adminRow.settings.currencySymbol;
+      }
+
+      if (adminRow.currencies) {
+        try {
+          const currList = typeof adminRow.currencies === 'string' ? JSON.parse(adminRow.currencies) : adminRow.currencies;
+          if (Array.isArray(currList)) {
+            const defCurr = currList.find((c: any) => c.is_default || c.isDefault || c.active);
+            if (defCurr) {
+              if (defCurr.code) currency = defCurr.code;
+              if (defCurr.symbol) currencySymbol = defCurr.symbol;
+            }
+          }
+        } catch (_) {}
+      }
+    }
 
     // 2. Fetch token settings
     const sRes: any = await query(`
       SELECT * FROM token_settings WHERE id::text = 'primary_settings' OR id::text = '1' OR id::text = 'current' LIMIT 1
     `).catch(() => null);
 
-    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
     if (sRow) {
       settings = {
-        tokenName: sRow.token_name || sRow.tokenName,
-        tokenSymbol: sRow.token_symbol || sRow.tokenSymbol,
-        startingBalance: sRow.starting_balance !== undefined ? sRow.starting_balance : sRow.startingBalance,
-        isEnabled: sRow.is_enabled !== undefined ? sRow.is_enabled : sRow.isEnabled,
-        importUrlCost: sRow.import_url_cost !== undefined ? sRow.import_url_cost : sRow.importUrlCost,
-        importTextCost: sRow.import_text_cost !== undefined ? sRow.import_text_cost : sRow.importTextCost,
-        importPhotoCost: sRow.import_photo_cost !== undefined ? sRow.import_photo_cost : sRow.importPhotoCost,
-        aiChefCost: sRow.ai_chef_cost !== undefined ? sRow.ai_chef_cost : sRow.aiChefCost,
-        mealPlannerCost: sRow.meal_planner_cost !== undefined ? sRow.meal_planner_cost : sRow.mealPlannerCost,
-        macroAnalysisCost: sRow.macro_analysis_cost !== undefined ? sRow.macro_analysis_cost : sRow.macroAnalysisCost,
-        packages: typeof sRow.packages === 'string' ? JSON.parse(sRow.packages) : sRow.packages,
+        tokenName: sRow.token_name || sRow.tokenName || 'Foodie Token',
+        tokenSymbol: sRow.token_symbol || sRow.tokenSymbol || '🪙',
+        startingBalance: sRow.starting_balance !== undefined ? sRow.starting_balance : (sRow.startingBalance ?? 100),
+        isEnabled: sRow.is_enabled !== undefined ? Boolean(sRow.is_enabled) : (sRow.isEnabled !== undefined ? Boolean(sRow.isEnabled) : true),
+        importUrlCost: sRow.import_url_cost !== undefined ? sRow.import_url_cost : (sRow.importUrlCost ?? 5),
+        importTextCost: sRow.import_text_cost !== undefined ? sRow.import_text_cost : (sRow.importTextCost ?? 2),
+        importPhotoCost: sRow.import_photo_cost !== undefined ? sRow.import_photo_cost : (sRow.importPhotoCost ?? 10),
+        aiChefCost: sRow.ai_chef_cost !== undefined ? sRow.ai_chef_cost : (sRow.aiChefCost ?? 2),
+        mealPlannerCost: sRow.meal_planner_cost !== undefined ? sRow.meal_planner_cost : (sRow.mealPlannerCost ?? 5),
+        macroAnalysisCost: sRow.macro_analysis_cost !== undefined ? sRow.macro_analysis_cost : (sRow.macroAnalysisCost ?? 3),
+        packages: typeof sRow.packages === 'string' ? JSON.parse(sRow.packages) : (sRow.packages || []),
         planAllocations: typeof sRow.plan_allocations === 'string' ? JSON.parse(sRow.plan_allocations) : (sRow.plan_allocations || {})
       };
     }
 
-    // 3. Fetch subscription plans to synchronize quotas
+    // 3. Fetch subscription plans using SELECT * (immune to missing column errors)
     const pRes: any = await query(`
-      SELECT id, name, slug, price, interval, token_limit
-      FROM subscription_plans
-      ORDER BY price ASC
+      SELECT * FROM subscription_plans
     `).catch(() => null);
+
     if (pRes) {
-      plans = Array.isArray(pRes) ? pRes : (pRes.rows || []);
+      const rawPlans = Array.isArray(pRes) ? pRes : ((pRes as any)?.rows || []);
+      plans = rawPlans.map((p: any) => ({
+        id: p.id || p.slug,
+        name: p.name || 'Plan',
+        slug: p.slug || p.id,
+        price: Number(p.price ?? p.monthly_price_dollars ?? p.price_monthly ?? p.price_dollars ?? 0),
+        interval: p.interval || p.billing_cycle || 'month',
+        token_limit: Number(p.token_limit ?? p.monthly_tokens ?? settings?.planAllocations?.[p.slug] ?? 500)
+      }));
+
+      // Sort plans ascending by price in JavaScript
+      plans.sort((a, b) => a.price - b.price);
     }
 
-    // 4. Fetch recent transactions
+    // 4. Fetch recent transactions and normalize description emojis
     const txRes: any = await query(`
       SELECT id, user_email as customer_email, amount, balance_after, type, description, created_at
       FROM token_transactions ORDER BY created_at DESC LIMIT 100
     `).catch(() => null);
+
     if (txRes) {
-      transactions = Array.isArray(txRes) ? txRes : (txRes.rows || []);
+      const rawTx = Array.isArray(txRes) ? txRes : ((txRes as any)?.rows || []);
+      const activeSym = settings?.tokenSymbol || '🪙';
+      transactions = rawTx.map((tx: any) => {
+        if (!tx.description) return tx;
+        let d = String(tx.description).replace(/🪙/g, activeSym);
+        d = d.replace(/(\([+-]?[\d,]+(?:\.\d+)?\s*)([^\w\s\)]+)(\))/g, `$1${activeSym}$3`);
+        d = d.replace(/(\([+-]?[\d,]+(?:\.\d+)?\))(?!\s*[^\w\s\)])/g, (m: string) => m.slice(0, -1) + ` ${activeSym})`);
+        return { ...tx, description: d };
+      });
     }
   } catch (err: any) {
     console.warn('[Token API] Fallback to server JSON store:', err?.message || err);
@@ -51214,7 +51428,7 @@ export async function POST(req: Request) {
     const tokenSettings = body.tokenSettings || body.settings || body;
 
     const tName = tokenSettings.tokenName || 'Foodie Token';
-    const tSymbol = tokenSettings.tokenSymbol || '🪙';
+    const tSymbol = (tokenSettings.tokenSymbol || '🪙').trim();
     const sBalance = parseInt(tokenSettings.startingBalance, 10) || 100;
     const isEn = tokenSettings.isEnabled !== undefined ? Boolean(tokenSettings.isEnabled) : true;
     const cUrl = parseInt(tokenSettings.importUrlCost, 10) || 5;
@@ -51252,24 +51466,33 @@ export async function POST(req: Request) {
           updated_at = NOW();
       `, [tName, tSymbol, sBalance, isEn, cUrl, cText, cPhoto, cChef, cPlan, cMacro, pkgs, pAlloc]);
 
-      // 2. Bidirectional sync with subscription_plans.token_limit
+      // 2. Bidirectional sync with subscription_plans (token_limit and monthly_tokens)
       if (tokenSettings.planAllocations && typeof tokenSettings.planAllocations === 'object') {
         for (const [slug, limit] of Object.entries(tokenSettings.planAllocations)) {
           const numLimit = parseInt(String(limit), 10);
           if (!isNaN(numLimit)) {
             await query(`
               UPDATE subscription_plans
-              SET token_limit = $1
+              SET token_limit = $1, monthly_tokens = $1
               WHERE slug = $2 OR id::text = $2;
             `, [numLimit, slug]).catch(() => null);
           }
         }
       }
-    } catch (dbErr) {
-      console.warn('[Token API] Database write error:', dbErr);
+
+      // 3. Persist active symbol into historical token_transactions
+      if (tSymbol && !tSymbol.startsWith('http')) {
+        await query(`
+          UPDATE token_transactions 
+          SET description = REPLACE(description, '🪙', $1)
+          WHERE description LIKE '%🪙%';
+        `, [tSymbol]).catch(() => null);
+      }
+    } catch (dbErr: any) {
+      console.warn('[Token API] Database write error:', dbErr?.message || dbErr);
     }
 
-    // 3. Persist to JSON store fallback
+    // 4. Persist to server JSON store fallback
     try {
       for (const relP of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
         const fullP = path.join(process.cwd(), relP);
@@ -75646,210 +75869,73 @@ export default function ThemeSync() {
 // @ts-nocheck
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Coins, Sparkles, Zap } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Coins } from 'lucide-react';
 
 export interface DynamicTokenIconProps {
-  symbol?: string;
   icon?: string;
+  symbol?: string;
+  size?: number;
   className?: string;
-  size?: number | string;
-  style?: React.CSSProperties;
-  fallbackClassName?: string;
 }
 
-export default function DynamicTokenIcon({
-  symbol: propSymbol,
-  icon: propIcon,
-  className = 'w-4 h-4',
-  size,
-  style = {},
-  fallbackClassName = 'text-amber-500'
-}: DynamicTokenIconProps) {
-  const [activeSymbol, setActiveSymbol] = useState<string>(() => {
-    if (propSymbol && propSymbol !== '🪙') return propSymbol;
+export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: DynamicTokenIconProps) {
+  const [activeSymbol, setActiveSymbol] = useState<string>(symbol || '🪙');
+
+  useEffect(() => {
+    if (symbol) {
+      setActiveSymbol(symbol);
+      return;
+    }
+
     if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('zecratary_token_symbol');
-        if (stored) return stored;
-      } catch (_) {}
+      const stored = localStorage.getItem('zecratary_token_symbol');
+      if (stored) setActiveSymbol(stored);
+
+      const handleSettingsUpdate = (e: any) => {
+        const sym = e?.detail?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
+        if (sym) setActiveSymbol(sym);
+      };
+
+      window.addEventListener('zecratary_token_settings_updated', handleSettingsUpdate);
+      window.addEventListener('zecratary_tokens_updated', handleSettingsUpdate);
+
+      return () => {
+        window.removeEventListener('zecratary_token_settings_updated', handleSettingsUpdate);
+        window.removeEventListener('zecratary_tokens_updated', handleSettingsUpdate);
+      };
     }
-    return propSymbol || '🪙';
-  });
+  }, [symbol]);
 
-  const [activeIcon, setActiveIcon] = useState<string | undefined>(() => {
-    if (propIcon && propIcon.trim() !== '') return propIcon;
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('zecratary_token_icon');
-        if (stored && stored.trim() !== '') return stored;
-      } catch (_) {}
-    }
-    return propIcon || undefined;
-  });
-
-  const fetchAuthoritativeSettings = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const settings = data?.settings || data?.config || data;
-        const sym = settings?.tokenSymbol || settings?.token_symbol;
-        const ic = settings?.tokenIcon || settings?.token_icon;
-
-        if (sym && sym !== '🪙') {
-          setActiveSymbol(sym);
-          try { localStorage.setItem('zecratary_token_symbol', sym); } catch (_) {}
-        } else if (sym && !activeSymbol) {
-          setActiveSymbol(sym);
-        }
-
-        if (ic && ic.trim() !== '') {
-          setActiveIcon(ic);
-          try { localStorage.setItem('zecratary_token_icon', ic); } catch (_) {}
-        }
-      }
-    } catch (_) {}
-  }, [activeSymbol]);
-
-  useEffect(() => {
-    if (propSymbol && propSymbol !== '🪙') {
-      setActiveSymbol(propSymbol);
-      try { localStorage.setItem('zecratary_token_symbol', propSymbol); } catch (_) {}
-    } else if (typeof window !== 'undefined') {
-      try {
-        const storedSym = localStorage.getItem('zecratary_token_symbol');
-        if (storedSym) setActiveSymbol(storedSym);
-        else fetchAuthoritativeSettings();
-
-        const storedIc = localStorage.getItem('zecratary_token_icon');
-        if (storedIc) setActiveIcon(storedIc);
-      } catch (_) {
-        fetchAuthoritativeSettings();
-      }
-    }
-
-    if (propIcon && propIcon.trim() !== '') {
-      setActiveIcon(propIcon);
-      try { localStorage.setItem('zecratary_token_icon', propIcon); } catch (_) {}
-    }
-
-    const handleUpdate = (e: Event) => {
-      const detail = (e as CustomEvent)?.detail;
-      if (detail?.tokenSymbol && detail.tokenSymbol !== '🪙') {
-        setActiveSymbol(detail.tokenSymbol);
-        try { localStorage.setItem('zecratary_token_symbol', detail.tokenSymbol); } catch (_) {}
-      }
-      if (detail?.tokenIcon !== undefined && detail.tokenIcon !== '') {
-        setActiveIcon(detail.tokenIcon);
-        try { localStorage.setItem('zecratary_token_icon', detail.tokenIcon); } catch (_) {}
-      }
-      if (!detail) fetchAuthoritativeSettings();
-    };
-
-    window.addEventListener('zecratary_token_settings_updated', handleUpdate);
-    window.addEventListener('zecratary_tokens_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
-
-    let bc: BroadcastChannel | null = null;
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        bc = new BroadcastChannel('zecratary_balance_channel');
-        bc.onmessage = (event) => {
-          if (event.data?.tokenSymbol && event.data.tokenSymbol !== '🪙') {
-            setActiveSymbol(event.data.tokenSymbol);
-          }
-          if (event.data?.tokenIcon !== undefined && event.data.tokenIcon !== '') {
-            setActiveIcon(event.data.tokenIcon);
-          }
-        };
-      } catch (_) {}
-    }
-
-    return () => {
-      window.removeEventListener('zecratary_token_settings_updated', handleUpdate);
-      window.removeEventListener('zecratary_tokens_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
-      if (bc) bc.close();
-    };
-  }, [propSymbol, propIcon, fetchAuthoritativeSettings]);
-
-  useEffect(() => {
-    if (propSymbol !== undefined && propSymbol !== '🪙') {
-      setActiveSymbol(propSymbol);
-    }
-  }, [propSymbol]);
-
-  useEffect(() => {
-    if (propIcon !== undefined && propIcon.trim() !== '') {
-      setActiveIcon(propIcon);
-    }
-  }, [propIcon]);
-
-  const rawCandidate = (activeIcon && activeIcon.trim() !== '') 
-    ? activeIcon 
-    : (activeSymbol || '🪙');
-
-  const isImage = typeof rawCandidate === 'string' && (
-    rawCandidate.startsWith('http://') ||
-    rawCandidate.startsWith('https://') ||
-    rawCandidate.startsWith('/') ||
-    rawCandidate.startsWith('data:image/')
-  );
-
-  const styleOverride: React.CSSProperties = {
-    ...style,
-    ...(size ? { width: size, height: size, minWidth: size, minHeight: size } : {})
-  };
-
-  if (isImage) {
+  // If icon is a URL (HTTP, HTTPS, or root path)
+  if (icon && (icon.startsWith('http') || icon.startsWith('/'))) {
     return (
-      <img
-        src={rawCandidate}
-        alt="Token"
-        className={`inline-block object-contain align-middle select-none shrink-0 ${className}`}
-        style={styleOverride}
-        loading="lazy"
+      <img 
+        src={icon} 
+        alt="Token" 
+        style={{ width: `${size}px`, height: `${size}px` }} 
+        className={`inline-block object-contain ${className}`} 
       />
     );
   }
 
-  const trimmed = typeof rawCandidate === 'string' ? rawCandidate.trim() : '';
-  const lower = trimmed.toLowerCase();
-
-  if (lower === 'sparkles' || lower === 'sparkle') {
-    return <Sparkles className={`inline-block shrink-0 ${className} ${fallbackClassName}`} style={styleOverride} />;
-  }
-  if (lower === 'zap' || lower === 'lightning' || lower === 'flash') {
-    return <Zap className={`inline-block shrink-0 ${className} ${fallbackClassName}`} style={styleOverride} />;
-  }
-  if (lower === 'coins' || lower === 'coin') {
-    return <Coins className={`inline-block shrink-0 ${className} ${fallbackClassName}`} style={styleOverride} />;
-  }
-
-  if (trimmed.length > 0 && trimmed !== '🪙') {
+  // Display custom unicode emoji/glyph
+  if (activeSymbol && activeSymbol !== 'Coins') {
     return (
-      <span
-        aria-hidden="true"
-        className={`inline-flex items-center justify-center font-normal leading-none select-none shrink-0 ${className}`}
-        style={{
-          fontSize: typeof size === 'number' ? `${size}px` : (size || '1.05em'),
-          display: 'inline-flex',
-          ...styleOverride
-        }}
+      <span 
+        style={{ fontSize: `${size}px`, lineHeight: 1 }} 
+        className={`inline-flex items-center justify-center select-none ${className}`}
       >
-        {trimmed}
+        {activeSymbol}
       </span>
     );
   }
 
-  return (
-    <Coins
-      className={`inline-block shrink-0 ${className} ${fallbackClassName}`}
-      style={styleOverride}
-    />
-  );
+  // Fallback to themed Coins icon
+  return <Coins style={{ width: `${size}px`, height: `${size}px` }} className={className} />;
 }
+
+export default DynamicTokenIcon;
 
 ```
 
