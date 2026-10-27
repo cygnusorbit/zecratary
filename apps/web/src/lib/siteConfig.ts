@@ -1,4 +1,4 @@
-// Site identity, configuration, SEO, and branding management (Constraint 8)
+// Universal Site Configuration & Branding Architecture (Constraint 8)
 // Repository: cygnusorbit/zecratary (GitHub)
 
 export interface SiteIdentityConfig {
@@ -59,7 +59,7 @@ export interface SiteConfig {
 }
 
 export const DEFAULT_SITE_NAME = 'Zecratary';
-export const DEFAULT_SITE_ICON = '🍳';
+export const DEFAULT_SITE_ICON = '👨‍🍳';
 export const DEFAULT_SITE_TAGLINE = 'Autonomous Culinary Intelligence & Precision Meal Planning';
 export const DEFAULT_TITLEBAR_EMOJI = '👨‍🍳';
 export const DEFAULT_FAVICON_EMOJI = '👨‍🍳';
@@ -98,15 +98,43 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
 
 let memorySiteConfig: SiteConfig = { ...DEFAULT_SITE_CONFIG };
 
+// Internal helper to read localStorage synchronously before DOM paint
+function readLocalStorageConfig(): Partial<SiteConfig> | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('zecratary_site_config');
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return null;
+}
+
 export function getSiteName(): string {
-  return memorySiteConfig.siteName || DEFAULT_SITE_NAME;
+  const local = readLocalStorageConfig();
+  if (local?.siteName || local?.site_name) {
+    return local.siteName || local.site_name || DEFAULT_SITE_NAME;
+  }
+  return memorySiteConfig.siteName || memorySiteConfig.site_name || DEFAULT_SITE_NAME;
 }
 
 export function getSiteIcon(): string {
+  const local = readLocalStorageConfig();
+  if (local) {
+    const localIcon =
+      local.titlebarImage ||
+      local.titlebar_image ||
+      local.titlebarEmoji ||
+      local.titlebar_emoji ||
+      local.siteIcon ||
+      local.site_icon;
+    if (localIcon) return localIcon;
+  }
   return (
     memorySiteConfig.titlebarImage ||
+    memorySiteConfig.titlebar_image ||
     memorySiteConfig.titlebarEmoji ||
+    memorySiteConfig.titlebar_emoji ||
     memorySiteConfig.siteIcon ||
+    memorySiteConfig.site_icon ||
     DEFAULT_SITE_ICON
   );
 }
@@ -116,15 +144,10 @@ export function getSiteConfig(fallback?: Partial<SiteConfig>): SiteConfig {
   if (fallback) {
     cfg = { ...cfg, ...fallback };
   }
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('zecratary_site_config');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        cfg = { ...cfg, ...parsed };
-        memorySiteConfig = cfg;
-      }
-    } catch (_) {}
+  const local = readLocalStorageConfig();
+  if (local) {
+    cfg = { ...cfg, ...local };
+    memorySiteConfig = cfg;
   }
   return cfg;
 }
@@ -139,10 +162,15 @@ export function setMemorySiteConfig(cfgOrName?: any, icon?: string): void {
     memorySiteConfig.site_name = cfgOrName;
   }
   if (icon) {
+    if (icon.startsWith('/') || icon.startsWith('http') || icon.startsWith('data:image')) {
+      memorySiteConfig.titlebarImage = icon;
+      memorySiteConfig.titlebar_image = icon;
+    } else {
+      memorySiteConfig.titlebarEmoji = icon;
+      memorySiteConfig.titlebar_emoji = icon;
+    }
     memorySiteConfig.siteIcon = icon;
     memorySiteConfig.site_icon = icon;
-    memorySiteConfig.titlebarEmoji = icon;
-    memorySiteConfig.faviconEmoji = icon;
   }
 }
 
@@ -152,9 +180,12 @@ export function updateFavicon(faviconUrlOrEmoji?: string): void {
     const iconToUse =
       faviconUrlOrEmoji ||
       memorySiteConfig.faviconImage ||
+      memorySiteConfig.favicon_image ||
       memorySiteConfig.faviconEmoji ||
+      memorySiteConfig.favicon_emoji ||
+      memorySiteConfig.titlebarImage ||
       memorySiteConfig.titlebarEmoji ||
-      DEFAULT_SITE_ICON;
+      DEFAULT_FAVICON_EMOJI;
 
     const existing = document.querySelectorAll("link[rel*='icon']");
     existing.forEach((el) => el.parentNode?.removeChild(el));
@@ -171,7 +202,7 @@ export function updateFavicon(faviconUrlOrEmoji?: string): void {
       link.type = 'image/png';
       link.href = iconToUse;
     } else if (iconToUse.startsWith('/') || iconToUse.startsWith('http')) {
-      link.href = iconToUse;
+      link.href = `${iconToUse}?v=${Date.now()}`;
     } else {
       link.type = 'image/svg+xml';
       link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${iconToUse}</text></svg>`;
@@ -190,36 +221,33 @@ export async function fetchSiteConfig(): Promise<SiteConfig> {
         const settings = data.settings || data;
         const resolvedTagline =
           settings.siteTagline || settings.tagline || settings.site_tagline || DEFAULT_SITE_TAGLINE;
+        const resolvedImage =
+          settings.titlebarImage || settings.titlebar_image || '';
+        const resolvedEmoji =
+          settings.titlebarEmoji || settings.titlebar_emoji || DEFAULT_TITLEBAR_EMOJI;
+        const resolvedFaviconImage =
+          settings.faviconImage || settings.favicon_image || '';
+        const resolvedFaviconEmoji =
+          settings.faviconEmoji || settings.favicon_emoji || DEFAULT_FAVICON_EMOJI;
+
+        const resolvedIcon = resolvedImage || resolvedEmoji || DEFAULT_SITE_ICON;
+
         const mapped: Partial<SiteConfig> = {
           siteName: settings.siteName || settings.site_name || memorySiteConfig.siteName,
           site_name: settings.siteName || settings.site_name || memorySiteConfig.siteName,
           siteTagline: resolvedTagline,
           site_tagline: resolvedTagline,
           tagline: resolvedTagline,
-          siteIcon:
-            settings.titlebarEmoji ||
-            settings.titlebar_emoji ||
-            settings.faviconEmoji ||
-            settings.favicon_emoji ||
-            memorySiteConfig.siteIcon,
-          site_icon:
-            settings.titlebarEmoji ||
-            settings.titlebar_emoji ||
-            settings.faviconEmoji ||
-            settings.favicon_emoji ||
-            memorySiteConfig.siteIcon,
-          titlebarEmoji:
-            settings.titlebarEmoji || settings.titlebar_emoji || memorySiteConfig.titlebarEmoji,
-          titlebarImage:
-            settings.titlebarImage !== undefined
-              ? settings.titlebarImage
-              : settings.titlebar_image || '',
-          faviconEmoji:
-            settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.faviconEmoji,
-          faviconImage:
-            settings.faviconImage !== undefined
-              ? settings.faviconImage
-              : settings.favicon_image || '',
+          siteIcon: resolvedIcon,
+          site_icon: resolvedIcon,
+          titlebarImage: resolvedImage,
+          titlebar_image: resolvedImage,
+          titlebarEmoji: resolvedEmoji,
+          titlebar_emoji: resolvedEmoji,
+          faviconImage: resolvedFaviconImage,
+          favicon_image: resolvedFaviconImage,
+          faviconEmoji: resolvedFaviconEmoji,
+          favicon_emoji: resolvedFaviconEmoji,
           fontFamily:
             settings.fontFamily || settings.font_family || memorySiteConfig.fontFamily,
           metaDescription:
@@ -239,7 +267,11 @@ export async function fetchSiteConfig(): Promise<SiteConfig> {
             memorySiteConfig.metaAuthor,
           currency: settings.currency || memorySiteConfig.currency,
         };
+
         memorySiteConfig = { ...memorySiteConfig, ...mapped };
+        try {
+          localStorage.setItem('zecratary_site_config', JSON.stringify(memorySiteConfig));
+        } catch (_) {}
       }
     } catch (_) {}
   }
@@ -249,14 +281,24 @@ export async function fetchSiteConfig(): Promise<SiteConfig> {
 export async function saveSiteConfig(newConfig: any): Promise<SiteConfig> {
   const cfg = newConfig || {};
   const resolvedName = cfg.siteName || cfg.site_name || memorySiteConfig.siteName;
-  const resolvedIcon =
-    cfg.siteIcon ||
-    cfg.site_icon ||
-    cfg.titlebarEmoji ||
-    cfg.titlebar_emoji ||
-    cfg.faviconEmoji ||
-    cfg.favicon_emoji ||
-    memorySiteConfig.siteIcon;
+  const resolvedImage =
+    cfg.titlebarImage !== undefined
+      ? cfg.titlebarImage
+      : cfg.titlebar_image !== undefined
+      ? cfg.titlebar_image
+      : memorySiteConfig.titlebarImage;
+  const resolvedEmoji =
+    cfg.titlebarEmoji || cfg.titlebar_emoji || memorySiteConfig.titlebarEmoji;
+  const resolvedFaviconImage =
+    cfg.faviconImage !== undefined
+      ? cfg.faviconImage
+      : cfg.favicon_image !== undefined
+      ? cfg.favicon_image
+      : memorySiteConfig.faviconImage;
+  const resolvedFaviconEmoji =
+    cfg.faviconEmoji || cfg.favicon_emoji || memorySiteConfig.faviconEmoji;
+
+  const resolvedIcon = resolvedImage || resolvedEmoji || memorySiteConfig.siteIcon;
   const resolvedTagline =
     cfg.siteTagline ||
     cfg.site_tagline ||
@@ -288,20 +330,14 @@ export async function saveSiteConfig(newConfig: any): Promise<SiteConfig> {
     siteTagline: resolvedTagline,
     site_tagline: resolvedTagline,
     tagline: resolvedTagline,
-    titlebarEmoji: cfg.titlebarEmoji || cfg.titlebar_emoji || resolvedIcon,
-    faviconEmoji: cfg.faviconEmoji || cfg.favicon_emoji || resolvedIcon,
-    titlebarImage:
-      cfg.titlebarImage !== undefined
-        ? cfg.titlebarImage
-        : cfg.titlebar_image !== undefined
-        ? cfg.titlebar_image
-        : memorySiteConfig.titlebarImage,
-    faviconImage:
-      cfg.faviconImage !== undefined
-        ? cfg.faviconImage
-        : cfg.favicon_image !== undefined
-        ? cfg.favicon_image
-        : memorySiteConfig.faviconImage,
+    titlebarImage: resolvedImage,
+    titlebar_image: resolvedImage,
+    titlebarEmoji: resolvedEmoji,
+    titlebar_emoji: resolvedEmoji,
+    faviconImage: resolvedFaviconImage,
+    favicon_image: resolvedFaviconImage,
+    faviconEmoji: resolvedFaviconEmoji,
+    favicon_emoji: resolvedFaviconEmoji,
     metaDescription: resolvedDescription,
     meta_description: resolvedDescription,
     metaKeywords: resolvedKeywords,
@@ -320,10 +356,10 @@ export async function saveSiteConfig(newConfig: any): Promise<SiteConfig> {
         new CustomEvent('zecratary_site_settings_changed', { detail: memorySiteConfig })
       );
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      if (memorySiteConfig.faviconImage) {
-        updateFavicon(memorySiteConfig.faviconImage);
-      } else if (memorySiteConfig.faviconEmoji) {
-        updateFavicon(memorySiteConfig.faviconEmoji);
+      if (resolvedFaviconImage) {
+        updateFavicon(resolvedFaviconImage);
+      } else if (resolvedFaviconEmoji) {
+        updateFavicon(resolvedFaviconEmoji);
       }
     } catch (_) {}
 
@@ -338,14 +374,14 @@ export async function saveSiteConfig(newConfig: any): Promise<SiteConfig> {
           siteTagline: resolvedTagline,
           site_tagline: resolvedTagline,
           tagline: resolvedTagline,
-          titlebarEmoji: memorySiteConfig.titlebarEmoji,
-          titlebar_emoji: memorySiteConfig.titlebarEmoji,
-          titlebarImage: memorySiteConfig.titlebarImage,
-          titlebar_image: memorySiteConfig.titlebarImage,
-          faviconEmoji: memorySiteConfig.faviconEmoji,
-          favicon_emoji: memorySiteConfig.faviconEmoji,
-          faviconImage: memorySiteConfig.faviconImage,
-          favicon_image: memorySiteConfig.faviconImage,
+          titlebarImage: resolvedImage,
+          titlebar_image: resolvedImage,
+          titlebarEmoji: resolvedEmoji,
+          titlebar_emoji: resolvedEmoji,
+          faviconImage: resolvedFaviconImage,
+          favicon_image: resolvedFaviconImage,
+          faviconEmoji: resolvedFaviconEmoji,
+          favicon_emoji: resolvedFaviconEmoji,
           metaDescription: resolvedDescription,
           meta_description: resolvedDescription,
           metaKeywords: resolvedKeywords,

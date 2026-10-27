@@ -258,9 +258,11 @@ export default function AdminSettingsPage() {
 
         if (type === 'titlebar') {
           setTitlebarImage(publicUrl);
+          await saveSiteConfig({ titlebarImage: publicUrl, titlebar_image: publicUrl });
         } else {
           setFaviconImage(publicUrl);
           updateFavicon(publicUrl);
+          await saveSiteConfig({ faviconImage: publicUrl, favicon_image: publicUrl });
         }
         setStatus({
           type: 'success',

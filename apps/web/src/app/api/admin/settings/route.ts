@@ -31,9 +31,9 @@ export async function GET() {
   let settings: any = readJsonStore();
 
   try {
+    // Select authoritative latest settings row regardless of id alias
     const rows = await query(`
       SELECT * FROM admin_settings 
-      WHERE id = 'primary_settings' OR id = '1' 
       ORDER BY updated_at DESC LIMIT 1;
     `);
 
@@ -47,6 +47,11 @@ export async function GET() {
         ? JSON.parse(row.translations)
         : (row.translations || settings.translations || {});
 
+      const resolvedTitlebarImage = row.titlebar_image || settings.titlebarImage || settings.titlebar_image || '';
+      const resolvedFaviconImage = row.favicon_image || settings.faviconImage || settings.favicon_image || '';
+      const resolvedTitlebarEmoji = row.titlebar_emoji || settings.titlebarEmoji || settings.titlebar_emoji || '👨‍🍳';
+      const resolvedFaviconEmoji = row.favicon_emoji || settings.faviconEmoji || settings.favicon_emoji || '👨‍🍳';
+
       settings = {
         ...settings,
         siteName: row.site_name || settings.siteName || 'Zecratary',
@@ -54,14 +59,16 @@ export async function GET() {
         tagline: row.tagline || settings.tagline || 'Autonomous Culinary Intelligence & Precision Meal Planning',
         siteTagline: row.tagline || settings.siteTagline || 'Autonomous Culinary Intelligence & Precision Meal Planning',
         site_tagline: row.tagline || settings.site_tagline || 'Autonomous Culinary Intelligence & Precision Meal Planning',
-        titlebarEmoji: row.titlebar_emoji || settings.titlebarEmoji || '👨‍🍳',
-        titlebar_emoji: row.titlebar_emoji || settings.titlebar_emoji || '👨‍🍳',
-        titlebarImage: row.titlebar_image || settings.titlebarImage || '',
-        titlebar_image: row.titlebar_image || settings.titlebar_image || '',
-        faviconEmoji: row.favicon_emoji || settings.faviconEmoji || '👨‍🍳',
-        favicon_emoji: row.favicon_emoji || settings.favicon_emoji || '👨‍🍳',
-        faviconImage: row.favicon_image || settings.faviconImage || '',
-        favicon_image: row.favicon_image || settings.favicon_image || '',
+        titlebarEmoji: resolvedTitlebarEmoji,
+        titlebar_emoji: resolvedTitlebarEmoji,
+        titlebarImage: resolvedTitlebarImage,
+        titlebar_image: resolvedTitlebarImage,
+        faviconEmoji: resolvedFaviconEmoji,
+        favicon_emoji: resolvedFaviconEmoji,
+        faviconImage: resolvedFaviconImage,
+        favicon_image: resolvedFaviconImage,
+        siteIcon: resolvedTitlebarImage || resolvedTitlebarEmoji,
+        site_icon: resolvedTitlebarImage || resolvedTitlebarEmoji,
         fontFamily: row.font_family || settings.fontFamily || 'Inter, sans-serif',
         font_family: row.font_family || settings.font_family || 'Inter, sans-serif',
         themeColors: parsedTheme,
@@ -121,6 +128,8 @@ export async function POST(req: Request) {
       favicon_emoji: faviconEmoji,
       faviconImage,
       favicon_image: faviconImage,
+      siteIcon: titlebarImage || titlebarEmoji,
+      site_icon: titlebarImage || titlebarEmoji,
       fontFamily,
       font_family: fontFamily,
       themeColors,
@@ -137,7 +146,6 @@ export async function POST(req: Request) {
     writeJsonStore(updated);
 
     try {
-      // 1. Ensure table structure exists
       await query(`
         CREATE TABLE IF NOT EXISTS admin_settings (
           id VARCHAR(255) PRIMARY KEY,
@@ -157,36 +165,17 @@ export async function POST(req: Request) {
         );
       `);
 
-      // 2. Ensure each column exists individually without parameter conflicts
-      const columnsToAdd = [
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS tagline TEXT DEFAULT 'Autonomous Culinary Intelligence & Precision Meal Planning';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name VARCHAR(255) DEFAULT 'Zecratary';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_emoji VARCHAR(50) DEFAULT '👨‍🍳';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT DEFAULT '';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_emoji VARCHAR(50) DEFAULT '👨‍🍳';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT DEFAULT '';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_family VARCHAR(100) DEFAULT 'Inter, sans-serif';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB DEFAULT '{}'::jsonb;",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS meta_description TEXT DEFAULT 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS meta_keywords TEXT DEFAULT 'culinary ai, recipe generator, meal planner, pantry management';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS meta_author TEXT DEFAULT 'Zecratary Culinary Intelligence Inc.';",
-        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;"
-      ];
+      // Determine active singleton id
+      const existingRows = await query(`SELECT id FROM admin_settings ORDER BY updated_at DESC LIMIT 1;`);
+      const targetId = existingRows && existingRows.length > 0 && existingRows[0]?.id ? existingRows[0].id : 'primary_settings';
 
-      for (const colQuery of columnsToAdd) {
-        try {
-          await query(colQuery);
-        } catch (_) {}
-      }
-
-      // 3. Perform Upsert with Adaptive Driver
       await query(`
         INSERT INTO admin_settings (
           id, site_name, tagline, titlebar_emoji, titlebar_image,
           favicon_emoji, favicon_image, font_family, theme_colors,
           meta_description, meta_keywords, meta_author, updated_at
         ) VALUES (
-          'primary_settings', $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, NOW()
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, NOW()
         ) ON CONFLICT (id) DO UPDATE SET
           site_name = EXCLUDED.site_name,
           tagline = EXCLUDED.tagline,
@@ -201,6 +190,7 @@ export async function POST(req: Request) {
           meta_author = EXCLUDED.meta_author,
           updated_at = NOW();
       `, [
+        targetId,
         siteName,
         tagline,
         titlebarEmoji,

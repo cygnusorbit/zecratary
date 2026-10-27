@@ -15,7 +15,7 @@ import {
   Plus, CheckCheck, HardDrive
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
-import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
+import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon, fetchSiteConfig } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 
 interface InAppNotification {
@@ -115,8 +115,31 @@ export default function Sidebar(
 
   const [mounted, setMounted] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
-  const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
+  const [siteName, setSiteName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('zecratary_site_config');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.siteName || parsed.site_name) return parsed.siteName || parsed.site_name;
+        }
+      } catch (_) {}
+    }
+    return DEFAULT_SITE_NAME;
+  });
+  const [siteIcon, setSiteIcon] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('zecratary_site_config');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const icon = parsed.titlebarImage || parsed.titlebar_image || parsed.titlebarEmoji || parsed.titlebar_emoji || parsed.siteIcon;
+          if (icon) return icon;
+        }
+      } catch (_) {}
+    }
+    return DEFAULT_SITE_ICON;
+  });
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
@@ -295,6 +318,17 @@ export default function Sidebar(
         setSiteIcon(icon);
         updateFavicon(icon);
       }
+      // Async authoritative hydration from server
+      fetchSiteConfig().then((cfg) => {
+        if (cfg) {
+          if (cfg.siteName) setSiteName(cfg.siteName);
+          const authoritativeIcon = cfg.titlebarImage || cfg.titlebar_image || cfg.titlebarEmoji || cfg.titlebar_emoji || cfg.siteIcon;
+          if (authoritativeIcon) {
+            setSiteIcon(authoritativeIcon);
+            updateFavicon(cfg.faviconImage || cfg.favicon_image || cfg.faviconEmoji || authoritativeIcon);
+          }
+        }
+      }).catch(() => {});
 
       if (typeof window !== 'undefined') {
         const themeMode = localStorage.getItem('zecratary_theme_mode') || 'dark';
@@ -373,6 +407,8 @@ export default function Sidebar(
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_site_settings_changed', handleSync);
+    window.addEventListener('zecratary_site_config_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleWalletUpdate);
     window.addEventListener('zecratary_tokens_updated', handleTokensUpdate);
