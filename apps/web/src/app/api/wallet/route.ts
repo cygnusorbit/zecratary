@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
                 COALESCE(wallet_balance, 0) as wallet_balance,
                 COALESCE(token_balance, 0) as token_balance 
          FROM users 
-         WHERE ($1 != '' AND id::text = $1) 
+         WHERE ($1 != '' AND (id::text = $1 OR user_id = $1)) 
             OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
          LIMIT 1`,
         [userId, email]

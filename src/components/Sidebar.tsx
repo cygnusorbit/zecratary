@@ -2,7 +2,7 @@
 'use client';
 
 import packageInfo from '../../package.json';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -12,7 +12,7 @@ import {
   Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
   Bell, BellRing, User as UserIcon, ChevronDown, 
   Layers, Check, Database, Receipt, Globe, Mail, ChevronRight,
-  Plus, CheckCheck
+  Plus, CheckCheck, HardDrive
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -29,12 +29,27 @@ interface InAppNotification {
   createdAt?: string;
 }
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
+export interface DynamicLanguageItem {
+  id?: string;
+  code: string;
+  name?: string;
+  native?: string;
+  flag?: string;
+  direction?: 'ltr' | 'rtl';
+  status?: string;
+  is_default?: boolean;
+}
+
+// Initial SSR-safe fallback dictionaries
+const DEFAULT_CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
-  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
+  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿',
+  BRL: 'R$', INR: '₹', MYR: 'RM', PHP: '₱', IDR: 'Rp',
+  VND: '₫', KRW: '₩', CNY: '¥', HKD: 'HK$', TWD: 'NT$',
+  AED: 'د.إ', SAR: '﷼', ZAR: 'R', MXN: 'Mex$'
 };
 
-const LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
+const DEFAULT_LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
   en: { flag: '🇺🇸', native: 'English' },
   th: { flag: '🇹🇭', native: 'ไทย' },
   es: { flag: '🇪🇸', native: 'Español' },
@@ -45,12 +60,14 @@ const LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
   zh: { flag: '🇨🇳', native: '中文' },
   ko: { flag: '🇰🇷', native: '한국어' },
   pt: { flag: '🇵🇹', native: 'Português' },
-  ru: { flag: '🇷🇺', native: 'Русский' }
-};
-
-const getLanguageMeta = (code: string) => {
-  const c = (code || 'en').toLowerCase().trim();
-  return LANGUAGE_FLAG_MAP[c] || { flag: '🌐', native: code.toUpperCase() };
+  ru: { flag: '🇷🇺', native: 'Русский' },
+  ar: { flag: '🇸🇦', native: 'العربية' },
+  vi: { flag: '🇻🇳', native: 'Tiếng Việt' },
+  nl: { flag: '🇳🇱', native: 'Nederlands' },
+  hi: { flag: '🇮🇳', native: 'हिन्दी' },
+  id: { flag: '🇮🇩', native: 'Bahasa Indonesia' },
+  ms: { flag: '🇲🇾', native: 'Bahasa Melayu' },
+  tr: { flag: '🇹🇷', native: 'Türkçe' }
 };
 
 const isImageIcon = (icon?: unknown): boolean =>
@@ -87,18 +104,14 @@ function DynamicTokenIcon({ icon, symbol, size = 16, className = '' }: { icon?: 
   return <Coins className={`text-amber-500 shrink-0 ${className}`} style={{ width: size, height: size }} />;
 }
 
-export default function Sidebar() {
+export default function Sidebar(
+  // [Server-Loop-Guard: Debounced lifecycle]
+) {
   const pathname = usePathname() || '';
   const langContext = useTranslation();
   const t = langContext?.t || ((k: string, fb?: string) => fb || k);
   const currentLanguage = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
   const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
-  const availableLanguages = (langContext as any)?.availableLanguages || [
-    { code: 'en', name: 'English', native: 'English', flag: '🇺🇸' },
-    { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭' },
-    { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸' },
-    { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷' }
-  ];
 
   const [mounted, setMounted] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -107,6 +120,52 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
+
+  // Dynamic Currencies & Languages States (from Admin Settings)
+  const [currencySymbols, setCurrencySymbols] = useState<Record<string, string>>(DEFAULT_CURRENCY_SYMBOLS);
+  const [dynamicLanguages, setDynamicLanguages] = useState<DynamicLanguageItem[]>(() => {
+    return (langContext as any)?.availableLanguages || [
+      { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
+      { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
+      { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
+      { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
+    ];
+  });
+
+  // Dynamic LANGUAGE_FLAG_MAP Synthesizer
+  const dynamicFlagMap = useMemo(() => {
+    const map: Record<string, { flag: string; native: string }> = { ...DEFAULT_LANGUAGE_FLAG_MAP };
+    (dynamicLanguages || []).forEach((l) => {
+      if (l && l.code) {
+        const c = l.code.toLowerCase().trim();
+        map[c] = {
+          flag: l.flag || map[c]?.flag || '🌐',
+          native: l.native || l.name || map[c]?.native || l.code.toUpperCase()
+        };
+      }
+    });
+    return map;
+  }, [dynamicLanguages]);
+
+  const getLanguageMeta = useCallback((code: string) => {
+    const c = (code || 'en').toLowerCase().trim();
+    return dynamicFlagMap[c] || { flag: '🌐', native: code.toUpperCase() };
+  }, [dynamicFlagMap]);
+
+  // Active Languages Filtered by Status
+  const activeLanguages = useMemo(() => {
+    const list = dynamicLanguages.length > 0 ? dynamicLanguages : (langContext as any)?.availableLanguages || [];
+    if (!Array.isArray(list) || list.length === 0) {
+      return [
+        { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
+        { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
+        { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
+        { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
+      ];
+    }
+    const filtered = list.filter((l: any) => l.status !== 'inactive');
+    return filtered.length > 0 ? filtered : list;
+  }, [dynamicLanguages, langContext]);
 
   // Accordion Sections
   const [openSections, setOpenSections] = useState<{
@@ -155,7 +214,7 @@ export default function Sidebar() {
 
   const topbarRef = useRef<HTMLDivElement>(null);
 
-  // Comprehensive Telemetry & Balances Fetcher
+  // Dynamic Telemetry & Settings Fetcher (PostgreSQL & MySQL Synced)
   const fetchBalancesAndTelemetry = useCallback(async (activeU?: any) => {
     try {
       const u = activeU || getCurrentUser();
@@ -164,12 +223,31 @@ export default function Sidebar() {
       if (u?.email) params.set('email', String(u.email));
       const qs = params.toString() ? `?${params.toString()}&t=${Date.now()}` : `?t=${Date.now()}`;
 
-      const [tokRes, walRes, notifRes, cfgRes] = await Promise.allSettled([
+      const [tokRes, walRes, notifRes, cfgRes, curRes, langRes] = await Promise.allSettled([
         fetch(`/api/tokens${qs}`, { cache: 'no-store' }),
         fetch(`/api/wallet${qs}`, { cache: 'no-store' }),
         fetch(`/api/notifications${qs}`, { cache: 'no-store' }),
-        fetch(`/api/admin/token-setting`, { cache: 'no-store' })
+        fetch(`/api/admin/token-setting`, { cache: 'no-store' }),
+        fetch(`/api/admin/currencies`, { cache: 'no-store' }),
+        fetch(`/api/admin/languages`, { cache: 'no-store' })
       ]);
+
+      let dynamicCurrMap = { ...DEFAULT_CURRENCY_SYMBOLS };
+
+      if (curRes.status === 'fulfilled' && curRes.value.ok) {
+        const curData = await curRes.value.json();
+        if (curData.currencySymbols && typeof curData.currencySymbols === 'object') {
+          dynamicCurrMap = { ...dynamicCurrMap, ...curData.currencySymbols };
+          setCurrencySymbols(dynamicCurrMap);
+        }
+      }
+
+      if (langRes.status === 'fulfilled' && langRes.value.ok) {
+        const lData = await langRes.value.json();
+        if (Array.isArray(lData.languages) && lData.languages.length > 0) {
+          setDynamicLanguages(lData.languages);
+        }
+      }
 
       if (tokRes.status === 'fulfilled' && tokRes.value.ok) {
         const tData = await tokRes.value.json();
@@ -185,9 +263,9 @@ export default function Sidebar() {
         const rawWal = wData.wallet_balance ?? wData.walletBalance ?? wData.balance ?? wData.user?.wallet_balance;
         const numWal = parseFloat(String(rawWal ?? 0));
         if (!isNaN(numWal)) setWalletBalance(numWal);
-        const curr = wData.currency || wData.settings?.currency || 'USD';
+        const curr = (wData.currency || wData.settings?.currency || 'USD').toUpperCase();
         setWalletCurrency(curr);
-        setWalletSymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || wData.walletSymbol || '$');
+        setWalletSymbol(dynamicCurrMap[curr] || wData.walletSymbol || '$');
       }
 
       if (notifRes.status === 'fulfilled' && notifRes.value.ok) {
@@ -222,9 +300,9 @@ export default function Sidebar() {
         const themeMode = localStorage.getItem('zecratary_theme_mode') || 'dark';
         setIsDarkMode(themeMode === 'dark');
 
-        const cur = localStorage.getItem('zecratary_currency') || 'USD';
+        const cur = (localStorage.getItem('zecratary_currency') || 'USD').toUpperCase();
         setWalletCurrency(cur);
-        setWalletSymbol(CURRENCY_SYMBOLS[cur] || '$');
+        setWalletSymbol(currencySymbols[cur] || '$');
 
         const storedSections = localStorage.getItem('zecratary_sidebar_sections');
         if (storedSections) {
@@ -233,11 +311,23 @@ export default function Sidebar() {
           } catch (_) {}
         }
       }
+
+      if (u?.id || u?.email) {
+        fetch(`/api/user/sidebar-settings?userId=${encodeURIComponent(u.id || u.email)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data?.success && data?.sections) {
+              setOpenSections(prev => ({ ...prev, ...data.sections }));
+            }
+          })
+          .catch(() => {});
+      }
+
       fetchBalancesAndTelemetry(u);
     } catch (_) {}
-  }, [fetchBalancesAndTelemetry]);
+  }, [currencySymbols, fetchBalancesAndTelemetry]);
 
-  // Route Auto-Expansion: Synchronized with canonical /recipes route
+  // Route Auto-Expansion: Synchronized with canonical routes
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -287,6 +377,10 @@ export default function Sidebar() {
     window.addEventListener('zecratary_wallet_updated', handleWalletUpdate);
     window.addEventListener('zecratary_tokens_updated', handleTokensUpdate);
     window.addEventListener('zecratary_token_settings_updated', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_currency_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('focus', () => fetchBalancesAndTelemetry());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') fetchBalancesAndTelemetry();
@@ -315,6 +409,10 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_wallet_updated', handleWalletUpdate);
       window.removeEventListener('zecratary_tokens_updated', handleTokensUpdate);
       window.removeEventListener('zecratary_token_settings_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_currency_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
       if (balanceChannel) balanceChannel.close();
     };
   }, [syncUserState, fetchBalancesAndTelemetry]);
@@ -354,6 +452,15 @@ export default function Sidebar() {
         try {
           localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
         } catch (_) {}
+      }
+      const u = getCurrentUser();
+      const uId = u?.id || u?.email;
+      if (uId) {
+        fetch('/api/user/sidebar-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: uId, sections: next })
+        }).catch(() => {});
       }
       return next;
     });
@@ -430,15 +537,26 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
+  const isRouteActive = (route: string): boolean => {
+    if (!pathname) return false;
+    const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
+    const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
+
+    if (cleanRoute === '/' || cleanRoute === '/admin') {
+      return cleanPath === cleanRoute;
+    }
+    return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
+  };
+
   const navClass = (route: string) => {
-    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    const active = isRouteActive(route);
     return `flex items-center gap-3 px-3 py-2 rounded-xl font-bold text-xs transition duration-200 cursor-pointer ${
       active ? 'text-white shadow-xs' : 'hover:text-white hover:bg-slate-800/30'
     }`;
   };
 
   const navStyle = (route: string) => {
-    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    const active = isRouteActive(route);
     return active
       ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
       : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
@@ -455,6 +573,10 @@ export default function Sidebar() {
       {/* DESKTOP TOP BAR (Fixed Header with Real-Time Telemetry) */}
       <header
         id="zecratary-desktop-topbar"
+        role="banner"
+        aria-label="Application Header"
+        data-lpignore="true"
+        data-form-type="other"
         className="hidden md:flex fixed top-0 left-0 right-0 h-16 border-b z-40 items-center justify-between px-6 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -484,7 +606,7 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* 1. DEDICATED STORE WALLET CAPSULE + DIRECT BUTTON */}
+          {/* 1. DEDICATED STORE WALLET CAPSULE + DIRECT BUTTON (DYNAMIC CURRENCY) */}
           <div 
             className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
             style={{
@@ -661,7 +783,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. QUICK LANGUAGE SELECTOR */}
+          {/* 4. DYNAMIC QUICK LANGUAGE SELECTOR */}
           <div className="relative">
             <button
               type="button"
@@ -688,14 +810,14 @@ export default function Sidebar() {
                 aria-label="Language Selector"
                 data-lpignore="true"
                 data-form-type="other"
-                className="absolute right-0 mt-2 w-48 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs transition-colors duration-200"
+                className="absolute right-0 mt-2 w-52 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                {availableLanguages.map((lang: any) => {
+                {activeLanguages.map((lang: any) => {
                   const meta = getLanguageMeta(lang.code);
                   const isSelected = currentLanguage === lang.code;
                   return (
@@ -849,7 +971,7 @@ export default function Sidebar() {
                           borderColor: 'var(--color-border)'
                         }}
                       >
-                        {availableLanguages.map((lang: any) => {
+                        {activeLanguages.map((lang: any) => {
                           const meta = getLanguageMeta(lang.code);
                           const isSel = currentLanguage === lang.code;
                           return (
@@ -913,6 +1035,10 @@ export default function Sidebar() {
 
       {/* MOBILE APPLICATION HEADER WITH COMPACT WALLET & TOKEN WIDGETS */}
       <header
+        role="banner"
+        aria-label="Mobile Application Header"
+        data-lpignore="true"
+        data-form-type="other"
         className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-3 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -1012,6 +1138,10 @@ export default function Sidebar() {
 
       {/* SIDEBAR NAVIGATION DRAWER */}
       <aside
+        role="navigation"
+        aria-label="Main Navigation Sidebar"
+        data-lpignore="true"
+        data-form-type="other"
         className={`hidden md:flex flex-col fixed top-16 bottom-0 left-0 border-r z-30 transition-all duration-200 ${
           isCollapsed ? 'w-20' : 'w-64'
         }`}
@@ -1066,7 +1196,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION (CANONICAL /recipes ROUTE) */}
+          {/* 2. MANAGE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1169,7 +1299,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (WITH STORAGE SETTINGS PRESERVED) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -1223,6 +1353,10 @@ export default function Sidebar() {
                     <Cpu className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('aiModels', 'AI Engine')}</span>}
                   </Link>
+                  <Link href="/admin/storage" className={navClass('/admin/storage')} style={navStyle('/admin/storage')} title={t('storageSettings', 'Storage Settings')}>
+                    <HardDrive className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('storageSettings', 'Storage Settings')}</span>}
+                  </Link>
                   <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} style={navStyle('/admin/recipe-type')} title={t('recipeTypes', 'Recipe Types')}>
                     <Utensils className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('recipeTypes', 'Recipe Types')}</span>}
@@ -1259,9 +1393,14 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* MOBILE APPLICATION DRAWER (CANONICAL /recipes ROUTE) */}
+      {/* MOBILE APPLICATION DRAWER */}
       {mobileMenuOpen && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile Navigation Drawer"
+          data-lpignore="true"
+          data-form-type="other"
           className="md:hidden fixed inset-0 z-50 flex"
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
           onClick={() => setMobileMenuOpen(false)}
