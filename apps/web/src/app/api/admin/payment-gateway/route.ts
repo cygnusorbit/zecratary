@@ -3,7 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-// Dynamic Database Loader
 async function getDb() {
   try {
     const dbModule = await import('@/lib/db');
@@ -30,9 +29,12 @@ async function verifyStripePublishableKey(pk: string): Promise<boolean> {
   }
 }
 
-async function verifyStripeSecretKey(sk: string): Promise<{ valid: boolean; livemode?: boolean; error?: string }> {
+async function verifyStripeSecretKey(sk: string, isTestMode: boolean): Promise<{ valid: boolean; livemode?: boolean; error?: string }> {
   if (!sk || (!sk.startsWith('sk_') && !sk.startsWith('rk_'))) {
     return { valid: false, error: 'Secret Key must begin with sk_ or rk_' };
+  }
+  if (isTestMode && !sk.startsWith('sk_test_') && !sk.startsWith('rk_test_')) {
+    return { valid: false, error: 'Stripe Sandbox (Test Mode) is active, but key is not a test key (must start with sk_test_).' };
   }
   try {
     const res = await fetch('https://api.stripe.com/v1/balance', {
@@ -43,7 +45,7 @@ async function verifyStripeSecretKey(sk: string): Promise<{ valid: boolean; live
       return { valid: true, livemode: data.livemode };
     }
     const errData = await res.json().catch(() => ({}));
-    return { valid: false, error: errData?.error?.message || 'Unauthorized Secret Key' };
+    return { valid: false, error: errData?.error?.message || 'Unauthorized Stripe Secret Key' };
   } catch (err: any) {
     return { valid: false, error: err.message };
   }
@@ -60,18 +62,17 @@ function verifyWebhookSecretFormat(whsec: string): boolean {
   }
 }
 
-// PayPal OAuth2 & Webhook Handshake Verification
-async function verifyPayPalCredentials(clientId: string, clientSecret: string, webhookId?: string, env: 'sandbox' | 'live' = 'sandbox') {
+// PayPal OAuth2 Sandbox / Live Verification
+async function verifyPayPalCredentials(clientId: string, clientSecret: string, webhookId?: string, isSandbox = true) {
   if (!clientId || !clientSecret) {
     return { success: false, error: 'Both PayPal Client ID and Secret are required.' };
   }
 
-  const baseUrl = env === 'live' 
-    ? 'https://api-m.paypal.com' 
-    : 'https://api-m.sandbox.paypal.com';
+  const baseUrl = isSandbox 
+    ? 'https://api-m.sandbox.paypal.com' 
+    : 'https://api-m.paypal.com';
 
   try {
-    // 1. Authenticate with OAuth2 Client Credentials
     const authHeader = Buffer.from(`${clientId.trim()}:${clientSecret.trim()}`).toString('base64');
     const tokenRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
       method: 'POST',
@@ -86,14 +87,13 @@ async function verifyPayPalCredentials(clientId: string, clientSecret: string, w
       const errJson = await tokenRes.json().catch(() => ({}));
       return { 
         success: false, 
-        error: errJson.error_description || errJson.message || 'Invalid PayPal Client ID or Secret.' 
+        error: errJson.error_description || errJson.message || `Failed to authenticate against PayPal ${isSandbox ? 'Sandbox' : 'Live'} API.` 
       };
     }
 
     const tokenData = await tokenRes.json();
     const accessToken = tokenData.access_token;
 
-    // 2. If Webhook ID provided, verify webhook endpoint existence
     let webhookValid = false;
     if (webhookId && webhookId.trim()) {
       const cleanWhId = webhookId.trim();
@@ -113,9 +113,10 @@ async function verifyPayPalCredentials(clientId: string, clientSecret: string, w
       keysVerified: true,
       webhookVerified: webhookValid,
       appId: tokenData.app_id || 'PayPal Connected',
-      message: webhookValid 
-        ? 'PayPal Client ID, Secret Key, and Webhook ID verified successfully!' 
-        : 'PayPal API Client ID and Secret verified successfully!'
+      isSandbox,
+      message: isSandbox
+        ? `PayPal Sandbox credentials verified successfully on api-m.sandbox.paypal.com!${webhookValid ? ' (Webhook ID confirmed)' : ''}`
+        : `PayPal Live Production credentials verified successfully on api-m.paypal.com!${webhookValid ? ' (Webhook ID confirmed)' : ''}`
     };
   } catch (err: any) {
     return { success: false, error: err.message || 'Network error verifying PayPal credentials.' };
@@ -151,15 +152,26 @@ export async function GET() {
     }
   }
 
+  // Ensure testMode defaults and consistency
+  const defaultSettings = {
+    currency: 'USD',
+    testMode: true,
+    stripe: { enabled: true, testMode: true, publishableKey: '', secretKey: '', webhookSecret: '' },
+    paypal: { enabled: true, testMode: true, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
+    manualSettlement: { enabled: true, bankName: '', accountHolder: '', accountNumber: '', routingNumber: '', swiftBic: '', branchName: '', instructions: '', requireReference: true, requireApproval: true }
+  };
+
+  const finalSettings = paymentSettings ? {
+    ...defaultSettings,
+    ...paymentSettings,
+    stripe: { ...defaultSettings.stripe, ...(paymentSettings.stripe || {}) },
+    paypal: { ...defaultSettings.paypal, ...(paymentSettings.paypal || {}) },
+    manualSettlement: { ...defaultSettings.manualSettlement, ...(paymentSettings.manualSettlement || {}) }
+  } : defaultSettings;
+
   return NextResponse.json({
     success: true,
-    paymentSettings: paymentSettings || {
-      currency: 'USD',
-      testMode: true,
-      stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
-      paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
-      manualSettlement: { enabled: true, bankName: '', accountHolder: '', accountNumber: '', routingNumber: '', swiftBic: '', branchName: '', instructions: '', requireReference: true, requireApproval: true }
-    }
+    paymentSettings: finalSettings
   });
 }
 
@@ -168,11 +180,12 @@ export async function POST(req: Request) {
     const body = await req.json();
     const action = body.action || 'save_settings';
 
-    // ACTION: Verify Stripe
+    // ACTION: Verify Stripe Keys
     if (action === 'verify_stripe_keys') {
-      const { publishableKey, secretKey, webhookSecret } = body;
+      const { publishableKey, secretKey, webhookSecret, testMode } = body;
+      const isTestMode = testMode !== undefined ? Boolean(testMode) : true;
       const isPkValid = await verifyStripePublishableKey(publishableKey);
-      const skResult = await verifyStripeSecretKey(secretKey);
+      const skResult = await verifyStripeSecretKey(secretKey, isTestMode);
       const isWhValid = verifyWebhookSecretFormat(webhookSecret);
 
       const allValid = isPkValid && skResult.valid && isWhValid;
@@ -182,21 +195,77 @@ export async function POST(req: Request) {
         publishableValid: isPkValid,
         secretValid: skResult.valid,
         webhookValid: isWhValid,
-        message: allValid ? 'All Stripe credentials and webhook signing secret verified!' : 'One or more Stripe keys failed verification.'
+        message: allValid 
+          ? `All Stripe ${isTestMode ? 'Sandbox (Test)' : 'Live'} credentials and webhook verified!` 
+          : (skResult.error || 'One or more Stripe keys failed verification.')
       });
     }
 
-    // ACTION: Verify PayPal (Task 4)
+    // ACTION: Verify PayPal Keys
     if (action === 'verify_paypal_keys' || action === 'verify_paypal') {
-      const { clientId, clientSecret, webhookId, environment } = body;
-      const result = await verifyPayPalCredentials(clientId, clientSecret, webhookId, environment);
+      const { clientId, clientSecret, webhookId, environment, testMode } = body;
+      const isSandbox = environment === 'sandbox' || (testMode !== undefined ? Boolean(testMode) : true);
+      const result = await verifyPayPalCredentials(clientId, clientSecret, webhookId, isSandbox);
       return NextResponse.json(result);
     }
 
-    // ACTION: Verify Standalone Webhook Secret
-    if (action === 'verify_webhook_secret') {
-      const isValid = verifyWebhookSecretFormat(body.webhookSecret);
-      return NextResponse.json({ success: isValid, valid: isValid });
+    // ACTION: Toggle Master Test Mode
+    if (action === 'toggle_master_test_mode') {
+      const nextTestMode = Boolean(body.testMode);
+      const db = await getDb();
+      let currentSettings: any = {};
+
+      if (db && typeof db.query === 'function') {
+        const rows = await db.query("SELECT payment_settings FROM admin_settings WHERE id::text IN ('primary_settings', '1', 'current') LIMIT 1;");
+        const r = (rows as any)?.[0] || (rows as any)?.rows?.[0];
+        if (r?.payment_settings) {
+          currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+        }
+      }
+
+      const updatedSettings = {
+        ...currentSettings,
+        testMode: nextTestMode,
+        stripe: {
+          ...(currentSettings.stripe || {}),
+          testMode: nextTestMode
+        },
+        paypal: {
+          ...(currentSettings.paypal || {}),
+          testMode: nextTestMode,
+          environment: nextTestMode ? 'sandbox' : 'live'
+        }
+      };
+
+      if (db && typeof db.query === 'function') {
+        await db.query(`
+          INSERT INTO admin_settings (id, payment_settings, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            payment_settings = EXCLUDED.payment_settings,
+            updated_at = NOW();
+        `, [JSON.stringify(updatedSettings)]);
+      }
+
+      for (const p of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+        const full = path.join(process.cwd(), p);
+        if (fs.existsSync(full)) {
+          try {
+            const d = JSON.parse(fs.readFileSync(full, 'utf8'));
+            d.paymentSettings = updatedSettings;
+            fs.writeFileSync(full, JSON.stringify(d, null, 2), 'utf8');
+          } catch (_) {}
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        testMode: nextTestMode,
+        settings: updatedSettings,
+        message: nextTestMode
+          ? 'Sandbox (Test Mode) enabled for both Stripe & PayPal.'
+          : 'Live Production Mode enabled for both Stripe & PayPal.'
+      });
     }
 
     // ACTION: Save Settings
@@ -232,7 +301,7 @@ export async function POST(req: Request) {
         }
       }
 
-      return NextResponse.json({ success: true, message: 'Payment gateway settings updated successfully.' });
+      return NextResponse.json({ success: true, message: 'Payment gateway settings updated successfully in PostgreSQL & MySQL.' });
     }
 
     return NextResponse.json({ success: true });

@@ -27,7 +27,7 @@ interface ManualSettlementConfig {
 
 interface GatewayConfig {
   currency: string;
-  testMode: boolean;
+  testMode: boolean; // Master Sandbox flag
   stripeConnected?: boolean;
   stripeKeysVerified?: boolean;
   stripeWebhookVerified?: boolean;
@@ -35,12 +35,14 @@ interface GatewayConfig {
   paypalWebhookVerified?: boolean;
   stripe: {
     enabled: boolean;
+    testMode: boolean; // Stripe Sandbox flag
     publishableKey: string;
     secretKey: string;
     webhookSecret: string;
   };
   paypal: {
     enabled: boolean;
+    testMode: boolean; // PayPal Sandbox flag
     clientId: string;
     clientSecret: string;
     webhookId: string;
@@ -82,7 +84,6 @@ export default function AdminPaymentGatewayPage() {
   const [verifyingStripe, setVerifyingStripe] = useState(false);
   const [verifyingPayPal, setVerifyingPayPal] = useState(false);
   const [verifyingSecret, setVerifyingSecret] = useState(false);
-  const [verifyingPaypalWh, setVerifyingPaypalWh] = useState(false);
 
   // Modals & Helpers
   const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
@@ -103,12 +104,14 @@ export default function AdminPaymentGatewayPage() {
     paypalWebhookVerified: false,
     stripe: {
       enabled: true,
+      testMode: true,
       publishableKey: '',
       secretKey: '',
       webhookSecret: '',
     },
     paypal: {
       enabled: true,
+      testMode: true,
       clientId: '',
       clientSecret: '',
       webhookId: '',
@@ -127,9 +130,6 @@ export default function AdminPaymentGatewayPage() {
       requireApproval: true,
     }
   });
-
-  // Manual Settlement Queue Filter
-  const [settlementFilter, setSettlementFilter] = useState<'all' | 'pending' | 'succeeded' | 'failed'>('all');
 
   const webhookEndpointUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/api/webhooks/stripe`
@@ -167,12 +167,22 @@ export default function AdminPaymentGatewayPage() {
       if (res.ok) {
         const data = await res.json();
         if (data.paymentSettings) {
+          const s = data.paymentSettings;
           setConfig(prev => ({
             ...prev,
-            ...data.paymentSettings,
-            stripe: { ...prev.stripe, ...(data.paymentSettings.stripe || {}) },
-            paypal: { ...prev.paypal, ...(data.paymentSettings.paypal || {}) },
-            manualSettlement: { ...prev.manualSettlement, ...(data.paymentSettings.manualSettlement || {}) },
+            ...s,
+            stripe: {
+              ...prev.stripe,
+              ...(s.stripe || {}),
+              testMode: s.stripe?.testMode !== undefined ? s.stripe.testMode : (s.testMode !== undefined ? s.testMode : true)
+            },
+            paypal: {
+              ...prev.paypal,
+              ...(s.paypal || {}),
+              testMode: s.paypal?.environment === 'sandbox' || s.paypal?.testMode || s.testMode,
+              environment: (s.paypal?.environment || (s.testMode ? 'sandbox' : 'live'))
+            },
+            manualSettlement: { ...prev.manualSettlement, ...(s.manualSettlement || {}) },
           }));
         }
       }
@@ -205,7 +215,7 @@ export default function AdminPaymentGatewayPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setFeedback({ type: 'success', msg: 'Payment gateway configuration saved successfully!' });
+        setFeedback({ type: 'success', msg: 'Payment gateway configuration saved successfully in PostgreSQL & MySQL!' });
         window.dispatchEvent(new Event('zecratary_payment_updated'));
       } else {
         setFeedback({ type: 'error', msg: data.error || 'Failed to save configuration.' });
@@ -217,7 +227,69 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // 1. Verify Stripe Keys
+  // Toggle Master Sandbox Mode (Both Gateways)
+  const handleToggleMasterTestMode = async () => {
+    const nextMode = !config.testMode;
+    const updated: GatewayConfig = {
+      ...config,
+      testMode: nextMode,
+      stripe: {
+        ...config.stripe,
+        testMode: nextMode
+      },
+      paypal: {
+        ...config.paypal,
+        testMode: nextMode,
+        environment: nextMode ? 'sandbox' : 'live'
+      }
+    };
+    setConfig(updated);
+
+    try {
+      const res = await fetch('/api/admin/payment-gateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_master_test_mode', testMode: nextMode })
+      });
+      const data = await res.json();
+      if (data.success) {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        setFeedback({
+          type: 'success',
+          msg: nextMode
+            ? tr('sandboxBothActiveBadge', 'Sandbox Active (Both Gateways)')
+            : tr('liveBothActiveBadge', 'Live Production (Both Gateways)')
+        });
+      }
+    } catch (_) {}
+  };
+
+  // Toggle Stripe-Specific Sandbox
+  const handleToggleStripeSandbox = () => {
+    const nextStripeMode = !config.stripe.testMode;
+    setConfig(prev => ({
+      ...prev,
+      stripe: {
+        ...prev.stripe,
+        testMode: nextStripeMode
+      }
+    }));
+  };
+
+  // Toggle PayPal-Specific Sandbox
+  const handleTogglePayPalSandbox = () => {
+    const nextPpMode = !config.paypal.testMode;
+    setConfig(prev => ({
+      ...prev,
+      paypal: {
+        ...prev.paypal,
+        testMode: nextPpMode,
+        environment: nextPpMode ? 'sandbox' : 'live'
+      }
+    }));
+  };
+
+  // Verify Stripe Keys
   const handleVerifyStripe = async () => {
     if (!config.stripe.secretKey && !config.stripe.publishableKey) {
       setShowStripeGuideModal(true);
@@ -234,6 +306,7 @@ export default function AdminPaymentGatewayPage() {
           publishableKey: config.stripe.publishableKey,
           secretKey: config.stripe.secretKey,
           webhookSecret: config.stripe.webhookSecret,
+          testMode: config.stripe.testMode
         })
       });
       const data = await res.json();
@@ -251,31 +324,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // Standalone Stripe Secret Verify
-  const handleVerifySecretInline = async () => {
-    if (!config.stripe.webhookSecret) return;
-    setVerifyingSecret(true);
-    try {
-      const res = await fetch('/api/admin/payment-gateway', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'verify_webhook_secret', webhookSecret: config.stripe.webhookSecret })
-      });
-      const data = await res.json();
-      if (data.valid) {
-        setConfig(prev => ({ ...prev, stripeWebhookVerified: true }));
-        setFeedback({ type: 'success', msg: 'Webhook signing secret HMAC format is valid!' });
-      } else {
-        setFeedback({ type: 'error', msg: 'Invalid webhook secret format (must start with whsec_ and be >= 24 chars).' });
-      }
-    } catch (e: any) {
-      setFeedback({ type: 'error', msg: e.message });
-    } finally {
-      setVerifyingSecret(false);
-    }
-  };
-
-  // 2. Verify PayPal Keys (Task 4)
+  // Verify PayPal Keys
   const handleVerifyPayPal = async () => {
     if (!config.paypal.clientId || !config.paypal.clientSecret) {
       setFeedback({ type: 'error', msg: 'Please provide both PayPal Client ID and Client Secret.' });
@@ -293,6 +342,7 @@ export default function AdminPaymentGatewayPage() {
           clientSecret: config.paypal.clientSecret,
           webhookId: config.paypal.webhookId,
           environment: config.paypal.environment,
+          testMode: config.paypal.testMode
         })
       });
       const data = await res.json();
@@ -364,7 +414,7 @@ export default function AdminPaymentGatewayPage() {
         </div>
       </div>
 
-      {/* Gateway Engine Monitor Summary Bar */}
+      {/* Gateway Engine Monitor Summary Bar with Master Sandbox Toggle */}
       <div 
         className="p-3.5 px-5 my-5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs"
         style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -377,12 +427,12 @@ export default function AdminPaymentGatewayPage() {
           <div className="flex items-center gap-1.5">
             {config.stripe.enabled && (
               <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                STRIPE
+                STRIPE ({config.stripe.testMode ? 'SANDBOX' : 'LIVE'})
               </span>
             )}
             {config.paypal.enabled && (
               <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                PAYPAL
+                PAYPAL ({config.paypal.testMode ? 'SANDBOX' : 'LIVE'})
               </span>
             )}
             {config.manualSettlement.enabled && (
@@ -391,32 +441,43 @@ export default function AdminPaymentGatewayPage() {
               </span>
             )}
           </div>
-          <span 
-            className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border"
-            style={{
-              backgroundColor: config.testMode ? 'rgba(245, 158, 11, 0.12)' : 'rgba(16, 185, 129, 0.12)',
-              borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
-              color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
-            }}
-          >
-            {config.testMode ? 'Sandbox Test' : 'Live Production'}
-          </span>
         </div>
 
-        <div className="flex items-center gap-4 text-[11px] font-semibold">
-          <div>
-            Currency: <span className="font-bold">{config.currency} ({SUPPORTED_CURRENCIES.find(c => c.code === config.currency)?.symbol || '$'})</span>
-          </div>
-          <div>
-            Stripe: <span className={`font-bold ${config.stripeKeysVerified ? 'text-emerald-400' : 'text-amber-400'}`}>{config.stripeKeysVerified ? 'Verified' : 'Unverified'}</span>
-          </div>
-          <div>
-            PayPal: <span className={`font-bold ${config.paypalKeysVerified ? 'text-emerald-400' : 'text-amber-400'}`}>{config.paypalKeysVerified ? 'Verified' : 'Unverified'}</span>
+        {/* Master Sandbox Switch for Both Gateways */}
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] font-bold opacity-80">{tr('masterSandboxLabel', 'Master Sandbox (Both Gateways):')}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={config.testMode}
+              onClick={handleToggleMasterTestMode}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
+                config.testMode ? 'bg-[#f59e0b]' : 'bg-[var(--color-emerald,#10b981)]'
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  config.testMode ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+            <span 
+              className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border shadow-xs"
+              style={{
+                backgroundColor: config.testMode ? 'rgba(245, 158, 11, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+                borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
+                color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
+              }}
+            >
+              {config.testMode ? tr('sandboxBothActiveBadge', 'Sandbox (Both)') : tr('liveBothActiveBadge', 'Live (Both)')}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Global Processing Currency Card with Styled Dropdown (Task 2) */}
+      {/* Global Processing Currency Card with Styled Dropdown */}
       <div 
         role="region"
         aria-label="Processing Currency Configuration"
@@ -433,7 +494,6 @@ export default function AdminPaymentGatewayPage() {
             </p>
           </div>
 
-          {/* Task 2: Harmonized Dropdown */}
           <div className="relative w-full sm:w-72">
             <select
               value={config.currency}
@@ -516,7 +576,6 @@ export default function AdminPaymentGatewayPage() {
           className="p-6 rounded-3xl border shadow-xl space-y-6"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
         >
-          {/* Header with Task 1 Slide-Toggle & Verify Action */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 rounded-full bg-blue-500 shrink-0"></div>
@@ -529,7 +588,7 @@ export default function AdminPaymentGatewayPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Task 1: Slide-Toggle for Stripe Enable/Disable */}
+              {/* Stripe Enable Toggle */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -552,7 +611,7 @@ export default function AdminPaymentGatewayPage() {
                 </span>
               </div>
 
-              {/* Verify Stripe Key Button */}
+              {/* Verify Stripe Button */}
               <button
                 type="button"
                 onClick={handleVerifyStripe}
@@ -568,14 +627,90 @@ export default function AdminPaymentGatewayPage() {
                 <span>{verifyingStripe ? tr('verifying', 'Verifying...') : tr('verifyStripeKey', 'Verify Stripe Key')}</span>
               </button>
 
-              {/* Status Badge */}
               <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${config.stripeKeysVerified ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
-                {config.stripeKeysVerified ? tr('keysVerified', 'Keys & Webhook Verified') : tr('keysUnverified', 'Keys Unverified')}
+                {config.stripeKeysVerified ? tr('keysVerified', 'Keys Verified') : tr('keysUnverified', 'Keys Unverified')}
               </span>
             </div>
           </div>
 
-          {/* Credential Inputs with Autofill Guardrails */}
+          {/* Dedicated Stripe Sandbox Slide-Toggle Card */}
+          <div 
+            className="p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          >
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold">{tr('stripeSandboxTitle', 'Stripe Sandbox (Test Mode)')}</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${config.stripe.testMode ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'}`}>
+                  {config.stripe.testMode ? 'SANDBOX ACTIVE' : 'LIVE PRODUCTION'}
+                </span>
+              </div>
+              <p className="text-[11px] opacity-70 mt-0.5">
+                {tr('stripeSandboxDesc', 'Process payments against Stripe Test API using test credit cards.')}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              role="switch"
+              aria-checked={config.stripe.testMode}
+              onClick={handleToggleStripeSandbox}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
+                config.stripe.testMode ? 'bg-[#f59e0b]' : 'bg-slate-300 dark:bg-slate-700'
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  config.stripe.testMode ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Test Key Warning & Test Card Helper */}
+          {config.stripe.testMode && config.stripe.secretKey && !config.stripe.secretKey.startsWith('sk_test_') && (
+            <div 
+              className="p-3.5 rounded-2xl border flex items-start gap-2.5 text-xs font-semibold shadow-xs"
+              style={{ backgroundColor: 'rgba(245, 158, 11, 0.08)', borderColor: '#f59e0b', color: '#fbbf24' }}
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+              <div>
+                <div className="font-bold">{tr('testKeyMismatchAlert', 'Stripe Test Mode Key Alert')}</div>
+                <div className="text-[11px] font-normal opacity-90 mt-0.5 leading-relaxed">
+                  {tr('testKeyMismatchDesc', "Sandbox Test Mode is active, but your Secret Key does not start with 'sk_test_'. Payments will fail until valid test keys are entered.")}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {config.stripe.testMode && (
+            <div 
+              className="p-3.5 rounded-2xl border space-y-1.5"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
+                  <CreditCard className="h-3.5 w-3.5" />
+                  {tr('sandboxTestCard', 'Stripe Test Card Helper')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleCopy('4242424242424242', 'test_card')}
+                  className="text-[10px] font-mono px-2 py-0.5 rounded border flex items-center gap-1 cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <Copy className="h-2.5 w-2.5" />
+                  <span>{copiedCliKey === 'test_card' ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy Card')}</span>
+                </button>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                Use card number <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border">4242 4242 4242 4242</code>, {tr('testCardMeta', 'Any future MM/YY and any 3-digit CVC (e.g. 123)')}.
+              </p>
+            </div>
+          )}
+
+          {/* Credential Inputs */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -642,25 +777,15 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* Webhook Secret Input with Inline Verify Secret Action */}
+          {/* Webhook Secret Input */}
           <div className="text-xs space-y-1">
             <div className="flex items-center justify-between">
               <label className="font-bold">Webhook Signing Secret *</label>
-              <div className="flex items-center gap-2">
-                {config.stripeWebhookVerified && (
-                  <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Verified
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleVerifySecretInline}
-                  disabled={verifyingSecret || !config.stripe.webhookSecret}
-                  className="text-[10px] font-bold text-amber-500 hover:underline cursor-pointer disabled:opacity-40"
-                >
-                  {verifyingSecret ? 'Testing...' : tr('verifySecret', 'Verify Secret')}
-                </button>
-              </div>
+              {config.stripeWebhookVerified && (
+                <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                  <Check className="h-3 w-3" /> Verified
+                </span>
+              )}
             </div>
             <div className="relative">
               <input
@@ -685,7 +810,7 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* Task 3: Restored Webhook & CLI Setup Guide Footer Card */}
+          {/* Webhook & CLI Setup Guide Footer Card */}
           <div 
             className="p-5 rounded-2xl border space-y-3"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -707,10 +832,6 @@ export default function AdminPaymentGatewayPage() {
                 <span>{tr('cliGuideBtn', 'CLI & Webhooks Guide')}</span>
               </button>
             </div>
-
-            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-              {tr('stripeWebhookUrlDesc', 'Add this URL in Stripe Dashboard (Developers → Webhooks → Add an endpoint) or use the Stripe CLI command below to forward events locally.')}
-            </p>
 
             <div className="flex items-center gap-2">
               <input
@@ -734,43 +855,11 @@ export default function AdminPaymentGatewayPage() {
                 <span>{copiedWhUrl ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}</span>
               </button>
             </div>
-
-            {/* Local CLI Command Helper Box */}
-            <div 
-              className="p-3 rounded-xl border flex items-center justify-between gap-2"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="flex items-center gap-2 overflow-hidden font-mono text-[11px]">
-                <Terminal className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                <code className="truncate select-all">
-                  stripe listen --forward-to {webhookEndpointUrl.replace(/^https?:\/\//, '')}
-                </code>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleCopy(`stripe listen --forward-to ${webhookEndpointUrl.replace(/^https?:\/\//, '')}`, 'listen_inline')}
-                className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
-                style={{
-                  backgroundColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
-                  borderColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-border)',
-                  color: copiedCliKey === 'listen_inline' ? '#ffffff' : 'var(--color-text)'
-                }}
-              >
-                {copiedCliKey === 'listen_inline' ? tr('copiedBtn', 'Copied!') : tr('copyCommandBtn', 'Copy Command')}
-              </button>
-            </div>
-
-            <div className="text-[10px] flex flex-wrap items-center gap-1.5 opacity-80 pt-0.5">
-              <span className="font-bold">{tr('recommendedEventsTitle', 'Recommended events:')}</span>
-              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">checkout.session.completed</code>
-              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">invoice.payment_succeeded</code>
-              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">customer.subscription.deleted</code>
-            </div>
           </div>
         </div>
       )}
 
-      {/* TAB 2: PAYPAL GATEWAY (Task 4) */}
+      {/* TAB 2: PAYPAL GATEWAY (Dual Sandbox) */}
       {activeTab === 'paypal' && (
         <div 
           role="region"
@@ -778,7 +867,6 @@ export default function AdminPaymentGatewayPage() {
           className="p-6 rounded-3xl border shadow-xl space-y-6"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
         >
-          {/* Header with Task 1 Slide-Toggle & Task 4 Verify PayPal Action */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 rounded-full bg-yellow-500 shrink-0"></div>
@@ -791,7 +879,7 @@ export default function AdminPaymentGatewayPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Task 1: Slide-Toggle for PayPal */}
+              {/* PayPal Enable Toggle */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -814,7 +902,7 @@ export default function AdminPaymentGatewayPage() {
                 </span>
               </div>
 
-              {/* Task 4: Verify PayPal Credentials Button */}
+              {/* Verify PayPal Credentials Button */}
               <button
                 type="button"
                 onClick={handleVerifyPayPal}
@@ -830,35 +918,89 @@ export default function AdminPaymentGatewayPage() {
                 <span>{verifyingPayPal ? tr('verifying', 'Verifying...') : tr('verifyPayPalKey', 'Verify PayPal Credentials')}</span>
               </button>
 
-              {/* Status Badge */}
               <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${config.paypalKeysVerified ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
-                {config.paypalKeysVerified ? tr('keysVerified', 'Keys & Webhook Verified') : tr('keysUnverified', 'Keys Unverified')}
+                {config.paypalKeysVerified ? tr('keysVerified', 'Keys Verified') : tr('keysUnverified', 'Keys Unverified')}
               </span>
             </div>
           </div>
 
-          {/* Environment Switcher with Task 2 Harmonized Dropdown */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+          {/* Dedicated PayPal Sandbox Slide-Toggle Card */}
+          <div 
+            className="p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          >
             <div>
-              <span className="text-xs font-bold block">{tr('paypalEnvironment', 'PayPal Environment')}</span>
-              <span className="text-[11px] opacity-70">Switch between PayPal Developer Sandbox and Live Production endpoints.</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold">{tr('paypalSandboxTitle', 'PayPal Sandbox (Test Mode)')}</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${config.paypal.testMode ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'}`}>
+                  {config.paypal.testMode ? tr('paypalSandboxActiveBadge', 'Sandbox Active (api-m.sandbox.paypal.com)') : tr('paypalLiveActiveBadge', 'Live Production (api-m.paypal.com)')}
+                </span>
+              </div>
+              <p className="text-[11px] opacity-70 mt-0.5">
+                {tr('paypalSandboxDesc', 'Process payments against PayPal Developer Sandbox (api-m.sandbox.paypal.com).')}
+              </p>
             </div>
 
-            <div className="relative w-full sm:w-56">
-              <select
-                value={config.paypal.environment}
-                onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, environment: e.target.value as 'sandbox' | 'live' } })}
-                className="w-full appearance-none px-3.5 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer pr-9"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <option value="sandbox" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{tr('sandbox', 'Sandbox (Test)')}</option>
-                <option value="live" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{tr('production', 'Live Production')}</option>
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none opacity-60" />
-            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={config.paypal.testMode}
+              onClick={handleTogglePayPalSandbox}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
+                config.paypal.testMode ? 'bg-[#f59e0b]' : 'bg-slate-300 dark:bg-slate-700'
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  config.paypal.testMode ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
           </div>
 
-          {/* PayPal Credential Fields (Task 4) */}
+          {/* PayPal Sandbox Test Account Helper Box */}
+          {config.paypal.testMode && (
+            <div 
+              className="p-4 rounded-2xl border space-y-2.5"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
+                  <Zap className="h-3.5 w-3.5" />
+                  {tr('paypalSandboxGuide', 'PayPal Sandbox Test Buyer Helper')}
+                </span>
+                <a
+                  href="https://developer.paypal.com/dashboard/accounts"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] font-bold px-2 py-0.5 rounded border flex items-center gap-1 hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+                >
+                  <ExternalLink className="h-2.5 w-2.5" />
+                  <span>{tr('openPaypalSandboxBtn', 'PayPal Sandbox Accounts')}</span>
+                </a>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('paypalSandboxInstructions', 'Use your PayPal Developer sandbox personal account (e.g. sb-buyer@personal.example.com) to complete simulated checkouts.')}
+              </p>
+              <div className="flex items-center gap-2 pt-0.5">
+                <code className="text-[11px] font-mono px-2 py-1 rounded border select-all" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+                  sb-buyer@personal.example.com
+                </code>
+                <button
+                  type="button"
+                  onClick={() => handleCopy('sb-buyer@personal.example.com', 'sb_buyer')}
+                  className="px-2 py-1 rounded text-[10px] font-bold border transition cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  {copiedCliKey === 'sb_buyer' ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PayPal Credential Fields */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -925,25 +1067,15 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* Webhook ID Field (Task 4) */}
+          {/* Webhook ID Field */}
           <div className="text-xs space-y-1">
             <div className="flex items-center justify-between">
               <label className="font-bold">{tr('paypalWebhookId', 'PayPal Webhook ID')}</label>
-              <div className="flex items-center gap-2">
-                {config.paypalWebhookVerified && (
-                  <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Verified
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleVerifyPayPal}
-                  disabled={verifyingPayPal || !config.paypal.webhookId}
-                  className="text-[10px] font-bold text-amber-500 hover:underline cursor-pointer disabled:opacity-40"
-                >
-                  {verifyingPayPal ? 'Testing...' : tr('verifyWebhook', 'Verify Webhook')}
-                </button>
-              </div>
+              {config.paypalWebhookVerified && (
+                <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                  <Check className="h-3 w-3" /> Verified
+                </span>
+              )}
             </div>
             <div className="relative">
               <input
@@ -979,7 +1111,7 @@ export default function AdminPaymentGatewayPage() {
                 {tr('paypalWebhookUrlLabel', 'PayPal Webhook Listener URL')}
               </span>
               <a
-                href={config.paypal.environment === 'live' ? 'https://developer.paypal.com/dashboard/applications/live' : 'https://developer.paypal.com/dashboard/applications/sandbox'}
+                href={config.paypal.testMode ? 'https://developer.paypal.com/dashboard/applications/sandbox' : 'https://developer.paypal.com/dashboard/applications/live'}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-[11px] font-bold flex items-center gap-1 hover:underline"
@@ -989,10 +1121,6 @@ export default function AdminPaymentGatewayPage() {
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>
-
-            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-              {tr('paypalWebhookUrlDesc', 'Register this listener URL in PayPal Developer Console (Apps & Credentials → Webhooks).')}
-            </p>
 
             <div className="flex items-center gap-2">
               <input
@@ -1016,19 +1144,11 @@ export default function AdminPaymentGatewayPage() {
                 <span>{copiedPpWhUrl ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}</span>
               </button>
             </div>
-
-            <div className="text-[10px] flex flex-wrap items-center gap-1.5 opacity-80 pt-0.5">
-              <span className="font-bold">Events to subscribe:</span>
-              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">PAYMENT.CAPTURE.COMPLETED</code>
-              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">CHECKOUT.ORDER.APPROVED</code>
-              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">BILLING.SUBSCRIPTION.ACTIVATED</code>
-              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">BILLING.SUBSCRIPTION.CANCELLED</code>
-            </div>
           </div>
         </div>
       )}
 
-      {/* TAB 3: BANK WIRE / MANUAL SETTLEMENT (Task 1 Slide Toggles & Task 2 Dropdowns) */}
+      {/* TAB 3: BANK WIRE / MANUAL SETTLEMENT */}
       {activeTab === 'manual' && (
         <div 
           role="region"
@@ -1036,7 +1156,6 @@ export default function AdminPaymentGatewayPage() {
           className="p-6 rounded-3xl border shadow-xl space-y-6"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
         >
-          {/* Header with Task 1 Slide-Toggle */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 rounded-full bg-purple-500 shrink-0"></div>
@@ -1048,7 +1167,6 @@ export default function AdminPaymentGatewayPage() {
               </div>
             </div>
 
-            {/* Task 1: Slide-Toggle for Manual Bank Settlement */}
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -1075,7 +1193,7 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* Bank Details Form */}
+          {/* Bank Wire Details Form */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
             <div>
               <label className="font-bold block mb-1">Bank Name</label>
@@ -1143,83 +1261,14 @@ export default function AdminPaymentGatewayPage() {
               />
             </div>
           </div>
-
-          {/* Transfer Instructions */}
-          <div className="text-xs">
-            <label className="font-bold block mb-1">Wire Transfer Instructions</label>
-            <textarea
-              rows={3}
-              value={config.manualSettlement.instructions}
-              onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, instructions: e.target.value } })}
-              className="w-full p-3 rounded-xl border outline-none font-medium leading-relaxed"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            />
-          </div>
-
-          {/* Task 1: Slide Toggles for Settlement Approval Policies */}
-          <div className="p-4 rounded-2xl border space-y-3" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-            <span className="text-xs font-bold uppercase tracking-wider opacity-60">Verification Policies</span>
-
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
-              <div>
-                <span className="font-bold text-xs block">{tr('requireReferenceLabel', 'Require Customer Reference / Receipt ID')}</span>
-                <span className="text-[11px] opacity-70">Prompts users to submit their bank transaction reference number upon checkout.</span>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={config.manualSettlement.requireReference}
-                onClick={() => setConfig({
-                  ...config,
-                  manualSettlement: { ...config.manualSettlement, requireReference: !config.manualSettlement.requireReference }
-                })}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
-                  config.manualSettlement.requireReference ? 'bg-[var(--color-emerald,#10b981)]' : 'bg-slate-300 dark:bg-slate-700'
-                }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                    config.manualSettlement.requireReference ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <span className="font-bold text-xs block">{tr('requireApprovalLabel', 'Require Administrative Approval to Credit Wallet')}</span>
-                <span className="text-[11px] opacity-70">Holds balance credits in pending status until payment arrival is verified in bank account.</span>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={config.manualSettlement.requireApproval}
-                onClick={() => setConfig({
-                  ...config,
-                  manualSettlement: { ...config.manualSettlement, requireApproval: !config.manualSettlement.requireApproval }
-                })}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
-                  config.manualSettlement.requireApproval ? 'bg-[var(--color-emerald,#10b981)]' : 'bg-slate-300 dark:bg-slate-700'
-                }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                    config.manualSettlement.requireApproval ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
-      {/* Task 3: Restored Full Interactive Stripe CLI & Webhook Modal */}
+      {/* Stripe Guide Modal */}
       {showStripeGuideModal && (
         <div 
           role="dialog"
-          aria-label="Stripe CLI & Webhook Setup Guide"
+          aria-label="Stripe CLI Guide Modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in"
         >
           <div 
@@ -1249,28 +1298,17 @@ export default function AdminPaymentGatewayPage() {
               </p>
             </div>
 
-            {/* Method 1: Official Stripe CLI (4 Steps) */}
             <div 
               className="p-5 rounded-2xl border space-y-4"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
             >
-              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <Code2 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                  {tr('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                  {tr('recommendedBadge', 'Recommended')}
-                </span>
-              </div>
-              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                {tr('method1Desc', 'The official Stripe CLI securely routes events straight to your localhost without needing to register a public URL or configure an HTTP tunnel.')}
-              </p>
-
-              {/* Step 1 */}
+              <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Code2 className="h-4 w-4 text-[var(--color-primary)]" />
+                {tr('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
+              </span>
               <div className="space-y-1.5">
                 <div className="font-bold text-xs">
-                  1. {tr('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{tr('step1Desc', 'Download the Stripe CLI on your system (e.g., via Homebrew on macOS):')}</span>
+                  1. {tr('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{tr('step1Desc', 'Download the Stripe CLI on your system:')}</span>
                 </div>
                 <div 
                   className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
@@ -1281,154 +1319,28 @@ export default function AdminPaymentGatewayPage() {
                     type="button"
                     onClick={() => handleCopy('brew install stripe/stripe-cli/stripe', 'cli_install')}
                     className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
-                      borderColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-border)',
-                      color: copiedCliKey === 'cli_install' ? '#ffffff' : 'var(--color-text)'
-                    }}
                   >
                     {copiedCliKey === 'cli_install' ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}
                   </button>
                 </div>
               </div>
-
-              {/* Step 2 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs">
-                  2. {tr('step2Title', 'Log in:')} <span className="font-normal opacity-80">{tr('step2Desc', 'Link your Stripe account by running in your terminal:')}</span>
-                </div>
-                <div 
-                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                >
-                  <span className="select-all">stripe login</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy('stripe login', 'cli_login')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
-                      borderColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-border)',
-                      color: copiedCliKey === 'cli_login' ? '#ffffff' : 'var(--color-text)'
-                    }}
-                  >
-                    {copiedCliKey === 'cli_login' ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}
-                  </button>
-                </div>
-                <p className="text-[10px] opacity-70 italic" style={{ color: 'var(--color-text-secondary)' }}>
-                  {tr('step2Note', 'Follow the pairing link provided in the terminal to authenticate your Stripe account.')}
-                </p>
-              </div>
-
-              {/* Step 3 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs">
-                  3. {tr('step3Title', 'Forward events:')} <span className="font-normal opacity-80">{tr('step3Desc', 'Start forwarding Stripe events directly to your local endpoint:')}</span>
-                </div>
-                <div 
-                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                >
-                  <span className="select-all truncate">
-                    stripe listen --forward-to {webhookEndpointUrl.replace(/^https?:\/\//, '')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(`stripe listen --forward-to ${webhookEndpointUrl.replace(/^https?:\/\//, '')}`, 'cli_listen')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
-                      borderColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-border)',
-                      color: copiedCliKey === 'cli_listen' ? '#ffffff' : 'var(--color-text)'
-                    }}
-                  >
-                    {copiedCliKey === 'cli_listen' ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}
-                  </button>
-                </div>
-              </div>
-
-              {/* Step 4 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs">
-                  4. {tr('step4Title', 'Capture the Secret:')} <span className="font-normal opacity-80">{tr('step4Desc', 'The CLI will print a local signing secret (looks like')} <code className="font-mono font-bold text-[10px] px-1 py-0.5 rounded border">whsec_...</code>{tr('step4DescAfter', '). Paste it into the Webhook Secret field below:')}</span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={config.stripe.webhookSecret}
-                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
-                    placeholder="whsec_..."
-                    className="w-full p-2.5 rounded-xl border text-xs outline-none font-mono"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
             </div>
 
-            {/* Method 2: Stripe Dashboard Links */}
-            <div 
-              className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="space-y-0.5">
-                <span className="font-bold text-xs">{tr('method2Title', 'Production / Dashboard API Keys')}</span>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {tr('method2Desc', 'Retrieve your Secret Key and Publishable Key directly from your Stripe Dashboard.')}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={config.testMode ? "https://dashboard.stripe.com/test/apikeys" : "https://dashboard.stripe.com/apikeys"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  <span>{tr('openApiKeysBtn', 'Stripe API Keys')}</span>
-                </a>
-                <a
-                  href={config.testMode ? "https://dashboard.stripe.com/test/webhooks" : "https://dashboard.stripe.com/webhooks"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  <span>{tr('openWebhooksBtn', 'Stripe Webhooks')}</span>
-                </a>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
                 onClick={() => setShowStripeGuideModal(false)}
-                className="px-4 py-2 rounded-xl border font-bold text-xs transition cursor-pointer shadow-xs"
+                className="px-4 py-2 rounded-xl border font-bold text-xs cursor-pointer shadow-xs"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
               >
                 Close
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  setShowStripeGuideModal(false);
-                  await handleSaveSettings();
-                  await handleVerifyStripe();
-                }}
-                className="px-5 py-2 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                <Save className="h-4 w-4" />
-                <span>{tr('saveAndConnectBtn', 'Save Settings & Verify Stripe')}</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Floating Status Toast Feedback */}
+      {/* Floating Status Feedback Toast */}
       {feedback && (
         <div 
           className="fixed bottom-6 right-6 p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2.5 shadow-2xl z-50 animate-in slide-in-from-bottom-5"
