@@ -1,17 +1,24 @@
-// Synchronized Auth Library for Zecratary
+// Generated / Maintained by AI Collaborator - Production Build Compliant
 export interface User {
   id: string;
   name: string;
   email: string;
   role: 'admin' | 'user';
   avatar?: string;
+  image?: string;
+  picture?: string;
   provider?: string;
   token_balance?: number;
   tokenBalance?: number;
   wallet_balance?: number;
   subscription_plan?: string;
   subscriptionPlan?: string;
+  subscriptionTier?: string;
   password?: string;
+  created_at?: string;
+  updated_at?: string;
+  createdAt?: string;
+  updatedAt?: string;
   [key: string]: any;
 }
 
@@ -40,6 +47,8 @@ export const DEFAULT_USERS: User[] = [
   }
 ];
 
+let inMemoryUser: User | null = null;
+
 export function initAuthStorage(): void {
   if (typeof window === 'undefined') return;
   try {
@@ -59,14 +68,17 @@ export function initAuthStorage(): void {
           try {
             const decoded = decodeURIComponent(m[1]);
             const parsed = JSON.parse(decoded);
-            if (parsed && parsed.email) {
+            if (parsed && (parsed.email || parsed.id)) {
               localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
+              inMemoryUser = parsed;
               current = JSON.stringify(parsed);
               break;
             }
           } catch (_) {}
         }
       }
+    } else {
+      try { inMemoryUser = JSON.parse(current); } catch (_) {}
     }
 
     if (!localStorage.getItem('zecratary_users')) {
@@ -76,28 +88,33 @@ export function initAuthStorage(): void {
 }
 
 export function getCurrentUser(): User | null {
+  if (inMemoryUser && (inMemoryUser.email || inMemoryUser.id)) return inMemoryUser;
   if (typeof window === 'undefined') return null;
   try {
     initAuthStorage();
     const raw = localStorage.getItem('zecratary_current_user');
     if (raw && raw !== 'null') {
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.email) return parsed;
+      if (parsed && (parsed.email || parsed.id)) {
+        inMemoryUser = parsed;
+        return inMemoryUser;
+      }
     }
 
-    // Direct cookie evaluation fallback
     const cookieMatches = [
       document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/),
       document.cookie.match(/(?:^|;\s*)zecratary_current_user=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)zecratary_auth_session=([^;]+)/),
       document.cookie.match(/(?:^|;\s*)currentUser=([^;]+)/)
     ];
     for (const m of cookieMatches) {
       if (m && m[1]) {
         try {
           const parsed = JSON.parse(decodeURIComponent(m[1]));
-          if (parsed && parsed.email) {
+          if (parsed && (parsed.email || parsed.id)) {
+            inMemoryUser = parsed;
             localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
-            return parsed;
+            return inMemoryUser;
           }
         } catch (_) {}
       }
@@ -106,11 +123,47 @@ export function getCurrentUser(): User | null {
   return null;
 }
 
+export function syncSessionCookie(user: any): void {
+  if (typeof window === 'undefined' || !user) return;
+  try {
+    const raw = JSON.stringify(user);
+    const encoded = encodeURIComponent(raw);
+    const keys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+    keys.forEach(k => {
+      document.cookie = `${k}=${encoded}; path=/; max-age=604800; SameSite=Lax`;
+    });
+  } catch (_) {}
+}
+
+export function isSessionCookieValid(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const cookieMatches = [
+      document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)zecratary_current_user=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)zecratary_auth_session=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)currentUser=([^;]+)/)
+    ];
+    for (const m of cookieMatches) {
+      if (m && m[1]) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(m[1]));
+          if (parsed && (parsed.email || parsed.id)) {
+            return true;
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
 export function setCurrentUser(user: User | null): void {
+  inMemoryUser = user;
   if (typeof window === 'undefined') return;
   try {
+    const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser', 'user'];
     if (!user) {
-      const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser', 'user'];
       keys.forEach(k => {
         localStorage.removeItem(k);
         document.cookie = `${k}=; path=/; max-age=0; SameSite=Lax`;
@@ -120,44 +173,91 @@ export function setCurrentUser(user: User | null): void {
 
     const raw = JSON.stringify(user);
     const encoded = encodeURIComponent(raw);
-    const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser'];
-    
     keys.forEach(k => {
       localStorage.setItem(k, raw);
       document.cookie = `${k}=${encoded}; path=/; max-age=604800; SameSite=Lax`;
     });
+
+    syncSessionCookie(user);
+  } catch (_) {}
+
+  try {
+    window.dispatchEvent(new CustomEvent('zecratary_auth_changed', { detail: user }));
+    window.dispatchEvent(new CustomEvent('zecratary_users_updated', { detail: user }));
+    window.dispatchEvent(new Event('storage'));
   } catch (_) {}
 }
 
-export function loginUser(email: string, password?: string): User | null {
+export function isAuthenticated(): boolean {
+  return getCurrentUser() !== null || isSessionCookieValid();
+}
+
+export function loginUser(
+  emailOrPayload: string | { email?: string; password?: string; [key: string]: any },
+  passwordInput?: string
+): (User & { success: boolean; user: User }) | null {
   if (typeof window === 'undefined') return null;
   initAuthStorage();
   try {
-    const cleanEmail = email.toLowerCase().trim();
+    let email = '';
+    let password = '';
+    if (typeof emailOrPayload === 'string') {
+      email = emailOrPayload.trim().toLowerCase();
+      password = (passwordInput || '').trim();
+    } else if (emailOrPayload && typeof emailOrPayload === 'object') {
+      email = (emailOrPayload.email || '').trim().toLowerCase();
+      password = (emailOrPayload.password || passwordInput || '').trim();
+    }
+
+    if (!email) return null;
+
     let storedUsers: User[] = [];
     const raw = localStorage.getItem('zecratary_users');
     if (raw) {
       try { storedUsers = JSON.parse(raw); } catch (_) {}
     }
     const combined = [...DEFAULT_USERS, ...storedUsers];
-    const match = combined.find(u => u.email.toLowerCase().trim() === cleanEmail);
-    
+    const match = combined.find(u => u.email.toLowerCase().trim() === email);
+
     if (match) {
-      if (password && match.password && match.password !== password.trim()) {
+      if (password && match.password && match.password !== password) {
         return null;
       }
       const safe: User = { ...match };
       delete (safe as any).password;
       setCurrentUser(safe);
-      return safe;
+      syncSessionCookie(safe);
+      return Object.assign(safe, { success: true, user: safe });
     }
   } catch (_) {}
   return null;
 }
 
-export function logoutUser(): void {
+export async function logoutUser(): Promise<void> {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (_) {}
   setCurrentUser(null);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('zecratary_auth_changed'));
+  }
+}
+
+export async function registerUser(payload: { email: string; name?: string; password?: string; [key: string]: any }): Promise<any> {
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok && data.success && data.user) {
+      setCurrentUser(data.user);
+      syncSessionCookie(data.user);
+      return { success: true, user: data.user };
+    }
+    return { success: false, error: data.error || 'Registration failed' };
+  } catch (err: any) {
+    return { success: false, error: err.message };
   }
 }

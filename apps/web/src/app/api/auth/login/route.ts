@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { queryMysql } from '@/lib/mysql';
 
 export async function POST(req: Request) {
   try {
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
     const cleanPassword = String(password).trim();
     let matchedUser: any = null;
 
-    // 1. Check PostgreSQL users database table
+    // 1. PostgreSQL User Authentication & Audit Timestamp
     try {
       const { query } = await import('@/lib/db');
       if (typeof query === 'function') {
@@ -37,7 +38,6 @@ export async function POST(req: Request) {
               subscription_plan: dbUser.subscription_plan || 'free'
             };
 
-            // Update last_login_at in PostgreSQL
             try {
               await query('UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1', [dbUser.id]);
             } catch (_) {}
@@ -48,32 +48,35 @@ export async function POST(req: Request) {
       console.warn('[auth:login] PostgreSQL check bypassed or unavailable:', pgErr);
     }
 
-    // 2. MySQL fallback check (Constraint 8)
+    // 2. MySQL Fallback Authentication & Audit Timestamp (Constraint 8)
     if (!matchedUser) {
       try {
-        const mysqlModule = await import('@/lib/mysql');
-        if (mysqlModule && typeof mysqlModule.queryMysql === 'function') {
-          const myRows: any = await mysqlModule.queryMysql(
-            'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1',
-            [cleanEmail]
-          );
-          if (Array.isArray(myRows) && myRows.length > 0) {
-            const myUser = myRows[0];
-            if (!myUser.password || myUser.password === cleanPassword) {
-              matchedUser = {
-                id: String(myUser.id),
-                name: myUser.name || 'User',
-                email: myUser.email,
-                role: myUser.role || 'user',
-                avatar: myUser.avatar || '',
-                provider: myUser.provider || 'local',
-                token_balance: Number(myUser.token_balance ?? 50000),
-                subscription_plan: myUser.subscription_plan || 'free'
-              };
-            }
+        const myRows = await queryMysql(
+          'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1',
+          [cleanEmail]
+        );
+        if (Array.isArray(myRows) && myRows.length > 0) {
+          const myUser: any = myRows[0];
+          if (!myUser.password || myUser.password === cleanPassword) {
+            matchedUser = {
+              id: String(myUser.id),
+              name: myUser.name || 'User',
+              email: myUser.email,
+              role: myUser.role || 'user',
+              avatar: myUser.avatar || '',
+              provider: myUser.provider || 'local',
+              token_balance: Number(myUser.token_balance ?? 50000),
+              subscription_plan: myUser.subscription_plan || 'free'
+            };
+
+            try {
+              await queryMysql('UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = ?', [myUser.id]);
+            } catch (_) {}
           }
         }
-      } catch (_) {}
+      } catch (myErr) {
+        console.warn('[auth:login] MySQL check bypassed or unavailable:', myErr);
+      }
     }
 
     // 3. Fallback to default user presets & local users.json
@@ -124,7 +127,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Invalid email or password' }, { status: 401 });
     }
 
-    // Prepare unified response with destination set to /dashboard
+    // Always redirect to /dashboard upon successful login
     const response = NextResponse.json({
       success: true,
       user: matchedUser,

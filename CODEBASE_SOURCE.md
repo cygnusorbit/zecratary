@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.49",
+  "version": "8.1.50",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.49",
+  "version": "8.1.50",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -43850,80 +43850,91 @@ export async function GET(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/auth/google-session/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { syncUserToPostgres } from '@/lib/postgresUser';
+import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const profile = body.profile;
-    const requestedCallback = body.callbackUrl;
+    const { profile } = body || {};
 
     if (!profile || !profile.email) {
-      return NextResponse.json({ error: 'Missing profile email' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Profile with email is required' }, { status: 400 });
     }
 
-    const email = profile.email.toLowerCase().trim();
-    const name = profile.name || profile.given_name || email.split('@')[0];
-    const picture = profile.picture || '';
-    const googleId = profile.sub || profile.id || Date.now().toString();
+    const cleanEmail = profile.email.toLowerCase().trim();
+    const displayName = profile.name || profile.given_name || cleanEmail.split('@')[0];
+    const avatar = profile.picture || profile.avatar || '';
 
-    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
-
-    const candidateUser = {
-      id: `usr_g_${googleId}`,
-      name,
-      email,
-      role: isEmailAdmin ? 'admin' : 'user',
-      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
-      picture,
-      avatar: picture,
-      createdAt: new Date().toISOString()
+    const userObj = {
+      id: profile.sub ? `usr_google_${profile.sub}` : `usr_${Date.now()}`,
+      name: displayName,
+      email: cleanEmail,
+      avatar: avatar,
+      provider: 'google',
+      role: cleanEmail.includes('admin') ? 'admin' : 'user',
+      token_balance: 50000,
+      subscription_plan: 'taster'
     };
 
-    const finalUser = await syncUserToPostgres(candidateUser);
+    // Upsert into PostgreSQL users table (Constraint 8)
+    try {
+      const { query } = await import('@/lib/db');
+      if (typeof query === 'function') {
+        await query(`
+          CREATE TABLE IF NOT EXISTS users (
+            id VARCHAR(255) PRIMARY KEY,
+            name VARCHAR(255),
+            email VARCHAR(255) UNIQUE NOT NULL,
+            avatar TEXT,
+            provider VARCHAR(50) DEFAULT 'local',
+            role VARCHAR(50) DEFAULT 'user',
+            token_balance BIGINT DEFAULT 50000,
+            subscription_plan VARCHAR(100) DEFAULT 'free',
+            last_login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
 
-    let targetUrl = (requestedCallback || '').trim();
-    if (
-      !targetUrl || 
-      targetUrl === '/login' || 
-      targetUrl.startsWith('/login?') || 
-      targetUrl.startsWith('/login/') ||
-      targetUrl === '/register'
-    ) {
-      targetUrl = finalUser.role === 'admin' ? '/admin' : '/profile';
+        await query(`
+          INSERT INTO users (id, name, email, avatar, provider, role, token_balance, subscription_plan, last_login_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+          ON CONFLICT (email) DO UPDATE SET
+            name = EXCLUDED.name,
+            avatar = EXCLUDED.avatar,
+            last_login_at = NOW(),
+            updated_at = NOW()
+        `, [userObj.id, userObj.name, userObj.email, userObj.avatar, userObj.provider, userObj.role, userObj.token_balance, userObj.subscription_plan]);
+      }
+    } catch (dbErr) {
+      console.warn('[google-session] Database sync warning:', dbErr);
     }
 
+    // Always redirect to /dashboard upon successful Google login
     const response = NextResponse.json({
       success: true,
-      user: finalUser,
-      redirectUrl: targetUrl
+      user: userObj,
+      redirectUrl: '/dashboard'
     });
 
-    const serializedUser = JSON.stringify(finalUser);
-    const cookieNames = [
-      'zecratary_session',
-      'zecratary_current_user',
-      'zecratary_auth_session',
-      'currentUser'
-    ];
-
-    for (const cname of cookieNames) {
-      response.cookies.set(cname, serializedUser, {
+    const userRaw = JSON.stringify(userObj);
+    const userEncoded = encodeURIComponent(userRaw);
+    const keys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+    
+    keys.forEach(k => {
+      response.cookies.set({
+        name: k,
+        value: userEncoded,
         path: '/',
-        httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 86400 * 7
+        maxAge: 604800,
+        sameSite: 'lax'
       });
-    }
+    });
 
     return response;
   } catch (err: any) {
-    console.error('[google-session] Error:', err);
-    return NextResponse.json({ error: err.message || 'Session creation failed' }, { status: 500 });
+    console.error('[google-session] Handler error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -44340,140 +44351,157 @@ export async function POST(req: NextRequest, context: { params: Promise<{ provid
 
 ## File: `apps/web/src/app/api/auth/login/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export const dynamic = 'force-dynamic';
-
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
-  try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (err) {
-    console.error('[PostgreSQL] Connection pool error in /api/auth/login:', err);
-    return null;
-  }
-}
-
-async function ensureUsersTable(pool: any) {
-  if (!pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id VARCHAR(100) PRIMARY KEY,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        name VARCHAR(255),
-        role VARCHAR(50) DEFAULT 'user',
-        password VARCHAR(255),
-        subscription_plan VARCHAR(100) DEFAULT 'taster',
-        token_balance INT DEFAULT 50,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-  } catch (_) {}
-}
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const email = (body.email || '').trim().toLowerCase();
-    const password = (body.password || '').trim();
+    const { email, password } = body || {};
 
-    if (!email) {
-      return NextResponse.json({ success: false, error: 'Email is required' }, { status: 400 });
+    if (!email || !password) {
+      return NextResponse.json({ success: false, error: 'Email and password are required' }, { status: 400 });
     }
 
-    const pool = await getPostgresPool();
-    let authenticatedUser: any = null;
+    const cleanEmail = String(email).toLowerCase().trim();
+    const cleanPassword = String(password).trim();
+    let matchedUser: any = null;
 
-    if (pool) {
-      await ensureUsersTable(pool);
-
-      const userRes = await pool.query(
-        'SELECT id, email, name, role, subscription_plan, token_balance FROM users WHERE LOWER(email) = $1 LIMIT 1',
-        [email]
-      );
-
-      if (userRes.rows.length > 0) {
-        const row = userRes.rows[0];
-        authenticatedUser = {
-          id: row.id,
-          email: row.email,
-          name: row.name || row.email.split('@')[0],
-          role: row.role || 'user',
-          subscriptionPlan: row.subscription_plan || 'taster',
-          tokenBalance: Number(row.token_balance ?? 50)
-        };
-
-        await pool.query('UPDATE users SET updated_at = NOW() WHERE id = $1', [row.id]);
-      } else {
-        // Auto-provision if initial administrator or first login
-        const isAdmin = email.includes('admin');
-        const newId = isAdmin ? 'usr_admin_1' : `usr_${Date.now()}`;
-        const newName = isAdmin ? 'System Admin' : email.split('@')[0];
-        const newRole = isAdmin ? 'admin' : 'user';
-        const newPlan = isAdmin ? 'nutrition-pro-monthly' : 'taster';
-        const newTokens = isAdmin ? 1000 : 50;
-
-        await pool.query(
-          `INSERT INTO users (id, email, name, role, subscription_plan, token_balance, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW())
-           ON CONFLICT (id) DO UPDATE SET updated_at = NOW();`,
-          [newId, email, newName, newRole, newPlan, newTokens]
+    // 1. Check PostgreSQL users database table
+    try {
+      const { query } = await import('@/lib/db');
+      if (typeof query === 'function') {
+        const rows = await query(
+          'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+          [cleanEmail]
         );
+        if (rows && rows.length > 0) {
+          const dbUser = rows[0];
+          if (!dbUser.password || dbUser.password === cleanPassword) {
+            matchedUser = {
+              id: String(dbUser.id),
+              name: dbUser.name || 'User',
+              email: dbUser.email,
+              role: dbUser.role || 'user',
+              avatar: dbUser.avatar || '',
+              provider: dbUser.provider || 'local',
+              token_balance: Number(dbUser.token_balance ?? 50000),
+              subscription_plan: dbUser.subscription_plan || 'free'
+            };
 
-        authenticatedUser = {
-          id: newId,
-          email,
-          name: newName,
-          role: newRole,
-          subscriptionPlan: newPlan,
-          tokenBalance: newTokens
+            // Update last_login_at in PostgreSQL
+            try {
+              await query('UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1', [dbUser.id]);
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (pgErr) {
+      console.warn('[auth:login] PostgreSQL check bypassed or unavailable:', pgErr);
+    }
+
+    // 2. MySQL fallback check (Constraint 8)
+    if (!matchedUser) {
+      try {
+        const mysqlModule = await import('@/lib/mysql');
+        if (mysqlModule && typeof mysqlModule.queryMysql === 'function') {
+          const myRows: any = await mysqlModule.queryMysql(
+            'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1',
+            [cleanEmail]
+          );
+          if (Array.isArray(myRows) && myRows.length > 0) {
+            const myUser = myRows[0];
+            if (!myUser.password || myUser.password === cleanPassword) {
+              matchedUser = {
+                id: String(myUser.id),
+                name: myUser.name || 'User',
+                email: myUser.email,
+                role: myUser.role || 'user',
+                avatar: myUser.avatar || '',
+                provider: myUser.provider || 'local',
+                token_balance: Number(myUser.token_balance ?? 50000),
+                subscription_plan: myUser.subscription_plan || 'free'
+              };
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Fallback to default user presets & local users.json
+    if (!matchedUser) {
+      if (cleanEmail === 'admin@zecratary.com' && (cleanPassword === 'admin' || cleanPassword === 'admin123')) {
+        matchedUser = {
+          id: 'usr_admin_1',
+          name: 'System Administrator',
+          email: 'admin@zecratary.com',
+          role: 'admin',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+          provider: 'local',
+          token_balance: 1000000,
+          subscription_plan: 'nutrition-pro'
         };
+      } else if (cleanEmail === 'user@zecratary.com' && (cleanPassword === 'password' || cleanPassword === 'user123')) {
+        matchedUser = {
+          id: 'usr_demo_1',
+          name: 'Chef Jordan',
+          email: 'user@zecratary.com',
+          role: 'user',
+          avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150',
+          provider: 'local',
+          token_balance: 50000,
+          subscription_plan: 'taster'
+        };
+      } else {
+        const jsonCandidates = ['data/users.json', 'apps/web/data/users.json'];
+        for (const jPath of jsonCandidates) {
+          if (fs.existsSync(jPath)) {
+            try {
+              const fileData = JSON.parse(fs.readFileSync(jPath, 'utf-8'));
+              if (Array.isArray(fileData)) {
+                const found = fileData.find((u: any) => u.email?.toLowerCase().trim() === cleanEmail);
+                if (found && (!found.password || found.password === cleanPassword)) {
+                  matchedUser = { ...found };
+                  delete matchedUser.password;
+                  break;
+                }
+              }
+            } catch (_) {}
+          }
+        }
       }
     }
 
-    if (!authenticatedUser) {
-      const isAdmin = email.includes('admin');
-      authenticatedUser = {
-        id: isAdmin ? 'usr_admin_1' : `usr_${Date.now()}`,
-        email,
-        name: isAdmin ? 'System Admin' : email.split('@')[0],
-        role: isAdmin ? 'admin' : 'user',
-        subscriptionPlan: isAdmin ? 'nutrition-pro-monthly' : 'taster',
-        tokenBalance: isAdmin ? 1000 : 50
-      };
+    if (!matchedUser) {
+      return NextResponse.json({ success: false, error: 'Invalid email or password' }, { status: 401 });
     }
 
+    // Prepare unified response with destination set to /dashboard
     const response = NextResponse.json({
       success: true,
-      message: 'Login successful',
-      user: authenticatedUser
+      user: matchedUser,
+      redirectUrl: '/dashboard'
     });
 
-    response.cookies.set('zecratary_session', JSON.stringify(authenticatedUser), {
-      path: '/',
-      httpOnly: false,
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60
+    const userRaw = JSON.stringify(matchedUser);
+    const userEncoded = encodeURIComponent(userRaw);
+    const cookieKeys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+
+    cookieKeys.forEach(k => {
+      response.cookies.set({
+        name: k,
+        value: userEncoded,
+        path: '/',
+        maxAge: 604800,
+        sameSite: 'lax'
+      });
     });
 
     return response;
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Internal Server Error' }, { status: 500 });
+  } catch (error: any) {
+    console.error('[api/auth/login] Error during authentication:', error);
+    return NextResponse.json({ success: false, error: 'Internal server authentication error' }, { status: 500 });
   }
 }
 
@@ -59644,9 +59672,8 @@ export default function BooksRedirectPage() {
 
 ## File: `apps/web/src/app/login/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator - Production Build Compliant
 'use client';
-
-// Generated / Updated by AI Collaborator
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -59682,8 +59709,11 @@ function persistSessionUniversally(user: any) {
   } catch (_) {}
 }
 
+/**
+ * Sanitizes destination and guarantees redirection to /dashboard
+ */
 function sanitizeDestination(targetUrl: string | null | undefined, userRole?: string): string {
-  const fallback = userRole === 'admin' ? '/admin' : '/profile';
+  const fallback = '/dashboard';
   if (!targetUrl) return fallback;
 
   const trimmed = targetUrl.trim();
@@ -59699,7 +59729,9 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
         path.startsWith('/login/') || 
         path === '/register' || 
         path === '/register/' || 
-        path.startsWith('/register/')
+        path.startsWith('/register/') ||
+        path === '/' ||
+        path === ''
       ) {
         return fallback;
       }
@@ -59722,6 +59754,8 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
     lower.startsWith('/register/') ||
     lower === 'login' ||
     lower === 'register' ||
+    lower === '/' ||
+    lower === '' ||
     lower.includes('%2flogin') ||
     lower.includes('%2fregister')
   ) {
@@ -59736,13 +59770,11 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const langContext = useTranslation();
   const rawT = langContext?.t;
-  const currentLangCode = (langContext as any)?.locale || (langContext as any)?.language || (langContext as any)?.currentLanguage || 'en';
+  const currentLangCode = langContext?.locale || langContext?.currentLanguage || 'en';
 
-  // Dynamic server-backed custom dictionary cache
   const [dynamicDict, setDynamicDict] = useState<Record<string, string>>({});
   const [, setRerenderTrigger] = useState(0);
 
-  // Translation helper resolving: PostgreSQL dynamic phrases -> Context t() -> Fallback
   const t = useCallback((key: string, fallback?: string): string => {
     if (dynamicDict && dynamicDict[key]) {
       return dynamicDict[key];
@@ -59858,7 +59890,7 @@ function LoginForm() {
     }
   }, []);
 
-  // 4. Automated Code Exchange
+  // 4. Automated Google Code Exchange
   useEffect(() => {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
@@ -59871,7 +59903,7 @@ function LoginForm() {
     }
   }, [searchParams, t]);
 
-  // 5. Map Error Parameters
+  // 5. Error Banner Mapping
   useEffect(() => {
     const err = searchParams.get('error');
     if (err) {
@@ -59879,7 +59911,7 @@ function LoginForm() {
       if (err === 'missing_google_client_id') {
         setErrorMsg(t('missingGoogleClientId', 'Google Client ID is not configured. Please add your OAuth Client ID in /admin/social-login-setting.'));
       } else if (err === 'missing_google_client_secret') {
-        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured in /admin/social-login-setting. Click Google to sign in directly.'));
+        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured. Click Google to sign in directly.'));
       } else if (err === 'google_access_denied') {
         setErrorMsg(t('googleAccessDenied', 'Google sign-in was canceled.'));
       } else if (err === 'token_exchange_failed' || err === 'oauth_handshake_error') {
@@ -59929,7 +59961,7 @@ function LoginForm() {
         }
       }
     } catch (err) {
-      console.error('[login] Failed to load dynamic social login settings:', err);
+      console.error('[login] Failed to load social login settings:', err);
     } finally {
       isFetchingSocialRef.current = false;
       setSocialLoaded(true);
@@ -59955,7 +59987,7 @@ function LoginForm() {
     };
   }, [fetchSocialConfig]);
 
-  // 7. Session Verification Guard
+  // 7. Session Verification Guard: Forward active sessions to /dashboard
   const verifySession = useCallback(() => {
     if (isRedirectingRef.current) return;
     initAuthStorage();
@@ -60012,31 +60044,58 @@ function LoginForm() {
     };
   }, [verifySession]);
 
-  // 8. Credentials Submission (Decoupled from native form)
+  // 8. Credentials Submission: Authenticates with PostgreSQL/MySQL API & redirects to /dashboard
   const handleSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
     if (e && 'preventDefault' in e) e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    if (!email.trim() || !password) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
       setErrorMsg(t('fillRequiredFields', 'Please provide both email and password.'));
       return;
     }
 
     setLoading(true);
     try {
-      const user = await Promise.resolve(loginUser(email.trim(), password));
-      if (user) {
+      let resolvedUser: any = null;
+
+      // Layer 1: Query server database authentication API (/api/auth/login)
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, password: password.trim() })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.user) {
+            resolvedUser = data.user;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('[login] Server API call encountered network error, trying local adapter:', apiErr);
+      }
+
+      // Layer 2: Client auth fallback
+      if (!resolvedUser && typeof loginUser === 'function') {
+        const localAuth = await Promise.resolve(loginUser(cleanEmail, password.trim()));
+        if (localAuth) {
+          resolvedUser = localAuth;
+        }
+      }
+
+      if (resolvedUser) {
         setSuccessMsg(t('loginSuccess', 'Signing in...'));
-        persistSessionUniversally(user);
+        persistSessionUniversally(resolvedUser);
         window.dispatchEvent(new Event('zecratary_auth_changed'));
 
         const rawCb = searchParams.get('callbackUrl');
-        const dest = sanitizeDestination(rawCb, user.role);
+        const dest = sanitizeDestination(rawCb, resolvedUser.role);
 
         setTimeout(() => {
           window.location.replace(dest);
-        }, 300);
+        }, 250);
       } else {
         setErrorMsg(t('invalidCredentials', 'Invalid email or password.'));
         setLoading(false);
@@ -60047,7 +60106,7 @@ function LoginForm() {
     }
   };
 
-  // 9. GIS Authentication Trigger
+  // 9. GIS Authentication Trigger: Redirects directly to /dashboard
   const handleSocialClick = (provider: 'google' | 'facebook' | 'apple') => {
     const rawCb = searchParams.get('callbackUrl');
     const dest = sanitizeDestination(rawCb, 'user');
@@ -60131,7 +60190,11 @@ function LoginForm() {
   ].filter(Boolean).length;
 
   return (
-    <div className="w-full max-w-md mx-auto space-y-6">
+    <div 
+      role="region" 
+      aria-label="Sign In Container" 
+      className="w-full max-w-md mx-auto space-y-6"
+    >
       {/* Brand Header */}
       <div className="text-center space-y-2">
         <div 
@@ -60209,8 +60272,12 @@ function LoginForm() {
           </div>
         )}
 
-        {/* Credentials Container (No Native Form) */}
-        <div className="space-y-4 text-xs">
+        {/* Credentials Container with Autofill Guardrail (Constraint 9) */}
+        <div 
+          role="region" 
+          aria-label="Credentials Form" 
+          className="space-y-4 text-xs"
+        >
           <div>
             <label 
               className="block font-bold mb-1.5 transition-colors duration-200"
@@ -60226,7 +60293,12 @@ function LoginForm() {
               <input 
                 type="email"
                 required
-                autoComplete="email"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 placeholder={t('emailPlaceholder', 'you@example.com')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -60270,7 +60342,12 @@ function LoginForm() {
               <input 
                 type={showPassword ? 'text' : 'password'}
                 required
-                autoComplete="current-password"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 placeholder={t('passwordPlaceholder', '••••••••••••')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -75029,272 +75106,168 @@ export function deleteRecipeJsonFile(id: string): void {
 
 ## File: `apps/web/src/lib/auth.ts`
 ```typescript
-// Generated / Maintained by AI Collaborator
+// Synchronized Auth Library for Zecratary
 export interface User {
-  password?: string;
-
   id: string;
+  name: string;
   email: string;
-  name?: string;
-  role?: 'admin' | 'user';
+  role: 'admin' | 'user';
   avatar?: string;
-  image?: string;
-  subscriptionPlan?: string;
+  provider?: string;
+  token_balance?: number;
   tokenBalance?: number;
-  tokenUsage?: any;
-  created_at?: string;
-  updated_at?: string;
-
+  wallet_balance?: number;
+  subscription_plan?: string;
+  subscriptionPlan?: string;
+  password?: string;
   [key: string]: any;
 }
 
-export const DEFAULT_ADMIN_USER: User = {
-  id: 'usr_admin_1',
-  email: 'admin@example.com',
-  name: 'System Admin',
-  role: 'admin',
-  subscriptionPlan: 'nutrition-pro-monthly',
-  tokenBalance: 1000
-};
-
 export const DEFAULT_USERS: User[] = [
-  DEFAULT_ADMIN_USER,
   {
-    id: 'usr_user_demo',
-    email: 'user@example.com',
-    name: 'Sample User',
+    id: 'usr_admin_1',
+    name: 'System Administrator',
+    email: 'admin@zecratary.com',
+    role: 'admin',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    provider: 'local',
+    token_balance: 1000000,
+    subscription_plan: 'nutrition-pro',
+    password: 'admin'
+  },
+  {
+    id: 'usr_demo_1',
+    name: 'Chef Jordan',
+    email: 'user@zecratary.com',
     role: 'user',
-    subscriptionPlan: 'taster',
-    tokenBalance: 50
+    avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150',
+    provider: 'local',
+    token_balance: 50000,
+    subscription_plan: 'taster',
+    password: 'password'
   }
 ];
-
-let inMemoryUser: User | null = null;
 
 export function initAuthStorage(): void {
   if (typeof window === 'undefined') return;
   try {
-    const raw = localStorage.getItem('zecratary_current_user');
-    if (raw) {
-      inMemoryUser = JSON.parse(raw);
+    let current = localStorage.getItem('zecratary_current_user');
+    
+    // Cookie-to-LocalStorage Hydration Bridge
+    if (!current || current === 'null' || current === '{}') {
+      const cookieMatches = [
+        document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/),
+        document.cookie.match(/(?:^|;\s*)zecratary_current_user=([^;]+)/),
+        document.cookie.match(/(?:^|;\s*)zecratary_auth_session=([^;]+)/),
+        document.cookie.match(/(?:^|;\s*)currentUser=([^;]+)/)
+      ];
+      
+      for (const m of cookieMatches) {
+        if (m && m[1]) {
+          try {
+            const decoded = decodeURIComponent(m[1]);
+            const parsed = JSON.parse(decoded);
+            if (parsed && parsed.email) {
+              localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
+              current = JSON.stringify(parsed);
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (!localStorage.getItem('zecratary_users')) {
+      localStorage.setItem('zecratary_users', JSON.stringify(DEFAULT_USERS));
     }
   } catch (_) {}
 }
 
 export function getCurrentUser(): User | null {
-  if (inMemoryUser) return inMemoryUser;
   if (typeof window === 'undefined') return null;
   try {
+    initAuthStorage();
     const raw = localStorage.getItem('zecratary_current_user');
-    if (raw) {
-      inMemoryUser = JSON.parse(raw);
-      return inMemoryUser;
+    if (raw && raw !== 'null') {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.email) return parsed;
+    }
+
+    // Direct cookie evaluation fallback
+    const cookieMatches = [
+      document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)zecratary_current_user=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)currentUser=([^;]+)/)
+    ];
+    for (const m of cookieMatches) {
+      if (m && m[1]) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(m[1]));
+          if (parsed && parsed.email) {
+            localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
+            return parsed;
+          }
+        } catch (_) {}
+      }
     }
   } catch (_) {}
   return null;
 }
 
 export function setCurrentUser(user: User | null): void {
-  inMemoryUser = user;
   if (typeof window === 'undefined') return;
   try {
-    if (user) {
-      localStorage.setItem('zecratary_current_user', JSON.stringify(user));
-      document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(user))}; path=/; max-age=2592000; SameSite=Lax`;
-    } else {
-      localStorage.removeItem('zecratary_current_user');
-      document.cookie = 'zecratary_session=; path=/; max-age=0; SameSite=Lax';
-    }
-  } catch (_) {}
-
-  try {
-    window.dispatchEvent(new CustomEvent('zecratary_auth_changed', { detail: user }));
-    window.dispatchEvent(new CustomEvent('zecratary_users_updated', { detail: user }));
-    window.dispatchEvent(new Event('storage'));
-  } catch (_) {}
-}
-
-export function syncSessionCookie(user?: User | null): void {
-  if (typeof window === 'undefined') return;
-  const targetUser = user || getCurrentUser();
-  if (targetUser) {
-    try {
-      document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(targetUser))}; path=/; max-age=2592000; SameSite=Lax`;
-    } catch (_) {}
-  }
-}
-
-export function isSessionCookieValid(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const cookies = document.cookie.split(';');
-    const session = cookies.find((c) => c.trim().startsWith('zecratary_session='));
-    return Boolean(session && session.split('=')[1]);
-  } catch (_) {
-    return false;
-  }
-}
-
-export function isAuthenticated(): boolean {
-  return getCurrentUser() !== null;
-}
-
-export async function loginUser(
-  emailOrPayload: string | { email?: string; password?: string; [key: string]: any },
-  passwordInput?: string
-): Promise<{ success: boolean; user: User | null; error?: string; [key: string]: any }> {
-  let email = '';
-  let password = '';
-
-  if (typeof emailOrPayload === 'string') {
-    email = emailOrPayload.trim();
-    password = (passwordInput || '').trim();
-  } else if (emailOrPayload && typeof emailOrPayload === 'object') {
-    email = (emailOrPayload.email || '').trim();
-    password = (emailOrPayload.password || passwordInput || '').trim();
-  }
-
-  if (!email) {
-    return { success: false, user: null, error: 'Email address is required.' };
-  }
-
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-
-    const data = await res.json();
-    if (res.ok && data.success && data.user) {
-      const activeUser: User = {
-        id: data.user.id || `usr_${Date.now()}`,
-        email: data.user.email || email,
-        name: data.user.name || email.split('@')[0],
-        role: data.user.role || (email.toLowerCase().includes('admin') ? 'admin' : 'user'),
-        subscriptionPlan: data.user.subscriptionPlan || data.user.subscription_plan || 'taster',
-        tokenBalance: data.user.tokenBalance ?? data.user.token_balance ?? 50
-      };
-
-      setCurrentUser(activeUser);
-      syncSessionCookie(activeUser);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('zecratary_login_success', { detail: activeUser }));
-      }
-
-      return {
-        success: true,
-        user: activeUser,
-        ...activeUser,
-        error: undefined
-      };
+    if (!user) {
+      const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser', 'user'];
+      keys.forEach(k => {
+        localStorage.removeItem(k);
+        document.cookie = `${k}=; path=/; max-age=0; SameSite=Lax`;
+      });
+      return;
     }
 
-    if (!res.ok && data.error) {
-      return { success: false, user: null, error: data.error };
-    }
-  } catch (err: any) {
-    console.warn('[loginUser API notice]:', err.message);
-  }
-
-  // Client Fallback
-  const cleanEmail = email.toLowerCase();
-  const isAdmin = cleanEmail === 'admin@example.com' || cleanEmail === 'admin' || cleanEmail.includes('admin');
-  
-  const fallbackUser: User = {
-    id: isAdmin ? 'usr_admin_1' : `usr_${Date.now()}`,
-    email: email.includes('@') ? email : `${email}@example.com`,
-    name: isAdmin ? 'System Admin' : email.split('@')[0],
-    role: isAdmin ? 'admin' : 'user',
-    subscriptionPlan: isAdmin ? 'nutrition-pro-monthly' : 'taster',
-    tokenBalance: isAdmin ? 1000 : 50
-  };
-
-  setCurrentUser(fallbackUser);
-  syncSessionCookie(fallbackUser);
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_login_success', { detail: fallbackUser }));
-  }
-
-  return {
-    success: true,
-    user: fallbackUser,
-    ...fallbackUser,
-    error: undefined
-  };
-}
-
-
-
-export async function registerUser(payload: { email: string; name?: string; password?: string }): Promise<any> {
-  try {
-    const res = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (res.ok && data.success && data.user) {
-      setCurrentUser(data.user);
-      syncSessionCookie(data.user);
-      return { success: true, user: data.user };
-    }
-    return { success: false, error: data.error || 'Registration failed' };
-  } catch (err: any) {
-    return { success: false, error: err.message };
-  }
-}
-
-export function logoutUser(redirectTo: string = '/') {
-  if (typeof window === 'undefined') return;
-
-  try {
-    // 1. Clear Local and Session Storage
-    localStorage.removeItem('zecratary_current_user');
-    localStorage.removeItem('zecratary_user');
-    localStorage.removeItem('currentUser');
-    localStorage.removeItem('token_balance');
-    localStorage.removeItem('wallet_balance');
-    localStorage.removeItem('zecratary_auth_session');
+    const raw = JSON.stringify(user);
+    const encoded = encodeURIComponent(raw);
+    const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser'];
     
-    sessionStorage.removeItem('zec_login_bounce_ts');
-    sessionStorage.removeItem('zec_login_bounce_count');
+    keys.forEach(k => {
+      localStorage.setItem(k, raw);
+      document.cookie = `${k}=${encoded}; path=/; max-age=604800; SameSite=Lax`;
+    });
   } catch (_) {}
+}
 
-  // 2. Clear All Session Cookies across root path and domain
-  const cookieKeys = [
-    'zecratary_session',
-    'zecratary_current_user',
-    'zecratary_auth_session',
-    'currentUser'
-  ];
-  for (const key of cookieKeys) {
-    document.cookie = `${key}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax`;
-    if (typeof window !== 'undefined' && window.location.hostname) {
-      document.cookie = `${key}=; path=/; domain=${window.location.hostname}; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax`;
-    }
-  }
-
-  // 3. Notify app components and auth listeners
-  window.dispatchEvent(new Event('zecratary_auth_changed'));
-
-  // 4. Server-Side Logout Call to synchronize with PostgreSQL
+export function loginUser(email: string, password?: string): User | null {
+  if (typeof window === 'undefined') return null;
+  initAuthStorage();
   try {
-    fetch('/api/auth/logout', { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ redirectUrl: redirectTo || '/' }),
-      keepalive: true 
-    }).catch(() => {});
+    const cleanEmail = email.toLowerCase().trim();
+    let storedUsers: User[] = [];
+    const raw = localStorage.getItem('zecratary_users');
+    if (raw) {
+      try { storedUsers = JSON.parse(raw); } catch (_) {}
+    }
+    const combined = [...DEFAULT_USERS, ...storedUsers];
+    const match = combined.find(u => u.email.toLowerCase().trim() === cleanEmail);
+    
+    if (match) {
+      if (password && match.password && match.password !== password.trim()) {
+        return null;
+      }
+      const safe: User = { ...match };
+      delete (safe as any).password;
+      setCurrentUser(safe);
+      return safe;
+    }
   } catch (_) {}
+  return null;
+}
 
-  // 5. Navigate cleanly to Homepage ('/')
-  const target = redirectTo || '/';
-  setTimeout(() => {
-    window.location.replace(target);
-  }, 100);
+export function logoutUser(): void {
+  setCurrentUser(null);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('zecratary_auth_changed'));
+  }
 }
 
 ```
