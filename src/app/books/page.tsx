@@ -12,6 +12,18 @@ import {
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
+// Safe URL domain extractor getSafeHostname(avoiding) on string primitive errors
+const getSafeHostname = (urlStr?: any): string => {
+  if (!urlStr || typeof urlStr !== 'string') return '';
+  try {
+    const raw = urlStr.trim();
+    const candidate = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
+    return new URL(candidate).hostname.replace(/^www\./, '');
+  } catch (_) {
+    return String(urlStr).replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, '');
+  }
+};
+
 const COVER_GRADIENTS = [
   { id: 'rose', key: 'themeRosePink', fallback: 'Rose Pink', className: 'from-pink-600 via-rose-500 to-rose-600' },
   { id: 'orange', key: 'themeSunsetOrange', fallback: 'Sunset Orange', className: 'from-amber-500 via-orange-500 to-red-500' },
