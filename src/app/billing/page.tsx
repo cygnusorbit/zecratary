@@ -1,4 +1,4 @@
-// Generated / Updated by AI Collaborator - Production Build Ready
+// Generated / Stabilized by AI Collaborator - Production Build Ready
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -51,6 +51,33 @@ interface NormalizedTransaction {
   gatewayTxId?: string;
 }
 
+// Pure normalization function outside component to avoid React hook dependency churn
+function normalizeTransactionItem(
+  raw: any, 
+  fallbackName = 'Member', 
+  fallbackEmail = '', 
+  fallbackCurrency = 'USD'
+): NormalizedTransaction {
+  return {
+    id: String(raw.id || `tx_${Math.random().toString(36).substring(2, 9)}`),
+    customerName: raw.customer_name || raw.customerName || fallbackName,
+    customerEmail: raw.customer_email || raw.customerEmail || fallbackEmail,
+    planName: raw.plan_name || raw.planName || 'Plan Subscription',
+    planSlug: raw.plan_slug || raw.planSlug || 'taster',
+    amount: Number(raw.amount || 0),
+    currency: raw.currency || fallbackCurrency || 'USD',
+    gateway: raw.gateway || 'wallet',
+    status: String(raw.status || 'succeeded').toLowerCase(),
+    failureReason: raw.failure_reason || raw.failureReason,
+    isRecurring: Boolean(raw.is_recurring ?? raw.isRecurring ?? true),
+    recurringInterval: String(raw.recurring_interval || raw.recurringInterval || 'MONTH').toUpperCase(),
+    autoRenew: Boolean(raw.auto_renew ?? raw.autoRenew ?? true),
+    expiryDate: raw.expiry_date || raw.expiryDate,
+    createdAt: raw.created_at || raw.createdAt || new Date().toISOString(),
+    gatewayTxId: raw.gateway_tx_id || raw.gatewayTxId || raw.gateway_transaction_id || raw.gatewayTransactionId
+  };
+}
+
 export default function BillingPage() {
   const langContext = useTranslation();
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
@@ -80,48 +107,44 @@ export default function BillingPage() {
     tokenSymbol: '🪙'
   });
 
-  // Re-entrancy guard
+  // Concurrency & Debounce references
   const isFetchingRef = useRef<boolean>(false);
+  const syncDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const userRef = useRef<any>(null);
+  userRef.current = user;
+  const gatewayConfigRef = useRef<any>(gatewayConfig);
+  gatewayConfigRef.current = gatewayConfig;
 
-  // Normalized Transaction Parser for DB & API cross-compatibility
-  const normalizeTransaction = useCallback((raw: any): NormalizedTransaction => {
-    return {
-      id: String(raw.id || `tx_${Math.random().toString(36).substring(2, 9)}`),
-      customerName: raw.customer_name || raw.customerName || user?.name || 'Member',
-      customerEmail: raw.customer_email || raw.customerEmail || user?.email || '',
-      planName: raw.plan_name || raw.planName || 'Plan Subscription',
-      planSlug: raw.plan_slug || raw.planSlug || 'taster',
-      amount: Number(raw.amount || 0),
-      currency: raw.currency || gatewayConfig.currency || 'USD',
-      gateway: raw.gateway || 'wallet',
-      status: String(raw.status || 'succeeded').toLowerCase(),
-      failureReason: raw.failure_reason || raw.failureReason,
-      isRecurring: Boolean(raw.is_recurring ?? raw.isRecurring ?? true),
-      recurringInterval: String(raw.recurring_interval || raw.recurringInterval || 'MONTH').toUpperCase(),
-      autoRenew: Boolean(raw.auto_renew ?? raw.autoRenew ?? true),
-      expiryDate: raw.expiry_date || raw.expiryDate,
-      createdAt: raw.created_at || raw.createdAt || new Date().toISOString(),
-      gatewayTxId: raw.gateway_tx_id || raw.gatewayTxId || raw.gateway_transaction_id || raw.gatewayTransactionId
-    };
-  }, [user, gatewayConfig.currency]);
-
-  // Dynamic Theme Synchronization
-  useEffect(() => {
-    const checkTheme = () => {
-      if (typeof window !== 'undefined') {
-        const _ = localStorage.getItem('zecratary_theme_mode');
-      }
-    };
-    checkTheme();
-    window.addEventListener('zecratary_theme_mode_changed', checkTheme);
-    window.addEventListener('zecratary_theme_updated', checkTheme);
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', checkTheme);
-      window.removeEventListener('zecratary_theme_updated', checkTheme);
-    };
+  // Single-pass guarded state dispatchers with deep referential comparisons
+  const setUserGuarded = useCallback((nextUser: any) => {
+    setUser((prev: any) => {
+      if (JSON.stringify(prev) === JSON.stringify(nextUser)) return prev;
+      return nextUser;
+    });
   }, []);
 
-  // Fetch Billing Data
+  const setTransactionsGuarded = useCallback((nextTxList: NormalizedTransaction[]) => {
+    setTransactions((prev: NormalizedTransaction[]) => {
+      if (JSON.stringify(prev) === JSON.stringify(nextTxList)) return prev;
+      return nextTxList;
+    });
+  }, []);
+
+  const setGatewayConfigGuarded = useCallback((nextConfig: any) => {
+    setGatewayConfig((prev: any) => {
+      if (JSON.stringify(prev) === JSON.stringify(nextConfig)) return prev;
+      return nextConfig;
+    });
+  }, []);
+
+  const setTokenIdentityGuarded = useCallback((nextIdentity: any) => {
+    setTokenIdentity((prev: any) => {
+      if (JSON.stringify(prev) === JSON.stringify(nextIdentity)) return prev;
+      return nextIdentity;
+    });
+  }, []);
+
+  // Idempotent Billing Fetcher (Pure GET, without dynamic timestamp cache-busters)
   const fetchData = useCallback(async () => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -154,61 +177,89 @@ export default function BillingPage() {
       const params = new URLSearchParams();
       if (userEmail) params.append('email', userEmail);
       if (userId) params.append('userId', userId);
-      params.append('t', String(Date.now()));
 
-      const res = await fetch(`/api/billing?${params.toString()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
+      // Perform billing and wallet requests concurrently with standard cache-control
+      const [billingRes, walletRes] = await Promise.allSettled([
+        fetch(`/api/billing?${params.toString()}`, { cache: 'no-store' }),
+        userEmail || userId ? fetch(`/api/wallet?${params.toString()}`, { cache: 'no-store' }) : Promise.resolve(null)
+      ]);
+
+      let mergedUser: any = null;
+      let nextTx: NormalizedTransaction[] = [];
+
+      if (billingRes.status === 'fulfilled' && billingRes.value && billingRes.value.ok) {
+        const data = await billingRes.value.json();
         if (data.success) {
-          setUser(data.user);
+          mergedUser = data.user || null;
           const rawTxList = Array.isArray(data.transactions) ? data.transactions : [];
-          setTransactions(rawTxList.map(normalizeTransaction));
-          if (data.gatewayConfig) setGatewayConfig(data.gatewayConfig);
-          if (data.tokenIdentity) setTokenIdentity(data.tokenIdentity);
+          nextTx = rawTxList.map((tx: any) => 
+            normalizeTransactionItem(
+              tx, 
+              data.user?.name || userRef.current?.name, 
+              data.user?.email || userRef.current?.email, 
+              data.gatewayConfig?.currency || gatewayConfigRef.current.currency
+            )
+          );
+          if (data.gatewayConfig) setGatewayConfigGuarded(data.gatewayConfig);
+          if (data.tokenIdentity) setTokenIdentityGuarded(data.tokenIdentity);
         }
       }
 
-      // Concurrently synchronize live wallet ledger balance
-      if (userEmail || userId) {
-        try {
-          const wRes = await fetch(`/api/wallet?${params.toString()}`, { cache: 'no-store' });
-          if (wRes.ok) {
-            const wData = await wRes.json();
-            const liveBal = typeof wData.wallet_balance === 'number'
-              ? wData.wallet_balance
-              : (typeof wData.balance === 'number' ? wData.balance : Number(wData.user?.wallet_balance || 0));
-            if (!isNaN(liveBal)) {
-              setUser((prev: any) => prev ? { ...prev, wallet_balance: liveBal } : prev);
-            }
+      if (walletRes.status === 'fulfilled' && walletRes.value && walletRes.value.ok) {
+        const wData = await walletRes.value.json();
+        const liveBal = typeof wData.wallet_balance === 'number'
+          ? wData.wallet_balance
+          : (typeof wData.balance === 'number' ? wData.balance : Number(wData.user?.wallet_balance || 0));
+        if (!isNaN(liveBal)) {
+          if (mergedUser) {
+            mergedUser.wallet_balance = liveBal;
+          } else if (userRef.current) {
+            mergedUser = { ...userRef.current, wallet_balance: liveBal };
           }
-        } catch (_) {}
+        }
       }
 
+      if (mergedUser) setUserGuarded(mergedUser);
+      if (nextTx.length > 0) setTransactionsGuarded(nextTx);
+
     } catch (err: any) {
-      setFeedback({ type: 'error', msg: err.message || t('failedLoadBilling', 'Failed to load billing details') });
+      console.warn('Billing fetch notice:', err?.message || err);
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
     }
-  }, [t, normalizeTransaction]);
+  }, [setUserGuarded, setTransactionsGuarded, setGatewayConfigGuarded, setTokenIdentityGuarded]);
 
+  const fetchDataRef = useRef<() => Promise<void>>(fetchData);
+  fetchDataRef.current = fetchData;
+
+  // Mount-only lifecycle hook to permanently sever recursive render loops
   useEffect(() => {
-    fetchData();
-    const handleSync = () => fetchData();
-    window.addEventListener('zecratary_payment_updated', handleSync);
-    window.addEventListener('zecratary_users_updated', handleSync);
-    window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
-    return () => {
-      window.removeEventListener('zecratary_payment_updated', handleSync);
-      window.removeEventListener('zecratary_users_updated', handleSync);
-      window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
-    };
-  }, [fetchData]);
+    fetchDataRef.current();
 
+    // Debounced listener for administrative updates (coalesced by 300ms)
+    const debouncedSync = () => {
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+      syncDebounceRef.current = setTimeout(() => {
+        fetchDataRef.current();
+      }, 300);
+    };
+
+    window.addEventListener('zecratary_payment_updated', debouncedSync);
+    window.addEventListener('zecratary_wallet_updated', debouncedSync);
+    window.addEventListener('zecratary_admin_settings_updated', debouncedSync);
+    window.addEventListener('zecratary_locale_changed', debouncedSync);
+
+    return () => {
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+      window.removeEventListener('zecratary_payment_updated', debouncedSync);
+      window.removeEventListener('zecratary_wallet_updated', debouncedSync);
+      window.removeEventListener('zecratary_admin_settings_updated', debouncedSync);
+      window.removeEventListener('zecratary_locale_changed', debouncedSync);
+    };
+  }, []); // Strictly mount-only: []
+
+  // Auto-dismiss feedback notifications
   useEffect(() => {
     if (feedback) {
       const timer = setTimeout(() => setFeedback(null), 4000);
@@ -216,7 +267,7 @@ export default function BillingPage() {
     }
   }, [feedback]);
 
-  // Determine active transaction
+  // Determine active subscription transaction
   const activeTransaction = useMemo(() => {
     return transactions.find((tx) => {
       const isPaidOrActive = ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status);
@@ -231,7 +282,7 @@ export default function BillingPage() {
     return p === 'taster' || p === 'free';
   }, [user]);
 
-  // KPI Calculations
+  // Aggregate KPI telemetry statistics
   const stats = useMemo(() => {
     let totalPaid = 0;
     transactions.forEach(tx => {
@@ -245,7 +296,7 @@ export default function BillingPage() {
     };
   }, [transactions]);
 
-  // Filtered & Paginated Ledger
+  // Filtered & Paginated Ledger data
   const filteredTransactions = useMemo(() => {
     return transactions.filter(tx => {
       if (statusFilter !== 'all' && tx.status !== statusFilter) return false;
@@ -265,7 +316,7 @@ export default function BillingPage() {
   const startIdx = (safePage - 1) * pageSize;
   const paginatedTransactions = filteredTransactions.slice(startIdx, startIdx + pageSize);
 
-  // Handle Cancel Auto-Renew
+  // Auto-Renewal Cancellation Action
   const handleCancelAutoRenew = async () => {
     if (!window.confirm(t('confirmCancelAutoRenewPrompt', 'Are you sure you want to cancel auto-renewal? You will retain all plan features until the end of your billing cycle.'))) {
       return;
@@ -286,9 +337,8 @@ export default function BillingPage() {
         setFeedback({ type: 'success', msg: data.message || t('autoRenewCancelledMsg', 'Auto-renewal has been cancelled.') });
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
-          window.dispatchEvent(new Event('zecratary_users_updated'));
         }
-        await fetchData();
+        await fetchDataRef.current();
       } else {
         throw new Error(data.error);
       }
@@ -299,7 +349,7 @@ export default function BillingPage() {
     }
   };
 
-  // Handle Resume Auto-Renew
+  // Auto-Renewal Resumption Action
   const handleResumeAutoRenew = async () => {
     setProcessing(true);
     try {
@@ -317,9 +367,8 @@ export default function BillingPage() {
         setFeedback({ type: 'success', msg: data.message || t('autoRenewResumedMsg', 'Auto-renewal reactivated!') });
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
-          window.dispatchEvent(new Event('zecratary_users_updated'));
         }
-        await fetchData();
+        await fetchDataRef.current();
       } else {
         throw new Error(data.error);
       }
@@ -375,7 +424,7 @@ export default function BillingPage() {
 
           <button
             type="button"
-            onClick={fetchData}
+            onClick={() => fetchDataRef.current()}
             disabled={loading}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer hover:opacity-80 disabled:opacity-50"
             style={{
@@ -867,7 +916,7 @@ export default function BillingPage() {
         </div>
       )}
 
-      {/* OFFICIAL INVOICE / RECEIPT MODAL DIALOG (FORM-FREE & PRINTABLE) */}
+      {/* Official Printable Invoice / Receipt Modal */}
       {selectedInvoice && (
         <div 
           role="dialog"
