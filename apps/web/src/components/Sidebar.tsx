@@ -10,7 +10,8 @@ import {
   ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
   Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
   Bell, BellRing, User as UserIcon, ChevronDown, 
-  Layers, Check, Database, Receipt, Globe, Mail, ChevronRight
+  Layers, Check, Database, Receipt, Globe, Mail, ChevronRight,
+  Plus, CheckCheck
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -24,15 +25,12 @@ interface InAppNotification {
   isRead: boolean;
   actionUrl?: string;
   actionLabel?: string;
+  createdAt?: string;
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$',
-  EUR: '€',
-  GBP: '£',
-  CAD: 'CA$',
-  AUD: 'AU$',
-  JPY: '¥'
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
+  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
 };
 
 const LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
@@ -54,13 +52,39 @@ const getLanguageMeta = (code: string) => {
   return LANGUAGE_FLAG_MAP[c] || { flag: '🌐', native: code.toUpperCase() };
 };
 
-const isImageIcon = (icon?: unknown): icon is string =>
+const isImageIcon = (icon?: unknown): boolean =>
   typeof icon === 'string' && (
     icon.startsWith('/') ||
     icon.startsWith('http://') ||
     icon.startsWith('https://') ||
     icon.startsWith('data:image')
   );
+
+/**
+ * Universal Dynamic Token Icon Renderer
+ */
+function DynamicTokenIcon({ icon, symbol, size = 16, className = '' }: { icon?: any; symbol?: any; size?: number; className?: string }) {
+  const iconStr = typeof icon === 'string' ? icon.trim() : '';
+  const symStr = typeof symbol === 'string' ? symbol.trim() : '';
+
+  if (isImageIcon(iconStr)) {
+    return (
+      <img 
+        src={iconStr} 
+        alt="Token" 
+        className={`object-contain rounded shrink-0 ${className}`} 
+        style={{ width: size, height: size }} 
+      />
+    );
+  }
+  if (iconStr && iconStr !== 'Coins' && iconStr !== '🪙') {
+    return <span className={`shrink-0 leading-none select-none ${className}`} style={{ fontSize: size }}>{iconStr}</span>;
+  }
+  if (symStr && symStr !== '🪙' && symStr.length <= 3) {
+    return <span className={`font-mono font-black text-amber-500 shrink-0 ${className}`} style={{ fontSize: size }}>{symStr}</span>;
+  }
+  return <Coins className={`text-amber-500 shrink-0 ${className}`} style={{ width: size, height: size }} />;
+}
 
 export default function Sidebar() {
   const pathname = usePathname() || '';
@@ -98,20 +122,89 @@ export default function Sidebar() {
     admin: false,
   });
 
-  // Top Bar Dropdowns
-  const [walletDropdownOpen, setWalletDropdownOpen] = useState<boolean>(false);
+  // Topbar Dropdown Controls
   const [notifDropdownOpen, setNotifDropdownOpen] = useState<boolean>(false);
   const [langDropdownOpen, setLangDropdownOpen] = useState<boolean>(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
   const [dropdownLangExpanded, setDropdownLangExpanded] = useState<boolean>(false);
 
-  // Balances & Telemetry
-  const [tokenBalance, setTokenBalance] = useState<number>(50);
-  const [walletBalance, setWalletBalance] = useState<number>(0.00);
-  const [currencySymbol, setCurrencySymbol] = useState<string>('$');
-  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  // Synchronous Balances & Telemetry
+  const [tokenBalance, setTokenBalance] = useState<number>(() => {
+    try {
+      const u = getCurrentUser();
+      const val = Number(u?.token_balance ?? u?.tokenBalance ?? u?.tokens ?? 100);
+      return isNaN(val) ? 100 : val;
+    } catch (_) { return 100; }
+  });
+  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenIcon, setTokenIcon] = useState<string>('🪙');
 
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [walletBalance, setWalletBalance] = useState<number>(() => {
+    try {
+      const u = getCurrentUser();
+      const val = parseFloat(String(u?.wallet_balance ?? u?.walletBalance ?? 0));
+      return isNaN(val) ? 0 : val;
+    } catch (_) { return 0; }
+  });
+  const [walletCurrency, setWalletCurrency] = useState<string>('USD');
+  const [walletSymbol, setWalletSymbol] = useState<string>('$');
+
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  const topbarRef = useRef<HTMLDivElement>(null);
+
+  // Comprehensive Telemetry & Balances Fetcher
+  const fetchBalancesAndTelemetry = useCallback(async (activeU?: any) => {
+    try {
+      const u = activeU || getCurrentUser();
+      const params = new URLSearchParams();
+      if (u?.id) params.set('userId', String(u.id));
+      if (u?.email) params.set('email', String(u.email));
+      const qs = params.toString() ? `?${params.toString()}&t=${Date.now()}` : `?t=${Date.now()}`;
+
+      const [tokRes, walRes, notifRes, cfgRes] = await Promise.allSettled([
+        fetch(`/api/tokens${qs}`, { cache: 'no-store' }),
+        fetch(`/api/wallet${qs}`, { cache: 'no-store' }),
+        fetch(`/api/notifications${qs}`, { cache: 'no-store' }),
+        fetch(`/api/admin/token-setting`, { cache: 'no-store' })
+      ]);
+
+      if (tokRes.status === 'fulfilled' && tokRes.value.ok) {
+        const tData = await tokRes.value.json();
+        const rawTok = tData.tokenBalance ?? tData.token_balance ?? tData.balance ?? tData.tokens;
+        const numTok = Number(rawTok);
+        if (!isNaN(numTok)) setTokenBalance(numTok);
+        if (tData.tokenSymbol) setTokenSymbol(tData.tokenSymbol);
+        if (tData.tokenIcon) setTokenIcon(tData.tokenIcon);
+      }
+
+      if (walRes.status === 'fulfilled' && walRes.value.ok) {
+        const wData = await walRes.value.json();
+        const rawWal = wData.wallet_balance ?? wData.walletBalance ?? wData.balance ?? wData.user?.wallet_balance;
+        const numWal = parseFloat(String(rawWal ?? 0));
+        if (!isNaN(numWal)) setWalletBalance(numWal);
+        const curr = wData.currency || wData.settings?.currency || 'USD';
+        setWalletCurrency(curr);
+        setWalletSymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || wData.walletSymbol || '$');
+      }
+
+      if (notifRes.status === 'fulfilled' && notifRes.value.ok) {
+        const nData = await notifRes.value.json();
+        if (Array.isArray(nData.notifications)) {
+          setNotifications(nData.notifications);
+          setUnreadCount(nData.unreadCount ?? nData.notifications.filter((x: any) => !x.isRead).length);
+        }
+      }
+
+      if (cfgRes.status === 'fulfilled' && cfgRes.value.ok) {
+        const cData = await cfgRes.value.json();
+        const cfg = cData.settings || cData.config || cData;
+        if (cfg?.tokenIcon) setTokenIcon(cfg.tokenIcon);
+        if (cfg?.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
+      }
+    } catch (_) {}
+  }, []);
 
   const syncUserState = useCallback(() => {
     try {
@@ -129,7 +222,8 @@ export default function Sidebar() {
         setIsDarkMode(themeMode === 'dark');
 
         const cur = localStorage.getItem('zecratary_currency') || 'USD';
-        setCurrencySymbol(CURRENCY_SYMBOLS[cur] || '$');
+        setWalletCurrency(cur);
+        setWalletSymbol(CURRENCY_SYMBOLS[cur] || '$');
 
         const storedSections = localStorage.getItem('zecratary_sidebar_sections');
         if (storedSections) {
@@ -137,17 +231,10 @@ export default function Sidebar() {
             setOpenSections(prev => ({ ...prev, ...JSON.parse(storedSections) }));
           } catch (_) {}
         }
-
-        if (u) {
-          const storedTokens = localStorage.getItem(`zecratary_tokens_${u.id}`);
-          if (storedTokens !== null) setTokenBalance(Number(storedTokens) || 50);
-
-          const storedWallet = localStorage.getItem(`zecratary_wallet_${u.id}`);
-          if (storedWallet !== null) setWalletBalance(Number(storedWallet) || 0.00);
-        }
       }
+      fetchBalancesAndTelemetry(u);
     } catch (_) {}
-  }, []);
+  }, [fetchBalancesAndTelemetry]);
 
   // Route Auto-Expansion
   useEffect(() => {
@@ -165,33 +252,76 @@ export default function Sidebar() {
     }
   }, [pathname]);
 
+  // Real-Time Event & Cross-Tab Subscriptions
   useEffect(() => {
     setMounted(true);
     syncUserState();
 
     const handleSync = () => syncUserState();
+    const handleWalletUpdate = (e?: any) => {
+      if (e?.detail) {
+        const b = e.detail.wallet_balance ?? e.detail.walletBalance ?? e.detail.balance;
+        if (b !== undefined && b !== null) {
+          const parsed = parseFloat(String(b));
+          if (!isNaN(parsed)) setWalletBalance(parsed);
+        }
+      }
+      fetchBalancesAndTelemetry();
+    };
+    const handleTokensUpdate = (e?: any) => {
+      if (e?.detail) {
+        const b = e.detail.token_balance ?? e.detail.tokenBalance ?? e.detail.balance;
+        if (b !== undefined && b !== null) {
+          const parsed = Number(b);
+          if (!isNaN(parsed)) setTokenBalance(parsed);
+        }
+      }
+      fetchBalancesAndTelemetry();
+    };
+
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_site_settings_changed', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
-    window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_tokens_updated', handleSync);
+    window.addEventListener('zecratary_wallet_updated', handleWalletUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleTokensUpdate);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
+    window.addEventListener('focus', () => fetchBalancesAndTelemetry());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') fetchBalancesAndTelemetry();
+    });
+
+    let balanceChannel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        balanceChannel = new BroadcastChannel('zecratary_balance_channel');
+        balanceChannel.onmessage = (msg) => {
+          if (msg.data?.wallet_balance !== undefined) {
+            setWalletBalance(parseFloat(String(msg.data.wallet_balance)));
+          }
+          if (msg.data?.token_balance !== undefined || msg.data?.tokens !== undefined) {
+            setTokenBalance(Number(msg.data.token_balance ?? msg.data.tokens));
+          }
+        };
+      } catch (_) {}
+    }
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('zecratary_site_settings_changed', handleSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
-      window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_tokens_updated', handleSync);
+      window.removeEventListener('zecratary_wallet_updated', handleWalletUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleTokensUpdate);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
+      if (balanceChannel) balanceChannel.close();
     };
-  }, [syncUserState]);
+  }, [syncUserState, fetchBalancesAndTelemetry]);
 
-  // Click Outside and Escape Key Dismissal
+  // Click Outside & Escape Key Listener
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setWalletDropdownOpen(false);
+      if (topbarRef.current && !topbarRef.current.contains(e.target as Node)) {
         setNotifDropdownOpen(false);
         setLangDropdownOpen(false);
         setProfileDropdownOpen(false);
@@ -201,7 +331,6 @@ export default function Sidebar() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setWalletDropdownOpen(false);
         setNotifDropdownOpen(false);
         setLangDropdownOpen(false);
         setProfileDropdownOpen(false);
@@ -223,11 +352,6 @@ export default function Sidebar() {
       if (typeof window !== 'undefined') {
         try {
           localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
-          fetch('/api/user/sidebar-settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sections: next }),
-          }).catch(() => {});
         } catch (_) {}
       }
       return next;
@@ -249,6 +373,22 @@ export default function Sidebar() {
       }
       window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode: modeStr } }));
     }
+  };
+
+  const markAllNotificationsRead = async () => {
+    setUnreadCount(0);
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    try {
+      const u = getCurrentUser();
+      const params = new URLSearchParams();
+      if (u?.id) params.set('userId', String(u.id));
+      if (u?.email) params.set('email', String(u.email));
+      await fetch(`/api/notifications?${params.toString()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'mark_all_read' })
+      });
+    } catch (_) {}
   };
 
   const handleLogout = async () => {
@@ -311,7 +451,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* DESKTOP TOP BAR (Authenticated Workspace) */}
+      {/* DESKTOP TOP BAR (Fixed Header with Real-Time Telemetry) */}
       <header
         id="zecratary-desktop-topbar"
         className="hidden md:flex fixed top-0 left-0 right-0 h-16 border-b z-40 items-center justify-between px-6 transition-colors duration-200"
@@ -320,7 +460,7 @@ export default function Sidebar() {
           borderColor: 'var(--color-border)',
           color: 'var(--color-text)'
         }}
-        ref={dropdownRef}
+        ref={topbarRef}
       >
         <div className="flex items-center gap-3">
           <button
@@ -342,86 +482,87 @@ export default function Sidebar() {
           </Link>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* 1. WALLET & TOKEN BALANCE PILL */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => {
-                setWalletDropdownOpen(!walletDropdownOpen);
-                setNotifDropdownOpen(false);
-                setLangDropdownOpen(false);
-                setProfileDropdownOpen(false);
-              }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs cursor-pointer"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              title={t('topbarTokenTooltip', 'AI Token & Wallet Balance')}
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* 1. DEDICATED STORE WALLET CAPSULE + DIRECT BUTTON */}
+          <div 
+            className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/wallet" 
+              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
+              title={t('viewWalletBalance', 'View Wallet Balance & History')}
             >
-              <Coins className="h-3.5 w-3.5 text-amber-400" />
-              <span>{tokenBalance.toLocaleString()}</span>
-              <span className="opacity-40">|</span>
-              <Wallet className="h-3.5 w-3.5 text-emerald-400" />
-              <span>{currencySymbol}{walletBalance.toFixed(2)}</span>
-              <ChevronDown className="h-3 w-3 opacity-60" />
-            </button>
-
-            {walletDropdownOpen && (
-              <div
-                role="menu"
-                aria-label="Token & Wallet Summary"
-                data-lpignore="true"
-                data-form-type="other"
-                className="absolute right-0 mt-2 w-64 border rounded-2xl p-3 shadow-xl z-50 space-y-2 text-xs transition-colors duration-200"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
+              <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform shrink-0" />
+              <span 
+                suppressHydrationWarning
+                className="text-xs font-mono font-black" 
+                style={{ color: 'var(--color-emerald)' }}
               >
-                <div className="font-extrabold text-[11px] uppercase tracking-wider text-[var(--color-primary)] px-1">
-                  {t('tokenAndWallet', 'Token & Wallet Balance')}
-                </div>
-                <div className="p-2.5 rounded-xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <div className="flex justify-between items-center">
-                    <span className="opacity-70">{t('availableTokens', 'Tokens')}:</span>
-                    <span className="font-bold text-amber-400">{tokenBalance.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="opacity-70">{t('walletCredits', 'Credits')}:</span>
-                    <span className="font-bold text-emerald-400">{currencySymbol}{walletBalance.toFixed(2)}</span>
-                  </div>
-                </div>
-                <Link
-                  href="/wallet"
-                  onClick={() => setWalletDropdownOpen(false)}
-                  className="block w-full py-2 text-center rounded-xl text-white font-bold text-xs transition shadow-xs"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  {t('manageWallet', 'Top Up & Wallet Portal')}
-                </Link>
-                <Link
-                  href="/token"
-                  onClick={() => setWalletDropdownOpen(false)}
-                  className="block w-full py-2 text-center rounded-xl font-bold text-xs transition border"
-                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
-                >
-                  {t('manageTokens', 'Token Bundles & Quotas')}
-                </Link>
-              </div>
-            )}
+                {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
+              </span>
+              <span className="text-[10px] font-bold opacity-60 font-mono">
+                {walletCurrency}
+              </span>
+            </Link>
+
+            <Link
+              href="/wallet"
+              className="flex items-center justify-center w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer hover:opacity-90 active:scale-95 text-white shadow-xs shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpWallet', 'Top Up Wallet')}
+              aria-label="Top Up Wallet"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </Link>
           </div>
 
-          {/* 2. NOTIFICATIONS BELL */}
+          {/* 2. DEDICATED AI TOKEN CAPSULE + DIRECT BUTTON */}
+          <div 
+            className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/token" 
+              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
+              title={t('viewTokenBalance', 'View Token Balance & History')}
+            >
+              <DynamicTokenIcon icon={tokenIcon} symbol={tokenSymbol} size={16} className="group-hover:scale-110 transition-transform" />
+              <span 
+                suppressHydrationWarning
+                className="text-xs font-mono font-black" 
+                style={{ color: 'var(--color-emerald)' }}
+              >
+                {Number(tokenBalance || 0).toLocaleString()}
+              </span>
+              <span className="text-xs font-bold text-amber-500 font-mono">
+                {tokenSymbol}
+              </span>
+            </Link>
+
+            <Link
+              href="/token"
+              className="flex items-center justify-center w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer hover:opacity-90 active:scale-95 text-white shadow-xs shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpTokens', 'Top Up Tokens')}
+              aria-label="Top Up Tokens"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </Link>
+          </div>
+
+          {/* 3. NOTIFICATIONS BELL & POPOVER */}
           <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setNotifDropdownOpen(!notifDropdownOpen);
-                setWalletDropdownOpen(false);
                 setLangDropdownOpen(false);
                 setProfileDropdownOpen(false);
               }}
@@ -432,52 +573,85 @@ export default function Sidebar() {
                 color: 'var(--color-text)'
               }}
               title={t('topbarNotifications', 'Notifications')}
+              aria-label="Notifications"
             >
               <Bell className="h-4 w-4" />
-              {notifications.some(n => !n.isRead) && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
               )}
             </button>
 
             {notifDropdownOpen && (
               <div
-                role="menu"
-                aria-label="Notifications"
+                role="region"
+                aria-label="Notifications Panel"
                 data-lpignore="true"
                 data-form-type="other"
-                className="absolute right-0 mt-2 w-80 border rounded-2xl p-4 shadow-xl z-50 space-y-3 text-xs transition-colors duration-200"
+                className="absolute right-0 mt-2 w-80 border rounded-3xl p-4 shadow-2xl z-50 space-y-3 text-xs transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                <div className="flex items-center justify-between font-bold">
-                  <span>{t('topbarNotifications', 'Notifications')}</span>
-                  {isAdmin && (
-                    <Link
-                      href="/admin/notification-settings"
-                      onClick={() => setNotifDropdownOpen(false)}
-                      className="text-[10px] text-[var(--color-primary)] hover:underline"
-                    >
-                      {t('settings', 'Settings')}
-                    </Link>
-                  )}
+                <div className="flex items-center justify-between pb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold uppercase tracking-wider text-xs">{t('topbarNotifications', 'Notifications')}</span>
+                    {unreadCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold text-[10px]">
+                        {unreadCount} {t('topbarUnreadCount', 'unread')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={markAllNotificationsRead}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <CheckCheck className="h-3 w-3" />
+                        <span>{t('topbarMarkAllRead', 'Mark all read')}</span>
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <Link
+                        href="/admin/notification-settings"
+                        onClick={() => setNotifDropdownOpen(false)}
+                        className="text-[10px] opacity-70 hover:opacity-100"
+                      >
+                        {t('settings', 'Settings')}
+                      </Link>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                   {notifications.length === 0 ? (
-                    <div className="text-center py-6 opacity-60 text-xs">
+                    <div className="text-center py-8 opacity-60 text-xs">
                       {t('topbarNoNotifications', 'No unread notifications')}
                     </div>
                   ) : (
                     notifications.map((n) => (
                       <div
                         key={n.id}
-                        className="p-2.5 rounded-xl border space-y-1"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                        className={`p-2.5 rounded-2xl border space-y-1 transition ${
+                          n.isRead ? 'opacity-70' : 'border-[var(--color-primary)]/40 shadow-xs'
+                        }`}
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: n.isRead ? 'var(--color-border)' : 'var(--color-primary)'
+                        }}
                       >
-                        <div className="font-bold text-xs">{n.title}</div>
-                        <div className="text-[11px] opacity-80">{n.message}</div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-xs">{n.title}</span>
+                          {!n.isRead && (
+                            <span className="w-2 h-2 rounded-full bg-[var(--color-primary)] shrink-0" />
+                          )}
+                        </div>
+                        <div className="text-[11px] opacity-80 leading-relaxed">{n.message}</div>
                       </div>
                     ))
                   )}
@@ -486,13 +660,12 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 3. QUICK LANGUAGE BUTTON */}
+          {/* 4. QUICK LANGUAGE SELECTOR */}
           <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setLangDropdownOpen(!langDropdownOpen);
-                setWalletDropdownOpen(false);
                 setNotifDropdownOpen(false);
                 setProfileDropdownOpen(false);
               }}
@@ -547,7 +720,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. QUICK DAY / DARK TOGGLE */}
+          {/* 5. QUICK DAY / DARK TOGGLE */}
           <button
             type="button"
             onClick={toggleTheme}
@@ -562,13 +735,12 @@ export default function Sidebar() {
             {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
           </button>
 
-          {/* 5. RESTORED FULL PROFILE DROPDOWN MENU */}
+          {/* 6. USER PROFILE DROPDOWN */}
           <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setProfileDropdownOpen(!profileDropdownOpen);
-                setWalletDropdownOpen(false);
                 setNotifDropdownOpen(false);
                 setLangDropdownOpen(false);
                 setDropdownLangExpanded(false);
@@ -601,7 +773,6 @@ export default function Sidebar() {
                   color: 'var(--color-text)'
                 }}
               >
-                {/* User Identity Header */}
                 <div className="px-3 py-2 border-b mb-1 space-y-1" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center justify-between">
                     <span className="font-extrabold truncate text-xs">{currentUser?.name || 'User'}</span>
@@ -615,7 +786,6 @@ export default function Sidebar() {
                   <div className="text-[11px] opacity-60 truncate">{currentUser?.email || ''}</div>
                 </div>
 
-                {/* Core Navigation Links */}
                 <Link
                   href="/profile"
                   onClick={() => setProfileDropdownOpen(false)}
@@ -652,9 +822,7 @@ export default function Sidebar() {
                   <span>{t('contactSupport', 'Contact Support')}</span>
                 </Link>
 
-                {/* RESTORED PREFERENCES SECTION (Language & Day/Dark Mode) */}
                 <div className="pt-1.5 border-t space-y-1" style={{ borderColor: 'var(--color-border)' }}>
-                  {/* Inline Language Selector */}
                   <div>
                     <button
                       type="button"
@@ -705,7 +873,6 @@ export default function Sidebar() {
                     )}
                   </div>
 
-                  {/* Inline Day / Dark Mode Switcher */}
                   <button
                     type="button"
                     onClick={toggleTheme}
@@ -727,7 +894,6 @@ export default function Sidebar() {
                   </button>
                 </div>
 
-                {/* Functional Logout Option */}
                 <div className="pt-1.5 border-t" style={{ borderColor: 'var(--color-border)' }}>
                   <button
                     type="button"
@@ -744,38 +910,95 @@ export default function Sidebar() {
         </div>
       </header>
 
-      {/* MOBILE APPLICATION HEADER */}
+      {/* MOBILE APPLICATION HEADER WITH COMPACT WALLET & TOKEN WIDGETS */}
       <header
-        className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-4 transition-colors duration-200"
+        className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-3 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)',
           color: 'var(--color-text)'
         }}
       >
-        <Link href="/dashboard" className="flex items-center gap-2 font-black text-sm text-[var(--color-primary)]">
+        <Link href="/dashboard" className="flex items-center gap-1.5 font-black text-sm text-[var(--color-primary)] truncate max-w-[110px]">
           {isImageIcon(siteIcon) ? (
-            <img src={siteIcon} alt="Logo" className="w-6 h-6 rounded-md object-contain" />
+            <img src={siteIcon} alt="Logo" className="w-6 h-6 rounded-md object-contain shrink-0" />
           ) : (
-            <span className="text-xl">{siteIcon || '🍳'}</span>
+            <span className="text-xl shrink-0">{siteIcon || '🍳'}</span>
           )}
-          <span>{siteName || 'Zecratary'}</span>
+          <span className="truncate">{siteName || 'Zecratary'}</span>
         </Link>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {/* Mobile Wallet Capsule */}
+          <div 
+            className="flex items-center rounded-xl border p-0.5 text-[11px] font-mono font-bold shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/wallet" 
+              className="flex items-center gap-1 px-1.5 py-0.5 hover:opacity-85 transition"
+              title={t('wallet', 'Store Wallet')}
+            >
+              <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)] shrink-0" />
+              <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
+                {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
+              </span>
+            </Link>
+            <Link 
+              href="/wallet"
+              className="w-5 h-5 rounded-lg text-white flex items-center justify-center cursor-pointer hover:opacity-90 active:scale-95 shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpWallet', 'Top Up Wallet')}
+            >
+              <Plus className="h-3 w-3 stroke-[3]" />
+            </Link>
+          </div>
+
+          {/* Mobile Token Capsule */}
+          <div 
+            className="flex items-center rounded-xl border p-0.5 text-[11px] font-mono font-bold shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/token" 
+              className="flex items-center gap-1 px-1.5 py-0.5 hover:opacity-85 transition"
+              title={t('token', 'AI Tokens')}
+            >
+              <DynamicTokenIcon icon={tokenIcon} symbol={tokenSymbol} size={14} />
+              <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
+                {Number(tokenBalance || 0).toLocaleString()}
+              </span>
+            </Link>
+            <Link 
+              href="/token"
+              className="w-5 h-5 rounded-lg text-white flex items-center justify-center cursor-pointer hover:opacity-90 active:scale-95 shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpTokens', 'Top Up Tokens')}
+            >
+              <Plus className="h-3 w-3 stroke-[3]" />
+            </Link>
+          </div>
+
           <button
             type="button"
             onClick={toggleTheme}
-            className="p-1.5 rounded-lg border"
+            className="p-1.5 rounded-lg border shrink-0"
             style={{ borderColor: 'var(--color-border)' }}
             title={isDarkMode ? 'Day Mode' : 'Dark Mode'}
           >
             {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
           </button>
+
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 rounded-xl border cursor-pointer"
+            className="p-1.5 rounded-xl border cursor-pointer shrink-0"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-border)'
@@ -786,7 +1009,7 @@ export default function Sidebar() {
         </div>
       </header>
 
-      {/* AUTHENTICATED SIDEBAR NAVIGATION DRAWER */}
+      {/* SIDEBAR NAVIGATION DRAWER */}
       <aside
         className={`hidden md:flex flex-col fixed top-16 bottom-0 left-0 border-r z-30 transition-all duration-200 ${
           isCollapsed ? 'w-20' : 'w-64'

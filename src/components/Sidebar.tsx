@@ -124,7 +124,7 @@ const getLanguageFlag = (code: string): string => {
   return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
 };
 
-const isImageIcon = (icon?: unknown): icon is string =>
+const isImageIcon = (icon?: unknown): boolean =>
   typeof icon === 'string' && (
     icon.startsWith('/') ||
     icon.startsWith('http://') ||

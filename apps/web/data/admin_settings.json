@@ -4328,7 +4328,7 @@
       "topbarNotifications": "Notifications",
       "topbarNoNotifications": "No unread notifications",
       "topbarUnreadCount": "unread",
-      "topbarMarkAllRead": "Mark all as read",
+      "topbarMarkAllRead": "Mark all read",
       "topbarViewAllNotifications": "View all notifications",
       "topbarSearchPlaceholder": "Search recipes, pantry, meal plans...",
       "topbarSyncActive": "Synchronized",
@@ -4358,7 +4358,11 @@
       "themeMode": "Theme Mode",
       "interfaceLanguage": "Interface Language",
       "loggedOutSuccess": "You have been logged out successfully",
-      "userGreeting": "Signed in as"
+      "userGreeting": "Signed in as",
+      "viewWalletBalance": "View Wallet Balance & History",
+      "viewTokenBalance": "View Token Balance & History",
+      "topUpWallet": "Top Up Wallet",
+      "topUpTokens": "Top Up Tokens"
     },
     "th": {
       "importPageTitle": "นำเข้าสูตรอาหาร",
@@ -4714,8 +4718,8 @@
       "topbarAvailableTokens": "โทเค็นคงเหลือ",
       "topbarNotifications": "การแจ้งเตือน",
       "topbarNoNotifications": "ไม่มีการแจ้งเตือนใหม่",
-      "topbarUnreadCount": "ยังไม่ได้อ่าน",
-      "topbarMarkAllRead": "ทำเครื่องหมายว่าอ่านแล้วทั้งหมด",
+      "topbarUnreadCount": "ยังไม่อ่าน",
+      "topbarMarkAllRead": "ทำเครื่องหมายอ่านแล้วทั้งหมด",
       "topbarViewAllNotifications": "ดูการแจ้งเตือนทั้งหมด",
       "topbarSearchPlaceholder": "ค้นหาสูตรอาหาร, คลังวัตถุดิบ, แผนมื้ออาหาร...",
       "topbarSyncActive": "ซิงค์ระบบเรียบร้อย",
@@ -4745,7 +4749,11 @@
       "themeMode": "ธีมการแสดงผล",
       "interfaceLanguage": "ภาษาของระบบ",
       "loggedOutSuccess": "คุณได้ออกจากระบบเรียบร้อยแล้ว",
-      "userGreeting": "เข้าสู่ระบบในชื่อ"
+      "userGreeting": "เข้าสู่ระบบในชื่อ",
+      "viewWalletBalance": "ดูยอดเงินในกระเป๋าและประวัติ",
+      "viewTokenBalance": "ดูยอดโทเค็น AI และประวัติ",
+      "topUpWallet": "เติมเงินเข้ากระเป๋า",
+      "topUpTokens": "ซื้อโทเค็น AI"
     },
     "es": {
       "importPageTitle": "Importar Receta",
@@ -5132,7 +5140,11 @@
       "themeMode": "Modo de Tema",
       "interfaceLanguage": "Idioma de la Interfaz",
       "loggedOutSuccess": "Ha cerrado sesión correctamente",
-      "userGreeting": "Conectado como"
+      "userGreeting": "Conectado como",
+      "viewWalletBalance": "Ver saldo e historial de billetera",
+      "viewTokenBalance": "Ver saldo e historial de tokens IA",
+      "topUpWallet": "Recargar Billetera",
+      "topUpTokens": "Comprar Tokens IA"
     },
     "fr": {
       "importPageTitle": "Importer une recette",
@@ -5519,7 +5531,11 @@
       "themeMode": "Mode Thème",
       "interfaceLanguage": "Langue de l'Interface",
       "loggedOutSuccess": "Vous avez été déconnecté avec succès",
-      "userGreeting": "Connecté en tant que"
+      "userGreeting": "Connecté en tant que",
+      "viewWalletBalance": "Consulter le solde et l'historique du portefeuille",
+      "viewTokenBalance": "Consulter le solde et l'historique des jetons IA",
+      "topUpWallet": "Recharger le Portefeuille",
+      "topUpTokens": "Acheter des Jetons IA"
     }
   }
 }

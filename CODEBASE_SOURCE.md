@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.50",
+  "version": "8.1.51",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.50",
+  "version": "8.1.51",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -44354,6 +44354,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ provid
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { queryMysql } from '@/lib/mysql';
 
 export async function POST(req: Request) {
   try {
@@ -44368,7 +44369,7 @@ export async function POST(req: Request) {
     const cleanPassword = String(password).trim();
     let matchedUser: any = null;
 
-    // 1. Check PostgreSQL users database table
+    // 1. PostgreSQL User Authentication & Audit Timestamp
     try {
       const { query } = await import('@/lib/db');
       if (typeof query === 'function') {
@@ -44390,7 +44391,6 @@ export async function POST(req: Request) {
               subscription_plan: dbUser.subscription_plan || 'free'
             };
 
-            // Update last_login_at in PostgreSQL
             try {
               await query('UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1', [dbUser.id]);
             } catch (_) {}
@@ -44401,32 +44401,35 @@ export async function POST(req: Request) {
       console.warn('[auth:login] PostgreSQL check bypassed or unavailable:', pgErr);
     }
 
-    // 2. MySQL fallback check (Constraint 8)
+    // 2. MySQL Fallback Authentication & Audit Timestamp (Constraint 8)
     if (!matchedUser) {
       try {
-        const mysqlModule = await import('@/lib/mysql');
-        if (mysqlModule && typeof mysqlModule.queryMysql === 'function') {
-          const myRows: any = await mysqlModule.queryMysql(
-            'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1',
-            [cleanEmail]
-          );
-          if (Array.isArray(myRows) && myRows.length > 0) {
-            const myUser = myRows[0];
-            if (!myUser.password || myUser.password === cleanPassword) {
-              matchedUser = {
-                id: String(myUser.id),
-                name: myUser.name || 'User',
-                email: myUser.email,
-                role: myUser.role || 'user',
-                avatar: myUser.avatar || '',
-                provider: myUser.provider || 'local',
-                token_balance: Number(myUser.token_balance ?? 50000),
-                subscription_plan: myUser.subscription_plan || 'free'
-              };
-            }
+        const myRows = await queryMysql(
+          'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1',
+          [cleanEmail]
+        );
+        if (Array.isArray(myRows) && myRows.length > 0) {
+          const myUser: any = myRows[0];
+          if (!myUser.password || myUser.password === cleanPassword) {
+            matchedUser = {
+              id: String(myUser.id),
+              name: myUser.name || 'User',
+              email: myUser.email,
+              role: myUser.role || 'user',
+              avatar: myUser.avatar || '',
+              provider: myUser.provider || 'local',
+              token_balance: Number(myUser.token_balance ?? 50000),
+              subscription_plan: myUser.subscription_plan || 'free'
+            };
+
+            try {
+              await queryMysql('UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = ?', [myUser.id]);
+            } catch (_) {}
           }
         }
-      } catch (_) {}
+      } catch (myErr) {
+        console.warn('[auth:login] MySQL check bypassed or unavailable:', myErr);
+      }
     }
 
     // 3. Fallback to default user presets & local users.json
@@ -44477,7 +44480,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Invalid email or password' }, { status: 401 });
     }
 
-    // Prepare unified response with destination set to /dashboard
+    // Always redirect to /dashboard upon successful login
     const response = NextResponse.json({
       success: true,
       user: matchedUser,
@@ -71178,6 +71181,77 @@ export type { LanguageContextType, SupportedLanguage } from '@/components/Langua
 
 ```
 
+## File: `apps/web/src/lib/mysql.ts`
+```typescript
+// Webpack-safe & TypeScript-compliant MySQL Database Adapter for Zecratary
+export interface MysqlQueryResult<T = any> {
+  rows: T[];
+  fields?: any[];
+}
+
+/**
+ * Webpack-safe dynamic loader for mysql2/promise.
+ * Prevents Webpack / Turbopack static AST analyzer from throwing
+ * "Module not found: Can't resolve 'mysql2/promise'" when mysql2 is optional.
+ */
+function getMysqlDriver(): any {
+  try {
+    const loader = typeof (globalThis as any).__non_webpack_require__ === 'function'
+      ? (globalThis as any).__non_webpack_require__
+      : (typeof require === 'function' ? require : eval('require'));
+    return loader('mysql2/promise');
+  } catch (_) {
+    return null;
+  }
+}
+
+export function isMysqlConfigured(): boolean {
+  const url = process.env.MYSQL_URL || process.env.DATABASE_URL;
+  return Boolean(url && url.startsWith('mysql://'));
+}
+
+export async function getMysqlConnection(): Promise<any | null> {
+  const mysqlUrl = process.env.MYSQL_URL || 
+    (process.env.DATABASE_URL?.startsWith('mysql://') ? process.env.DATABASE_URL : null);
+  
+  if (!mysqlUrl) return null;
+
+  const mysql = getMysqlDriver();
+  if (!mysql) return null;
+
+  try {
+    return await mysql.createConnection(mysqlUrl);
+  } catch (err) {
+    console.warn('[getMysqlConnection] Connection failed:', err);
+    return null;
+  }
+}
+
+export async function queryMysql<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+  const conn = await getMysqlConnection();
+  if (!conn) return [];
+
+  try {
+    const [rows] = await conn.query(sql, params);
+    return Array.isArray(rows) ? (rows as T[]) : ([rows] as unknown as T[]);
+  } catch (err) {
+    console.warn('[queryMysql] Query execution failed:', err);
+    return [];
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
+const mysqlAdapter = {
+  queryMysql,
+  getMysqlConnection,
+  isMysqlConfigured
+};
+
+export default mysqlAdapter;
+
+```
+
 ## File: `apps/web/src/lib/postgresUser.ts`
 ```typescript
 import { Pool } from 'pg';
@@ -75106,20 +75180,27 @@ export function deleteRecipeJsonFile(id: string): void {
 
 ## File: `apps/web/src/lib/auth.ts`
 ```typescript
-// Synchronized Auth Library for Zecratary
+// Generated / Maintained by AI Collaborator - Production Build Compliant
 export interface User {
   id: string;
   name: string;
   email: string;
   role: 'admin' | 'user';
   avatar?: string;
+  image?: string;
+  picture?: string;
   provider?: string;
   token_balance?: number;
   tokenBalance?: number;
   wallet_balance?: number;
   subscription_plan?: string;
   subscriptionPlan?: string;
+  subscriptionTier?: string;
   password?: string;
+  created_at?: string;
+  updated_at?: string;
+  createdAt?: string;
+  updatedAt?: string;
   [key: string]: any;
 }
 
@@ -75148,6 +75229,8 @@ export const DEFAULT_USERS: User[] = [
   }
 ];
 
+let inMemoryUser: User | null = null;
+
 export function initAuthStorage(): void {
   if (typeof window === 'undefined') return;
   try {
@@ -75167,14 +75250,17 @@ export function initAuthStorage(): void {
           try {
             const decoded = decodeURIComponent(m[1]);
             const parsed = JSON.parse(decoded);
-            if (parsed && parsed.email) {
+            if (parsed && (parsed.email || parsed.id)) {
               localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
+              inMemoryUser = parsed;
               current = JSON.stringify(parsed);
               break;
             }
           } catch (_) {}
         }
       }
+    } else {
+      try { inMemoryUser = JSON.parse(current); } catch (_) {}
     }
 
     if (!localStorage.getItem('zecratary_users')) {
@@ -75184,28 +75270,33 @@ export function initAuthStorage(): void {
 }
 
 export function getCurrentUser(): User | null {
+  if (inMemoryUser && (inMemoryUser.email || inMemoryUser.id)) return inMemoryUser;
   if (typeof window === 'undefined') return null;
   try {
     initAuthStorage();
     const raw = localStorage.getItem('zecratary_current_user');
     if (raw && raw !== 'null') {
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.email) return parsed;
+      if (parsed && (parsed.email || parsed.id)) {
+        inMemoryUser = parsed;
+        return inMemoryUser;
+      }
     }
 
-    // Direct cookie evaluation fallback
     const cookieMatches = [
       document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/),
       document.cookie.match(/(?:^|;\s*)zecratary_current_user=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)zecratary_auth_session=([^;]+)/),
       document.cookie.match(/(?:^|;\s*)currentUser=([^;]+)/)
     ];
     for (const m of cookieMatches) {
       if (m && m[1]) {
         try {
           const parsed = JSON.parse(decodeURIComponent(m[1]));
-          if (parsed && parsed.email) {
+          if (parsed && (parsed.email || parsed.id)) {
+            inMemoryUser = parsed;
             localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
-            return parsed;
+            return inMemoryUser;
           }
         } catch (_) {}
       }
@@ -75214,11 +75305,47 @@ export function getCurrentUser(): User | null {
   return null;
 }
 
+export function syncSessionCookie(user: any): void {
+  if (typeof window === 'undefined' || !user) return;
+  try {
+    const raw = JSON.stringify(user);
+    const encoded = encodeURIComponent(raw);
+    const keys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+    keys.forEach(k => {
+      document.cookie = `${k}=${encoded}; path=/; max-age=604800; SameSite=Lax`;
+    });
+  } catch (_) {}
+}
+
+export function isSessionCookieValid(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const cookieMatches = [
+      document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)zecratary_current_user=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)zecratary_auth_session=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)currentUser=([^;]+)/)
+    ];
+    for (const m of cookieMatches) {
+      if (m && m[1]) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(m[1]));
+          if (parsed && (parsed.email || parsed.id)) {
+            return true;
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
 export function setCurrentUser(user: User | null): void {
+  inMemoryUser = user;
   if (typeof window === 'undefined') return;
   try {
+    const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser', 'user'];
     if (!user) {
-      const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser', 'user'];
       keys.forEach(k => {
         localStorage.removeItem(k);
         document.cookie = `${k}=; path=/; max-age=0; SameSite=Lax`;
@@ -75228,45 +75355,92 @@ export function setCurrentUser(user: User | null): void {
 
     const raw = JSON.stringify(user);
     const encoded = encodeURIComponent(raw);
-    const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser'];
-    
     keys.forEach(k => {
       localStorage.setItem(k, raw);
       document.cookie = `${k}=${encoded}; path=/; max-age=604800; SameSite=Lax`;
     });
+
+    syncSessionCookie(user);
+  } catch (_) {}
+
+  try {
+    window.dispatchEvent(new CustomEvent('zecratary_auth_changed', { detail: user }));
+    window.dispatchEvent(new CustomEvent('zecratary_users_updated', { detail: user }));
+    window.dispatchEvent(new Event('storage'));
   } catch (_) {}
 }
 
-export function loginUser(email: string, password?: string): User | null {
+export function isAuthenticated(): boolean {
+  return getCurrentUser() !== null || isSessionCookieValid();
+}
+
+export function loginUser(
+  emailOrPayload: string | { email?: string; password?: string; [key: string]: any },
+  passwordInput?: string
+): (User & { success: boolean; user: User }) | null {
   if (typeof window === 'undefined') return null;
   initAuthStorage();
   try {
-    const cleanEmail = email.toLowerCase().trim();
+    let email = '';
+    let password = '';
+    if (typeof emailOrPayload === 'string') {
+      email = emailOrPayload.trim().toLowerCase();
+      password = (passwordInput || '').trim();
+    } else if (emailOrPayload && typeof emailOrPayload === 'object') {
+      email = (emailOrPayload.email || '').trim().toLowerCase();
+      password = (emailOrPayload.password || passwordInput || '').trim();
+    }
+
+    if (!email) return null;
+
     let storedUsers: User[] = [];
     const raw = localStorage.getItem('zecratary_users');
     if (raw) {
       try { storedUsers = JSON.parse(raw); } catch (_) {}
     }
     const combined = [...DEFAULT_USERS, ...storedUsers];
-    const match = combined.find(u => u.email.toLowerCase().trim() === cleanEmail);
-    
+    const match = combined.find(u => u.email.toLowerCase().trim() === email);
+
     if (match) {
-      if (password && match.password && match.password !== password.trim()) {
+      if (password && match.password && match.password !== password) {
         return null;
       }
       const safe: User = { ...match };
       delete (safe as any).password;
       setCurrentUser(safe);
-      return safe;
+      syncSessionCookie(safe);
+      return Object.assign(safe, { success: true, user: safe });
     }
   } catch (_) {}
   return null;
 }
 
-export function logoutUser(): void {
+export async function logoutUser(): Promise<void> {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (_) {}
   setCurrentUser(null);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('zecratary_auth_changed'));
+  }
+}
+
+export async function registerUser(payload: { email: string; name?: string; password?: string; [key: string]: any }): Promise<any> {
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok && data.success && data.user) {
+      setCurrentUser(data.user);
+      syncSessionCookie(data.user);
+      return { success: true, user: data.user };
+    }
+    return { success: false, error: data.error || 'Registration failed' };
+  } catch (err: any) {
+    return { success: false, error: err.message };
   }
 }
 

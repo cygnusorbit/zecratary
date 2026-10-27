@@ -1,248 +1,121 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { queryMysql } from '@/lib/mysql';
 
 export const dynamic = 'force-dynamic';
 
-export interface ClientNotificationItem {
-  id: string;
-  title: string;
-  message: string;
-  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo' | 'system';
-  isRead: boolean;
-  actionUrl?: string;
-  actionLabel?: string;
-  timestamp: string;
-}
+async function resolveUserFromReq(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  let rawUserId = searchParams.get('userId')?.trim() || '';
+  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
 
-async function ensureNotificationReadTable() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS user_notification_reads (
-        id SERIAL PRIMARY KEY,
-        user_email VARCHAR(255) NOT NULL,
-        notification_id VARCHAR(128) NOT NULL,
-        read_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(user_email, notification_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_user_notif_reads_email ON user_notification_reads(user_email);
-    `);
-  } catch (err) {
-    console.warn('[ensureNotificationReadTable] Warning:', err);
+  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
+  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
+
+  if (!rawUserId && !rawEmail) {
+    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user', 'zecratary_current_user'];
+    for (const cName of authCookies) {
+      const cVal = req.cookies.get(cName)?.value;
+      if (cVal) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(cVal));
+          if (parsed?.id) rawUserId = String(parsed.id);
+          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
+          if (rawUserId || rawEmail) break;
+        } catch (_) {}
+      }
+    }
   }
+
+  return { userId: rawUserId, email: rawEmail };
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureNotificationReadTable();
-    const { searchParams } = new URL(req.url);
-    const email = (searchParams.get('email') || '').toLowerCase().trim();
-    const userId = searchParams.get('userId') || '';
+    const { userId, email } = await resolveUserFromReq(req);
 
-    // 1. Fetch Notification Settings
-    let notifSettings: any = {
-      is_enabled: true,
-      in_app_enabled: true,
-      token_low_enabled: true,
-      token_low_threshold: 15,
-      token_exhausted_enabled: true,
-      wallet_low_enabled: true,
-      wallet_low_threshold: 5.0,
-      subscription_expiry_enabled: true,
-      subscription_expiry_days: 3,
-      reminder_meal_planner: true,
-      sound_enabled: true,
-      quiet_hours_enabled: false,
-      quiet_hours_start: '22:00',
-      quiet_hours_end: '07:00',
-      retention_days: 30
-    };
-
+    // Ensure PostgreSQL notifications schema exists
     try {
-      const cfgRows = await query('SELECT * FROM notification_settings WHERE id = $1 LIMIT 1', ['default_notification_settings']);
-      if (cfgRows && cfgRows.length > 0) {
-        notifSettings = { ...notifSettings, ...cfgRows[0] };
-      }
-    } catch (_) {}
-
-    // If notifications master or in-app channel is disabled, return empty
-    if (!notifSettings.is_enabled || !notifSettings.in_app_enabled) {
-      return NextResponse.json({
-        success: true,
-        notifications: [],
-        unreadCount: 0,
-        settings: {
-          isEnabled: Boolean(notifSettings.is_enabled),
-          inAppEnabled: Boolean(notifSettings.in_app_enabled),
-          soundEnabled: false,
-          quietHoursEnabled: false
-        }
-      });
-    }
-
-    // 2. Load Read Receipts for this user
-    const readIds = new Set<string>();
-    if (email) {
-      const readRows = await query('SELECT notification_id FROM user_notification_reads WHERE LOWER(user_email) = $1', [email]);
-      (readRows || []).forEach((r: any) => {
-        if (r.notification_id) readIds.add(r.notification_id);
-      });
-    }
-
-    const notifications: ClientNotificationItem[] = [];
-
-    // 3. Load Custom Announcements from PostgreSQL custom_notifications
-    try {
-      const customRows = await query(`
-        SELECT * FROM custom_notifications
-        WHERE is_active = true AND (sent_at IS NOT NULL OR send_count > 0)
-        ORDER BY COALESCE(sent_at, created_at) DESC
-        LIMIT 25
+      await query(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          user_email VARCHAR(255),
+          title VARCHAR(255) NOT NULL,
+          message TEXT NOT NULL,
+          type VARCHAR(32) DEFAULT 'info',
+          is_read BOOLEAN DEFAULT false,
+          action_url VARCHAR(255),
+          action_label VARCHAR(100),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
       `);
-
-      (customRows || []).forEach((c: any) => {
-        let channels = { inApp: true };
-        if (c.channels) {
-          channels = typeof c.channels === 'string' ? JSON.parse(c.channels) : c.channels;
-        }
-        if (channels.inApp !== false) {
-          notifications.push({
-            id: c.id,
-            title: c.title,
-            message: c.message,
-            type: (c.type as any) || 'info',
-            isRead: readIds.has(c.id),
-            actionUrl: c.action_url || '',
-            actionLabel: c.action_label || '',
-            timestamp: c.sent_at ? new Date(c.sent_at).toISOString() : new Date(c.created_at).toISOString()
-          });
-        }
-      });
     } catch (_) {}
 
-    // 4. Evaluate Dynamic User Account Warnings (Tokens, Wallet, Subscriptions)
-    if (email) {
-      const userRows = await query('SELECT token_balance, wallet_balance, subscription_plan, role FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]);
-      if (userRows && userRows.length > 0) {
-        const u = userRows[0];
-        const tBal = Number(u.token_balance ?? 0);
-        const wBal = Number(u.wallet_balance ?? 0);
+    let rows: any[] = [];
+    if (userId || email) {
+      rows = await query(
+        `SELECT id, title, message, type, is_read, action_url, action_label, created_at 
+         FROM notifications 
+         WHERE ($1 != '' AND user_id::text = $1) 
+            OR ($2 != '' AND LOWER(TRIM(user_email)) = LOWER(TRIM($2)))
+         ORDER BY created_at DESC LIMIT 30`,
+        [userId, email]
+      );
+    }
 
-        // Daily bucket key ensures threshold alerts refresh predictably
-        const dayBucket = new Date().toISOString().slice(0, 10);
-
-        // A. Token Low or Zero Alert
-        if (notifSettings.token_exhausted_enabled && tBal <= 0) {
-          const id = `sys_token_zero_${dayBucket}`;
-          notifications.push({
-            id,
-            title: 'AI Tokens Exhausted',
-            message: 'You have 0 tokens remaining. Chef AI requests are paused until your tokens are replenished.',
-            type: 'urgent',
-            isRead: readIds.has(id),
-            actionUrl: '/token',
-            actionLabel: 'Top Up Tokens',
-            timestamp: new Date().toISOString()
-          });
-        } else if (notifSettings.token_low_enabled && tBal > 0 && tBal <= Number(notifSettings.token_low_threshold ?? 15)) {
-          const id = `sys_token_low_${dayBucket}`;
-          notifications.push({
-            id,
-            title: 'Token Balance Running Low',
-            message: `You have ${tBal} AI tokens left. Add tokens now to keep creating recipes uninterrupted.`,
-            type: 'warning',
-            isRead: readIds.has(id),
-            actionUrl: '/token',
-            actionLabel: 'Get Tokens',
-            timestamp: new Date().toISOString()
-          });
+    // Seed default welcoming notices if empty
+    if (!rows || rows.length === 0) {
+      const defaultNotifs = [
+        {
+          id: `notif_welcome_${Date.now()}_1`,
+          title: '🎉 Welcome to Zecratary!',
+          message: 'Your wallet credits and AI tokens are active and synchronized with PostgreSQL.',
+          type: 'success',
+          is_read: false,
+          created_at: new Date().toISOString()
+        },
+        {
+          id: `notif_sync_${Date.now()}_2`,
+          title: '⚡ Real-Time Balance Sync',
+          message: 'Balances update live across all open browser tabs without refreshing.',
+          type: 'info',
+          is_read: false,
+          created_at: new Date().toISOString()
         }
+      ];
 
-        // B. Wallet Balance Low Alert
-        if (notifSettings.wallet_low_enabled && wBal <= Number(notifSettings.wallet_low_threshold ?? 5.0)) {
-          const id = `sys_wallet_low_${dayBucket}`;
-          notifications.push({
-            id,
-            title: 'Store Wallet Funds Low',
-            message: `Your wallet balance is $${wBal.toFixed(2)}. Add funds to ensure seamless tool purchases and renewals.`,
-            type: 'warning',
-            isRead: readIds.has(id),
-            actionUrl: '/wallet',
-            actionLabel: 'Top Up Wallet',
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        // C. Subscription Expiry Warning
-        if (notifSettings.subscription_expiry_enabled && u.subscription_plan && u.subscription_plan !== 'taster' && u.subscription_plan !== 'free') {
-          try {
-            const txRows = await query(`
-              SELECT expiry_date, plan_name FROM payment_transactions
-              WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'active')
-              ORDER BY created_at DESC LIMIT 1
-            `, [email]);
-
-            if (txRows && txRows.length > 0 && txRows[0].expiry_date) {
-              const exp = new Date(txRows[0].expiry_date);
-              const now = new Date();
-              const diffDays = Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-              const alertDays = Number(notifSettings.subscription_expiry_days ?? 3);
-
-              if (diffDays <= alertDays) {
-                const id = `sys_sub_expiry_${dayBucket}`;
-                notifications.push({
-                  id,
-                  title: diffDays <= 0 ? 'Subscription Expired' : 'Subscription Renewal Reminder',
-                  message: diffDays <= 0
-                    ? `Your ${txRows[0].plan_name || 'Membership'} has expired. Choose a tier to keep your premium benefits.`
-                    : `Your ${txRows[0].plan_name || 'Membership'} will renew in ${diffDays} day(s) on ${exp.toLocaleDateString()}.`,
-                  type: diffDays <= 0 ? 'urgent' : 'info',
-                  isRead: readIds.has(id),
-                  actionUrl: '/subscriptions',
-                  actionLabel: 'Manage Plan',
-                  timestamp: new Date().toISOString()
-                });
-              }
-            }
-          } catch (_) {}
-        }
+      if (userId || email) {
+        try {
+          for (const n of defaultNotifs) {
+            await query(
+              `INSERT INTO notifications (id, user_id, user_email, title, message, type, is_read, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+               ON CONFLICT (id) DO NOTHING`,
+              [n.id, userId || 'usr_default', email || 'user@zecratary.com', n.title, n.message, n.type, false]
+            );
+          }
+        } catch (_) {}
       }
+      rows = defaultNotifs;
     }
 
-    // 5. Default Welcome Alert if no notifications exist
-    if (notifications.length === 0) {
-      const welcomeId = 'sys_welcome_alert';
-      notifications.push({
-        id: welcomeId,
-        title: '🎉 Welcome to Zecratary!',
-        message: 'Your culinary portal is fully connected with live PostgreSQL storage and AI tools.',
-        type: 'success',
-        isRead: readIds.has(welcomeId),
-        actionUrl: '/chef',
-        actionLabel: 'Try Chef AI',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Sort newest first
-    notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-    const unreadCount = notifications.filter(n => !n.isRead).length;
+    const unreadCount = rows.filter((r: any) => !r.is_read).length;
 
     return NextResponse.json({
       success: true,
-      notifications,
-      unreadCount,
-      settings: {
-        isEnabled: Boolean(notifSettings.is_enabled),
-        inAppEnabled: Boolean(notifSettings.in_app_enabled),
-        soundEnabled: Boolean(notifSettings.sound_enabled),
-        quietHoursEnabled: Boolean(notifSettings.quiet_hours_enabled),
-        quietHoursStart: notifSettings.quiet_hours_start || '22:00',
-        quietHoursEnd: notifSettings.quiet_hours_end || '07:00'
-      }
-    }, {
-      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
-    });
+      notifications: rows.map((r: any) => ({
+        id: String(r.id),
+        title: r.title,
+        message: r.message,
+        type: r.type || 'info',
+        isRead: Boolean(r.is_read),
+        actionUrl: r.action_url || '',
+        actionLabel: r.action_label || '',
+        createdAt: r.created_at
+      })),
+      unreadCount
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -250,42 +123,42 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureNotificationReadTable();
-    const body = await req.json();
-    const action = body.action;
-    const email = (body.email || '').toLowerCase().trim();
-
-    if (!email) {
-      return NextResponse.json({ success: false, error: 'User email is required' }, { status: 400 });
-    }
-
-    if (action === 'mark_read') {
-      const notifId = body.notificationId;
-      if (notifId) {
-        await query(`
-          INSERT INTO user_notification_reads (user_email, notification_id, read_at)
-          VALUES ($1, $2, NOW())
-          ON CONFLICT (user_email, notification_id) DO UPDATE SET read_at = NOW()
-        `, [email, notifId]);
-      }
-      return NextResponse.json({ success: true, message: 'Notification marked as read in PostgreSQL.' });
-    }
+    const { userId, email } = await resolveUserFromReq(req);
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action || 'mark_all_read';
+    const notifId = body?.id || '';
 
     if (action === 'mark_all_read') {
-      const ids: string[] = Array.isArray(body.notificationIds) ? body.notificationIds : [];
-      for (const id of ids) {
-        if (id) {
-          await query(`
-            INSERT INTO user_notification_reads (user_email, notification_id, read_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (user_email, notification_id) DO NOTHING
-          `, [email, id]);
-        }
-      }
-      return NextResponse.json({ success: true, message: 'All notifications marked as read in PostgreSQL.' });
+      try {
+        await query(
+          `UPDATE notifications SET is_read = true 
+           WHERE ($1 != '' AND user_id::text = $1) 
+              OR ($2 != '' AND LOWER(TRIM(user_email)) = LOWER(TRIM($2)))`,
+          [userId, email]
+        );
+      } catch (_) {}
+
+      try {
+        await queryMysql(
+          `UPDATE notifications SET is_read = true 
+           WHERE (? != '' AND user_id = ?) 
+              OR (? != '' AND LOWER(TRIM(user_email)) = LOWER(TRIM(?)))`,
+          [userId, userId, email, email]
+        );
+      } catch (_) {}
+
+      return NextResponse.json({ success: true, message: 'All notifications marked as read', unreadCount: 0 });
     }
 
-    return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });
+    if (action === 'mark_read' && notifId) {
+      try {
+        await query(`UPDATE notifications SET is_read = true WHERE id = $1`, [notifId]);
+      } catch (_) {}
+
+      return NextResponse.json({ success: true, message: 'Notification marked as read' });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unsupported action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

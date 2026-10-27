@@ -1167,7 +1167,7 @@
       "expiringPantryDesc": "{count} ingredient(s) are expiring soon in your pantry stock.",
       "cookExpiringAction": "Cook with Chef AI",
       "activeMembership": "Active Tier",
-      "topUpTokens": "+ Top Up",
+      "topUpTokens": "Top Up Tokens",
       "addFunds": "+ Add Funds",
       "manageMembership": "Manage Plan",
       "noRecentRecipes": "No saved recipes yet. Create or import your first recipe!",
@@ -2405,7 +2405,7 @@
       "topbarPlanPro": "Pro Plan",
       "topbarPlanFree": "Free Tier",
       "topbarUnreadCount": "unread",
-      "topbarMarkAllRead": "Mark all as read",
+      "topbarMarkAllRead": "Mark all read",
       "topbarViewAllNotifications": "View all notifications",
       "topbarTokenTooltip": "AI Token Balance",
       "topbarWalletTooltip": "Store Wallet Balance",
@@ -2421,7 +2421,9 @@
       "themeMode": "Theme Mode",
       "interfaceLanguage": "Interface Language",
       "loggedOutSuccess": "You have been logged out successfully",
-      "userGreeting": "Signed in as"
+      "userGreeting": "Signed in as",
+      "viewWalletBalance": "View Wallet Balance & History",
+      "viewTokenBalance": "View Token Balance & History"
     },
     "th": {
       "storageTitle": "การกำหนดค่าพื้นที่จัดเก็บสื่อและรูปภาพ",
@@ -2979,7 +2981,7 @@
       "emptyShoppingList": "ไม่มีรายการของที่ต้องซื้อ",
       "tokenBundles": "แพ็กเกจโทเค็นที่มีให้เลือก",
       "purchaseTokens": "ซื้อโทเค็น",
-      "topUpWallet": "เติมเงินกระเป๋า",
+      "topUpWallet": "เติมเงินเข้ากระเป๋า",
       "depositAmount": "จำนวนเงินที่ต้องการเติม",
       "currentPlan": "แพ็กเกจปัจจุบัน",
       "upgradePlan": "อัปเกรด",
@@ -3308,7 +3310,7 @@
       "expiringPantryDesc": "มีวัตถุดิบ {count} รายการที่ใกล้หมดอายุในคลังของคุณ",
       "cookExpiringAction": "ปรุงด้วยเชฟ AI",
       "activeMembership": "แพ็กเกจปัจจุบัน",
-      "topUpTokens": "+ เติมโทเค็น",
+      "topUpTokens": "ซื้อโทเค็น AI",
       "addFunds": "+ เติมเงิน",
       "manageMembership": "จัดการแพ็กเกจ",
       "noRecentRecipes": "ยังไม่มีสูตรอาหารที่บันทึกไว้ เริ่มต้นสร้างหรือนำเข้าสูตรอาหารแรกของคุณ!",
@@ -4545,8 +4547,8 @@
       "topbarPlanAdmin": "สิทธิ์ผู้ดูแลระบบ",
       "topbarPlanPro": "แพ็กเกจโปร",
       "topbarPlanFree": "แพ็กเกจฟรี",
-      "topbarUnreadCount": "ยังไม่ได้อ่าน",
-      "topbarMarkAllRead": "ทำเครื่องหมายว่าอ่านแล้วทั้งหมด",
+      "topbarUnreadCount": "ยังไม่อ่าน",
+      "topbarMarkAllRead": "ทำเครื่องหมายอ่านแล้วทั้งหมด",
       "topbarViewAllNotifications": "ดูการแจ้งเตือนทั้งหมด",
       "topbarTokenTooltip": "ยอดโทเค็น AI คงเหลือ",
       "topbarWalletTooltip": "ยอดเงินในกระเป๋า",
@@ -4562,7 +4564,9 @@
       "themeMode": "ธีมการแสดงผล",
       "interfaceLanguage": "ภาษาของระบบ",
       "loggedOutSuccess": "คุณได้ออกจากระบบเรียบร้อยแล้ว",
-      "userGreeting": "เข้าสู่ระบบในชื่อ"
+      "userGreeting": "เข้าสู่ระบบในชื่อ",
+      "viewWalletBalance": "ดูยอดเงินในกระเป๋าและประวัติ",
+      "viewTokenBalance": "ดูยอดโทเค็น AI และประวัติ"
     },
     "es": {
       "storageTitle": "Configuración de Almacenamiento de Medios",
@@ -5449,7 +5453,7 @@
       "expiringPantryDesc": "{count} ingrediente(s) están próximos a caducar en su despensa.",
       "cookExpiringAction": "Cocinar con Chef IA",
       "activeMembership": "Nivel Activo",
-      "topUpTokens": "+ Recargar",
+      "topUpTokens": "Comprar Tokens IA",
       "addFunds": "+ Añadir Fondos",
       "manageMembership": "Gestionar Plan",
       "noRecentRecipes": "¡Aún no hay recetas guardadas! ¡Cree o importe su primera receta!",
@@ -6703,7 +6707,9 @@
       "themeMode": "Modo de Tema",
       "interfaceLanguage": "Idioma de la Interfaz",
       "loggedOutSuccess": "Ha cerrado sesión correctamente",
-      "userGreeting": "Conectado como"
+      "userGreeting": "Conectado como",
+      "viewWalletBalance": "Ver saldo e historial de billetera",
+      "viewTokenBalance": "Ver saldo e historial de tokens IA"
     },
     "fr": {
       "storageTitle": "Configuration du Stockage des Médias",
@@ -7590,7 +7596,7 @@
       "expiringPantryDesc": "{count} ingrédient(s) arrivent bientôt à expiration.",
       "cookExpiringAction": "Cuisiner avec Chef IA",
       "activeMembership": "Abonnement Actif",
-      "topUpTokens": "+ Recharger",
+      "topUpTokens": "Acheter des Jetons IA",
       "addFunds": "+ Ajouter des Fonds",
       "manageMembership": "Gérer l'Abonnement",
       "noRecentRecipes": "Aucune recette enregistrée pour le moment. Créez ou importez votre première recette !",
@@ -8831,7 +8837,9 @@
       "themeMode": "Mode Thème",
       "interfaceLanguage": "Langue de l'Interface",
       "loggedOutSuccess": "Vous avez été déconnecté avec succès",
-      "userGreeting": "Connecté en tant que"
+      "userGreeting": "Connecté en tant que",
+      "viewWalletBalance": "Consulter le solde et l'historique du portefeuille",
+      "viewTokenBalance": "Consulter le solde et l'historique des jetons IA"
     }
   }
 }
