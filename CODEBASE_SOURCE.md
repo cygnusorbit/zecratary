@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.69",
+  "version": "8.1.70",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.69",
+  "version": "8.1.70",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -73928,7 +73928,7 @@ export default function Sidebar(
                     <CreditCard className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('plans', 'Subscription Plans')}</span>}
                   </Link>
-                  <Link href="/admin/payment" className={navClass('/admin/payment')} style={navStyle('/admin/payment')} title={t('payments', 'Payments')}>
+                  <Link href="/admin/payment-gateway" className={navClass('/admin/payment-gateway')} style={navStyle('/admin/payment-gateway')} title={t('payments', 'Payments')}>
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
                   </Link>
