@@ -4,6 +4,22 @@ import { query } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+function cleanCategory(cat: any): string {
+  if (!cat) return 'Produce';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    if (trimmed === '[object Object]' || trimmed === '') return 'Produce';
+    return trimmed;
+  }
+  if (typeof cat === 'object') {
+    const candidate = cat.name || cat.label || cat.title || cat.slug || cat.id;
+    if (typeof candidate === 'string' && candidate.trim() && candidate !== '[object Object]') {
+      return candidate.trim();
+    }
+  }
+  return 'Produce';
+}
+
 async function ensureTable() {
   try {
     await query(`
@@ -21,7 +37,26 @@ async function ensureTable() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_shopping_items_user ON shopping_items(user_id);
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_shopping_items_user ON shopping_items(user_id);`).catch(() => {});
+  } catch (_) {}
+
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS shopping_list (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        name VARCHAR(255) NOT NULL,
+        amount VARCHAR(64) DEFAULT '1',
+        unit VARCHAR(64) DEFAULT '',
+        category VARCHAR(64) DEFAULT 'Produce',
+        staple BOOLEAN DEFAULT FALSE,
+        checked BOOLEAN DEFAULT FALSE,
+        recipe_id VARCHAR(64),
+        recipe_title VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
     `);
   } catch (_) {}
 }
@@ -42,7 +77,13 @@ export async function GET(req: NextRequest) {
 
     sql += ' ORDER BY created_at ASC';
 
-    const rows: any = await query(sql, params);
+    let rows: any = [];
+    try {
+      rows = await query(sql, params);
+    } catch (_) {
+      rows = await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => []);
+    }
+
     const raw = Array.isArray(rows) ? rows : (rows?.rows || []);
 
     const formatted = raw.map((r: any) => ({
@@ -52,7 +93,7 @@ export async function GET(req: NextRequest) {
       item: r.name || '',
       amount: r.amount || '1',
       unit: r.unit || '',
-      category: r.category || 'Produce',
+      category: cleanCategory(r.category),
       staple: Boolean(r.staple),
       checked: Boolean(r.checked),
       recipeId: r.recipe_id || null,
@@ -73,36 +114,78 @@ export async function POST(req: NextRequest) {
   try {
     await ensureTable();
     const body = await req.json();
-    const targetUserId = body.userId || body.user_id || 'usr_admin_1';
+    const fallbackUserId = body?.userId || body?.user_id || 'usr_admin_1';
     const items = Array.isArray(body) ? body : (body.items || [body.item || body]);
 
     for (const item of items) {
       if (!item || (!item.name && !item.item)) continue;
       const id = String(item.id || ('s_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6))).slice(0, 64);
+      const targetUserId = item.userId || item.user_id || fallbackUserId;
       const name = String(item.name || item.item || '').trim().slice(0, 255);
       const amount = String(item.amount || item.quantity || '1').slice(0, 64);
       const unit = String(item.unit || '').slice(0, 64);
-      const category = String(item.category || 'Produce').slice(0, 64);
+      const category = cleanCategory(item.category);
       const staple = Boolean(item.staple);
       const checked = typeof item.checked !== 'undefined' ? Boolean(item.checked) : Boolean(item.completed);
       const recipeId = item.recipeId || item.recipe_id ? String(item.recipeId || item.recipe_id).slice(0, 64) : null;
       const recipeTitle = item.recipeTitle || item.recipe_title ? String(item.recipeTitle || item.recipe_title).slice(0, 255) : null;
 
-      await query(`
-        INSERT INTO shopping_items (
-          id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          amount = EXCLUDED.amount,
-          unit = EXCLUDED.unit,
-          category = EXCLUDED.category,
-          staple = EXCLUDED.staple,
-          checked = EXCLUDED.checked,
-          recipe_id = EXCLUDED.recipe_id,
-          recipe_title = EXCLUDED.recipe_title,
-          updated_at = NOW();
-      `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      try {
+        await query(`
+          INSERT INTO shopping_items (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            name = EXCLUDED.name,
+            amount = EXCLUDED.amount,
+            unit = EXCLUDED.unit,
+            category = EXCLUDED.category,
+            staple = EXCLUDED.staple,
+            checked = EXCLUDED.checked,
+            recipe_id = EXCLUDED.recipe_id,
+            recipe_title = EXCLUDED.recipe_title,
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      } catch (_) {
+        // MySQL fallback syntax
+        await query(`
+          INSERT INTO shopping_items (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+          ON DUPLICATE KEY UPDATE
+            user_id = VALUES(user_id),
+            name = VALUES(name),
+            amount = VALUES(amount),
+            unit = VALUES(unit),
+            category = VALUES(category),
+            staple = VALUES(staple),
+            checked = VALUES(checked),
+            recipe_id = VALUES(recipe_id),
+            recipe_title = VALUES(recipe_title),
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]).catch(() => {});
+      }
+
+      // Synchronize shopping_list table
+      try {
+        await query(`
+          INSERT INTO shopping_list (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            name = EXCLUDED.name,
+            amount = EXCLUDED.amount,
+            unit = EXCLUDED.unit,
+            category = EXCLUDED.category,
+            staple = EXCLUDED.staple,
+            checked = EXCLUDED.checked,
+            recipe_id = EXCLUDED.recipe_id,
+            recipe_title = EXCLUDED.recipe_title,
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      } catch (_) {}
     }
 
     return NextResponse.json({ success: true, message: 'Shopping items saved successfully.' });
@@ -133,20 +216,23 @@ export async function DELETE(req: NextRequest) {
     if (action === 'remove_completed') {
       if (bodyIds.length > 0) {
         const placeholders = bodyIds.map((_, i) => `$${i + 1}`).join(',');
-        await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds);
+        await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
+        await query(`DELETE FROM shopping_list WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
       } else {
         const sql = userId
           ? 'DELETE FROM shopping_items WHERE checked = TRUE AND (user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL)'
           : 'DELETE FROM shopping_items WHERE checked = TRUE';
         const params = userId ? [userId] : [];
-        await query(sql, params);
+        await query(sql, params).catch(() => {});
+        await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => {});
       }
       return NextResponse.json({ success: true, message: 'Completed items removed.' });
     }
 
     if (bodyIds.length > 0) {
       const placeholders = bodyIds.map((_, i) => `$${i + 1}`).join(',');
-      await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds);
+      await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
+      await query(`DELETE FROM shopping_list WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
       return NextResponse.json({ success: true, message: 'Items removed.' });
     }
 
@@ -154,7 +240,8 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Item ID is required' }, { status: 400 });
     }
 
-    await query('DELETE FROM shopping_items WHERE id = $1', [id.trim()]);
+    await query('DELETE FROM shopping_items WHERE id = $1', [id.trim()]).catch(() => {});
+    await query('DELETE FROM shopping_list WHERE id = $1', [id.trim()]).catch(() => {});
     return NextResponse.json({ success: true, message: 'Item removed.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

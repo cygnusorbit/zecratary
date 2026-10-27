@@ -115,60 +115,68 @@ export default function ShoppingPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // 1. Fetch live items from PostgreSQL /api/shopping without zombie data resurrection
+  // 1. Non-destructive sync: merge server items with local items from /recipes
   const loadShoppingData = useCallback(async (user: User | null) => {
     const targetUserId = user?.id || 'usr_admin_1';
     setLoading(true);
 
+    let localList: ShoppingItem[] = [];
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            localList = parsed.map((i: any) => ({
+              ...i,
+              category: getCategoryName(i.category)
+            }));
+          }
+        }
+      } catch (_) {}
+    }
+
     try {
-      let fetchedItems: ShoppingItem[] = [];
       const res = await fetch(`/api/shopping?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.items)) {
-          fetchedItems = data.items.map((i: any) => ({
+          const serverItems: ShoppingItem[] = data.items.map((i: any) => ({
             ...i,
             category: getCategoryName(i.category)
           }));
-          try {
-            localStorage.setItem('zecratary_shopping_list', JSON.stringify(fetchedItems));
-            localStorage.setItem('zecratary_shopping', JSON.stringify(fetchedItems));
-          } catch (_) {}
-        }
-      } else {
-        if (typeof window !== 'undefined') {
-          const raw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              fetchedItems = parsed.map((i: any) => ({
-                ...i,
-                category: getCategoryName(i.category)
-              }));
-            }
-          }
-        }
-      }
 
-      setItems(fetchedItems);
-    } catch (e) {
-      console.warn('[ShoppingPage] Error loading data, reading cache:', e);
-      if (typeof window !== 'undefined') {
-        const raw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
-        if (raw) {
+          const serverIdSet = new Set(serverItems.map(i => i.id));
+          // Preserve any locally staged items from /recipes that server hasn't committed yet
+          const uncommittedLocal = localList.filter(i => !serverIdSet.has(i.id));
+          const merged = [...serverItems, ...uncommittedLocal];
+
+          setItems(merged);
           try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              setItems(parsed.map((i: any) => ({
-                ...i,
-                category: getCategoryName(i.category)
-              })));
-            }
+            localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
+            localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
           } catch (_) {}
+
+          // If there were uncommitted items from /recipes, persist them to PostgreSQL in background
+          if (uncommittedLocal.length > 0) {
+            fetch('/api/shopping', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: targetUserId, items: uncommittedLocal })
+            }).catch(() => {});
+          }
+          return;
         }
       }
+    } catch (e) {
+      console.warn('[ShoppingPage] Server fetch note:', e);
     } finally {
       setLoading(false);
+    }
+
+    // Fallback: render local cached list
+    if (localList.length > 0) {
+      setItems(localList);
     }
   }, []);
 
@@ -193,6 +201,8 @@ export default function ShoppingPage() {
     };
 
     window.addEventListener('zecratary_shopping_updated', handleSync);
+    window.addEventListener('zecratary_shopping_list_updated', handleSync);
+    window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
@@ -200,6 +210,8 @@ export default function ShoppingPage() {
 
     return () => {
       window.removeEventListener('zecratary_shopping_updated', handleSync);
+    window.removeEventListener('zecratary_shopping_list_updated', handleSync);
+    window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);

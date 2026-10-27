@@ -1,5 +1,21 @@
 // @ts-nocheck
 'use client';
+const getSafeCategoryName = (cat: any): string => {
+  if (!cat) return 'Produce';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    if (trimmed === '[object Object]' || trimmed === '') return 'Produce';
+    return trimmed;
+  }
+  if (typeof cat === 'object') {
+    const candidate = cat.name || cat.label || cat.title || cat.slug || cat.id;
+    if (typeof candidate === 'string' && candidate.trim() && candidate !== '[object Object]') {
+      return candidate.trim();
+    }
+  }
+  return 'Produce';
+};
+
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -909,7 +925,7 @@ export default function RecipesPage() {
 
   const handleOpenShoppingModal = () => {
     if (!selectedRecipe) return;
-    const defaultCat = categories[0] || 'Produce';
+    const defaultCat = getSafeCategoryName(categories?.[0] || 'Produce');
     const baseServings = selectedRecipe.servings || 4;
     const totalServings = baseServings * servingsMultiplier;
 
@@ -955,7 +971,7 @@ export default function RecipesPage() {
   // Recipe Edit Studio Open & Handlers
   const handleOpenEdit = () => {
     if (!selectedRecipe) return;
-    const defaultCat = categories[0] || 'Produce';
+    const defaultCat = getSafeCategoryName(categories?.[0] || 'Produce');
     const rawIngs = selectedRecipe.ingredients || [];
     setEditForm({
       title: selectedRecipe.title || selectedRecipe.name || '',
