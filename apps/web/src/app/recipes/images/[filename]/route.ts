@@ -1,74 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { getRecipeImageDir } from '@/lib/recipeFiles';
+import { getCanonicalImagesDir } from '@/lib/storageService';
 
 export const dynamic = 'force-dynamic';
 
-function getMimeType(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  switch (ext) {
-    case '.webp': return 'image/webp';
-    case '.png': return 'image/png';
-    case '.jpg':
-    case '.jpeg': return 'image/jpeg';
-    case '.gif': return 'image/gif';
-    case '.svg': return 'image/svg+xml';
-    case '.avif': return 'image/avif';
-    default: return 'image/jpeg';
-  }
-}
-
 export async function GET(
-  req: NextRequest, 
-  { params }: { params: Promise<{ filename: string }> }
+  req: NextRequest,
+  context: { params: Promise<{ filename: string }> }
 ) {
   try {
-    const { filename } = await params;
-    const safeName = path.basename(filename);
-    const primaryPath = path.join(getRecipeImageDir(), safeName);
-
-    let foundPath = fs.existsSync(primaryPath) ? primaryPath : null;
-
-    if (!foundPath) {
-      const candidates = [
-        path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images', safeName),
-        path.join(process.cwd(), 'public', 'recipes', 'images', safeName),
-        path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes', safeName),
-        path.join(process.cwd(), 'public', 'uploads', 'recipes', safeName)
-      ];
-      for (const c of candidates) {
-        if (fs.existsSync(c)) {
-          foundPath = c;
-          break;
-        }
-      }
+    const { filename } = await context.params;
+    if (!filename) {
+      return new NextResponse('Filename missing', { status: 400 });
     }
 
-    if (foundPath) {
-      const buffer = fs.readFileSync(foundPath);
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': getMimeType(foundPath),
-          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'
-        }
-      });
+    const safeFilename = path.basename(filename);
+    const imagesDir = getCanonicalImagesDir();
+    let filePath = path.join(imagesDir, safeFilename);
+
+    if (!fs.existsSync(filePath)) {
+      // Fallback check in default.jpg
+      filePath = path.join(imagesDir, 'default.jpg');
     }
 
-    // Default fallback
-    const defaultFallback = path.join(getRecipeImageDir(), 'default.jpg');
-    if (fs.existsSync(defaultFallback)) {
-      const buffer = fs.readFileSync(defaultFallback);
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': 'image/jpeg',
-          'Cache-Control': 'public, max-age=3600'
-        }
-      });
+    if (!fs.existsSync(filePath)) {
+      return new NextResponse('Image not found', { status: 404 });
     }
 
-    return NextResponse.json({ error: 'Image not found' }, { status: 404 });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    const ext = path.extname(filePath).toLowerCase();
+    let mimeType = 'image/jpeg';
+    if (ext === '.png') mimeType = 'image/png';
+    else if (ext === '.webp') mimeType = 'image/webp';
+    else if (ext === '.gif') mimeType = 'image/gif';
+    else if (ext === '.avif') mimeType = 'image/avif';
+
+    const buffer = fs.readFileSync(filePath);
+    return new NextResponse(buffer, {
+      status: 200,
+      headers: {
+        'Content-Type': mimeType,
+        'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+      },
+    });
+  } catch (err: any) {
+    return new NextResponse('Internal Server Error', { status: 500 });
   }
 }

@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.55",
+  "version": "8.1.56",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.55",
+  "version": "8.1.56",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -47141,6 +47141,96 @@ export async function DELETE(req: Request) {
 
 ```
 
+## File: `apps/web/src/app/api/admin/currencies/route.ts`
+```typescript
+// @ts-nocheck
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+const DEFAULT_CURRENCIES = [
+  { code: 'USD', symbol: '$', name: 'US Dollar', rate: 1, is_default: true },
+  { code: 'EUR', symbol: '€', name: 'Euro', rate: 0.92, is_default: false },
+  { code: 'THB', symbol: '฿', name: 'Thai Baht', rate: 36.5, is_default: false },
+  { code: 'GBP', symbol: '£', name: 'British Pound', rate: 0.79, is_default: false }
+];
+
+export async function GET() {
+  try {
+    // 1. Try PostgreSQL
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        const res = await query(`
+          SELECT currencies FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;
+        `).catch(() => null);
+
+        if (res?.rows?.[0]?.currencies) {
+          const parsed = typeof res.rows[0].currencies === 'string'
+            ? JSON.parse(res.rows[0].currencies)
+            : res.rows[0].currencies;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return NextResponse.json({ success: true, currencies: parsed });
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Try Local JSON
+    const p = path.join(process.cwd(), 'data', 'admin_settings.json');
+    if (fs.existsSync(p)) {
+      try {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.currencies) && data.currencies.length > 0) {
+          return NextResponse.json({ success: true, currencies: data.currencies });
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json({ success: true, currencies: DEFAULT_CURRENCIES });
+  } catch (err: any) {
+    return NextResponse.json({ success: true, currencies: DEFAULT_CURRENCIES });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const currencies = body.currencies || [];
+
+    // 1. Update PostgreSQL
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query(`
+          INSERT INTO admin_settings (id, currencies, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            currencies = EXCLUDED.currencies,
+            updated_at = NOW();
+        `, [JSON.stringify(currencies)]);
+      }
+    } catch (_) {}
+
+    // 2. Update Local JSON
+    const p = path.join(process.cwd(), 'data', 'admin_settings.json');
+    if (fs.existsSync(p)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        data.currencies = currencies;
+        fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+      } catch (_) {}
+    }
+
+    return NextResponse.json({ success: true, currencies });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/admin/ai-settings/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -52616,95 +52706,196 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/user/sidebar-settings/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+// @ts-nocheck
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export const dynamic = 'force-dynamic';
+let isSidebarDbInitialized = false;
 
-async function ensureTable() {
+async function ensureSidebarSettingsTable() {
+  if (isSidebarDbInitialized) return;
   try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS user_sidebar_settings (
-        user_id VARCHAR(255) PRIMARY KEY,
-        sections TEXT NOT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-  } catch (_) {
-    try {
+    const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+    if (typeof query === 'function') {
       await query(`
         CREATE TABLE IF NOT EXISTS user_sidebar_settings (
-          user_id TEXT PRIMARY KEY,
-          sections JSONB NOT NULL DEFAULT '{"create": true, "manage": true, "plan": true, "finance": true, "admin": false}'::jsonb,
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          user_email VARCHAR(255),
+          collapsed BOOLEAN DEFAULT false,
+          hidden_items JSONB DEFAULT '[]',
+          pinned_items JSONB DEFAULT '[]',
+          custom_order JSONB DEFAULT '[]',
+          settings JSONB DEFAULT '{}',
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
+        CREATE INDEX IF NOT EXISTS idx_user_sidebar_settings_user ON user_sidebar_settings(user_id);
       `);
-    } catch (_) {}
-  }
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    await ensureTable();
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId') || searchParams.get('email');
-    if (!userId) {
-      return NextResponse.json({ success: true, sections: null });
+      isSidebarDbInitialized = true;
     }
-    const res = await query('SELECT sections FROM user_sidebar_settings WHERE user_id = $1 LIMIT 1', [userId]);
-    const row = Array.isArray(res) ? res[0] : (res as any)?.rows?.[0];
-    let sections = row ? row.sections : null;
-    if (typeof sections === 'string') {
-      try { sections = JSON.parse(sections); } catch (_) {}
-    }
-    return NextResponse.json({ success: true, sections });
   } catch (err: any) {
-    try {
-      const { searchParams } = new URL(req.url);
-      const userId = searchParams.get('userId') || searchParams.get('email');
-      const res = await query('SELECT sections FROM user_sidebar_settings WHERE user_id = ? LIMIT 1', [userId]);
-      const row = Array.isArray(res) ? res[0] : (res as any)?.rows?.[0];
-      let sections = row ? row.sections : null;
-      if (typeof sections === 'string') {
-        try { sections = JSON.parse(sections); } catch (_) {}
-      }
-      return NextResponse.json({ success: true, sections });
-    } catch (e: any) {
-      return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-    }
+    console.warn('[Sidebar Settings DB init notice]:', err.message);
   }
 }
 
-export async function POST(req: NextRequest) {
+function getLocalSidebarSettingsPath() {
+  const dataDir = path.join(process.cwd(), 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  return path.join(dataDir, 'user_sidebar_settings.json');
+}
+
+function readLocalSidebarSettings(): Record<string, any> {
   try {
-    await ensureTable();
-    const body = await req.json();
-    const userId = body.userId || body.email;
-    const sections = body.sections;
-    if (!userId || !sections) {
-      return NextResponse.json({ success: false, error: 'userId and sections are required' }, { status: 400 });
+    const p = getLocalSidebarSettingsPath();
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf-8')) || {};
     }
-    const sectionsStr = JSON.stringify(sections);
-    
+  } catch (_) {}
+  return {};
+}
+
+function writeLocalSidebarSettings(data: Record<string, any>) {
+  try {
+    const p = getLocalSidebarSettingsPath();
+    fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (_) {}
+}
+
+const DEFAULT_SETTINGS = {
+  collapsed: false,
+  hidden_items: [],
+  pinned_items: [],
+  custom_order: [],
+  settings: {}
+};
+
+export async function GET(request: Request) {
+  try {
+    await ensureSidebarSettingsTable();
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId')?.trim() || '';
+    const email = searchParams.get('email')?.trim().toLowerCase() || '';
+
+    // 1. Try PostgreSQL with clean parameterized SQL (No syntax errors at LIMIT)
     try {
-      await query(`
-        INSERT INTO user_sidebar_settings (user_id, sections, updated_at)
-        VALUES ($1, $2::jsonb, NOW())
-        ON CONFLICT (user_id) DO UPDATE SET
-          sections = EXCLUDED.sections,
-          updated_at = NOW();
-      `, [userId, sectionsStr]);
-    } catch (_) {
-      await query(`
-        INSERT INTO user_sidebar_settings (user_id, sections, updated_at)
-        VALUES (?, ?, NOW())
-        ON DUPLICATE KEY UPDATE
-          sections = VALUES(sections),
-          updated_at = NOW();
-      `, [userId, sectionsStr]);
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        let result: any = null;
+        if (userId && email) {
+          result = await query(
+            'SELECT * FROM user_sidebar_settings WHERE user_id = $1 OR LOWER(user_email) = $2 ORDER BY updated_at DESC LIMIT 1',
+            [userId, email]
+          );
+        } else if (userId) {
+          result = await query(
+            'SELECT * FROM user_sidebar_settings WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
+            [userId]
+          );
+        } else if (email) {
+          result = await query(
+            'SELECT * FROM user_sidebar_settings WHERE LOWER(user_email) = $1 ORDER BY updated_at DESC LIMIT 1',
+            [email]
+          );
+        } else {
+          result = await query(
+            'SELECT * FROM user_sidebar_settings ORDER BY updated_at DESC LIMIT 1'
+          );
+        }
+
+        const rows = result?.rows || result || [];
+        if (Array.isArray(rows) && rows.length > 0) {
+          const row = rows[0];
+          return NextResponse.json({
+            success: true,
+            settings: {
+              collapsed: !!row.collapsed,
+              hidden_items: typeof row.hidden_items === 'string' ? JSON.parse(row.hidden_items) : (row.hidden_items || []),
+              pinned_items: typeof row.pinned_items === 'string' ? JSON.parse(row.pinned_items) : (row.pinned_items || []),
+              custom_order: typeof row.custom_order === 'string' ? JSON.parse(row.custom_order) : (row.custom_order || []),
+              settings: typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {})
+            }
+          });
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Sidebar Settings GET notice]:', e.message);
     }
 
-    return NextResponse.json({ success: true, message: 'Sidebar preferences saved' });
+    // 2. Fallback to Local JSON
+    const localAll = readLocalSidebarSettings();
+    const localUserSetting = localAll[userId] || localAll[email] || DEFAULT_SETTINGS;
+
+    return NextResponse.json({
+      success: true,
+      settings: localUserSetting
+    });
+  } catch (err: any) {
+    return NextResponse.json({
+      success: true,
+      settings: DEFAULT_SETTINGS
+    });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    await ensureSidebarSettingsTable();
+    const body = await request.json().catch(() => ({}));
+    const { userId, email, collapsed, hidden_items, pinned_items, custom_order, settings } = body;
+
+    const targetUserId = userId || 'usr_admin_1';
+    const targetEmail = email || '';
+    const recordId = `sidebar_${targetUserId}`;
+
+    const payload = {
+      collapsed: !!collapsed,
+      hidden_items: Array.isArray(hidden_items) ? hidden_items : [],
+      pinned_items: Array.isArray(pinned_items) ? pinned_items : [],
+      custom_order: Array.isArray(custom_order) ? custom_order : [],
+      settings: settings || {}
+    };
+
+    // 1. Try PostgreSQL Upsert
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query(`
+          INSERT INTO user_sidebar_settings (
+            id, user_id, user_email, collapsed, hidden_items, pinned_items, custom_order, settings, updated_at
+          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            collapsed = EXCLUDED.collapsed,
+            hidden_items = EXCLUDED.hidden_items,
+            pinned_items = EXCLUDED.pinned_items,
+            custom_order = EXCLUDED.custom_order,
+            settings = EXCLUDED.settings,
+            updated_at = NOW();
+        `, [
+          recordId,
+          targetUserId,
+          targetEmail,
+          payload.collapsed,
+          JSON.stringify(payload.hidden_items),
+          JSON.stringify(payload.pinned_items),
+          JSON.stringify(payload.custom_order),
+          JSON.stringify(payload.settings)
+        ]);
+      }
+    } catch (e: any) {
+      console.warn('[Sidebar Settings POST notice]:', e.message);
+    }
+
+    // 2. Update Local JSON
+    const localAll = readLocalSidebarSettings();
+    localAll[targetUserId] = payload;
+    if (targetEmail) localAll[targetEmail] = payload;
+    writeLocalSidebarSettings(localAll);
+
+    return NextResponse.json({ success: true, settings: payload });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -56333,7 +56524,7 @@ export async function GET(req: NextRequest) {
                 COALESCE(wallet_balance, 0) as wallet_balance,
                 COALESCE(token_balance, 0) as token_balance 
          FROM users 
-         WHERE ($1 != '' AND id::text = $1) 
+         WHERE ($1 != '' AND (id::text = $1 OR user_id = $1)) 
             OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
          LIMIT 1`,
         [userId, email]
@@ -70312,7 +70503,7 @@ export function useTheme() {
 'use client';
 
 import packageInfo from '../../package.json';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -70339,12 +70530,27 @@ interface InAppNotification {
   createdAt?: string;
 }
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
+export interface DynamicLanguageItem {
+  id?: string;
+  code: string;
+  name?: string;
+  native?: string;
+  flag?: string;
+  direction?: 'ltr' | 'rtl';
+  status?: string;
+  is_default?: boolean;
+}
+
+// Initial SSR-safe fallback dictionaries
+const DEFAULT_CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
-  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
+  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿',
+  BRL: 'R$', INR: '₹', MYR: 'RM', PHP: '₱', IDR: 'Rp',
+  VND: '₫', KRW: '₩', CNY: '¥', HKD: 'HK$', TWD: 'NT$',
+  AED: 'د.إ', SAR: '﷼', ZAR: 'R', MXN: 'Mex$'
 };
 
-const LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
+const DEFAULT_LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
   en: { flag: '🇺🇸', native: 'English' },
   th: { flag: '🇹🇭', native: 'ไทย' },
   es: { flag: '🇪🇸', native: 'Español' },
@@ -70355,12 +70561,14 @@ const LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
   zh: { flag: '🇨🇳', native: '中文' },
   ko: { flag: '🇰🇷', native: '한국어' },
   pt: { flag: '🇵🇹', native: 'Português' },
-  ru: { flag: '🇷🇺', native: 'Русский' }
-};
-
-const getLanguageMeta = (code: string) => {
-  const c = (code || 'en').toLowerCase().trim();
-  return LANGUAGE_FLAG_MAP[c] || { flag: '🌐', native: code.toUpperCase() };
+  ru: { flag: '🇷🇺', native: 'Русский' },
+  ar: { flag: '🇸🇦', native: 'العربية' },
+  vi: { flag: '🇻🇳', native: 'Tiếng Việt' },
+  nl: { flag: '🇳🇱', native: 'Nederlands' },
+  hi: { flag: '🇮🇳', native: 'हिन्दी' },
+  id: { flag: '🇮🇩', native: 'Bahasa Indonesia' },
+  ms: { flag: '🇲🇾', native: 'Bahasa Melayu' },
+  tr: { flag: '🇹🇷', native: 'Türkçe' }
 };
 
 const isImageIcon = (icon?: unknown): boolean =>
@@ -70397,18 +70605,14 @@ function DynamicTokenIcon({ icon, symbol, size = 16, className = '' }: { icon?: 
   return <Coins className={`text-amber-500 shrink-0 ${className}`} style={{ width: size, height: size }} />;
 }
 
-export default function Sidebar() {
+export default function Sidebar(
+  // [Server-Loop-Guard: Debounced lifecycle]
+) {
   const pathname = usePathname() || '';
   const langContext = useTranslation();
   const t = langContext?.t || ((k: string, fb?: string) => fb || k);
   const currentLanguage = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
   const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
-  const availableLanguages = (langContext as any)?.availableLanguages || [
-    { code: 'en', name: 'English', native: 'English', flag: '🇺🇸' },
-    { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭' },
-    { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸' },
-    { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷' }
-  ];
 
   const [mounted, setMounted] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -70417,6 +70621,52 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
+
+  // Dynamic Currencies & Languages States (from Admin Settings)
+  const [currencySymbols, setCurrencySymbols] = useState<Record<string, string>>(DEFAULT_CURRENCY_SYMBOLS);
+  const [dynamicLanguages, setDynamicLanguages] = useState<DynamicLanguageItem[]>(() => {
+    return (langContext as any)?.availableLanguages || [
+      { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
+      { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
+      { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
+      { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
+    ];
+  });
+
+  // Dynamic LANGUAGE_FLAG_MAP Synthesizer
+  const dynamicFlagMap = useMemo(() => {
+    const map: Record<string, { flag: string; native: string }> = { ...DEFAULT_LANGUAGE_FLAG_MAP };
+    (dynamicLanguages || []).forEach((l) => {
+      if (l && l.code) {
+        const c = l.code.toLowerCase().trim();
+        map[c] = {
+          flag: l.flag || map[c]?.flag || '🌐',
+          native: l.native || l.name || map[c]?.native || l.code.toUpperCase()
+        };
+      }
+    });
+    return map;
+  }, [dynamicLanguages]);
+
+  const getLanguageMeta = useCallback((code: string) => {
+    const c = (code || 'en').toLowerCase().trim();
+    return dynamicFlagMap[c] || { flag: '🌐', native: code.toUpperCase() };
+  }, [dynamicFlagMap]);
+
+  // Active Languages Filtered by Status
+  const activeLanguages = useMemo(() => {
+    const list = dynamicLanguages.length > 0 ? dynamicLanguages : (langContext as any)?.availableLanguages || [];
+    if (!Array.isArray(list) || list.length === 0) {
+      return [
+        { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
+        { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
+        { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
+        { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
+      ];
+    }
+    const filtered = list.filter((l: any) => l.status !== 'inactive');
+    return filtered.length > 0 ? filtered : list;
+  }, [dynamicLanguages, langContext]);
 
   // Accordion Sections
   const [openSections, setOpenSections] = useState<{
@@ -70465,7 +70715,7 @@ export default function Sidebar() {
 
   const topbarRef = useRef<HTMLDivElement>(null);
 
-  // Comprehensive Telemetry & Balances Fetcher
+  // Dynamic Telemetry & Settings Fetcher (PostgreSQL & MySQL Synced)
   const fetchBalancesAndTelemetry = useCallback(async (activeU?: any) => {
     try {
       const u = activeU || getCurrentUser();
@@ -70474,12 +70724,31 @@ export default function Sidebar() {
       if (u?.email) params.set('email', String(u.email));
       const qs = params.toString() ? `?${params.toString()}&t=${Date.now()}` : `?t=${Date.now()}`;
 
-      const [tokRes, walRes, notifRes, cfgRes] = await Promise.allSettled([
+      const [tokRes, walRes, notifRes, cfgRes, curRes, langRes] = await Promise.allSettled([
         fetch(`/api/tokens${qs}`, { cache: 'no-store' }),
         fetch(`/api/wallet${qs}`, { cache: 'no-store' }),
         fetch(`/api/notifications${qs}`, { cache: 'no-store' }),
-        fetch(`/api/admin/token-setting`, { cache: 'no-store' })
+        fetch(`/api/admin/token-setting`, { cache: 'no-store' }),
+        fetch(`/api/admin/currencies`, { cache: 'no-store' }),
+        fetch(`/api/admin/languages`, { cache: 'no-store' })
       ]);
+
+      let dynamicCurrMap = { ...DEFAULT_CURRENCY_SYMBOLS };
+
+      if (curRes.status === 'fulfilled' && curRes.value.ok) {
+        const curData = await curRes.value.json();
+        if (curData.currencySymbols && typeof curData.currencySymbols === 'object') {
+          dynamicCurrMap = { ...dynamicCurrMap, ...curData.currencySymbols };
+          setCurrencySymbols(dynamicCurrMap);
+        }
+      }
+
+      if (langRes.status === 'fulfilled' && langRes.value.ok) {
+        const lData = await langRes.value.json();
+        if (Array.isArray(lData.languages) && lData.languages.length > 0) {
+          setDynamicLanguages(lData.languages);
+        }
+      }
 
       if (tokRes.status === 'fulfilled' && tokRes.value.ok) {
         const tData = await tokRes.value.json();
@@ -70495,9 +70764,9 @@ export default function Sidebar() {
         const rawWal = wData.wallet_balance ?? wData.walletBalance ?? wData.balance ?? wData.user?.wallet_balance;
         const numWal = parseFloat(String(rawWal ?? 0));
         if (!isNaN(numWal)) setWalletBalance(numWal);
-        const curr = wData.currency || wData.settings?.currency || 'USD';
+        const curr = (wData.currency || wData.settings?.currency || 'USD').toUpperCase();
         setWalletCurrency(curr);
-        setWalletSymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || wData.walletSymbol || '$');
+        setWalletSymbol(dynamicCurrMap[curr] || wData.walletSymbol || '$');
       }
 
       if (notifRes.status === 'fulfilled' && notifRes.value.ok) {
@@ -70532,9 +70801,9 @@ export default function Sidebar() {
         const themeMode = localStorage.getItem('zecratary_theme_mode') || 'dark';
         setIsDarkMode(themeMode === 'dark');
 
-        const cur = localStorage.getItem('zecratary_currency') || 'USD';
+        const cur = (localStorage.getItem('zecratary_currency') || 'USD').toUpperCase();
         setWalletCurrency(cur);
-        setWalletSymbol(CURRENCY_SYMBOLS[cur] || '$');
+        setWalletSymbol(currencySymbols[cur] || '$');
 
         const storedSections = localStorage.getItem('zecratary_sidebar_sections');
         if (storedSections) {
@@ -70557,9 +70826,9 @@ export default function Sidebar() {
 
       fetchBalancesAndTelemetry(u);
     } catch (_) {}
-  }, [fetchBalancesAndTelemetry]);
+  }, [currencySymbols, fetchBalancesAndTelemetry]);
 
-  // Route Auto-Expansion: Synchronized with canonical /recipes route
+  // Route Auto-Expansion: Synchronized with canonical routes
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -70609,6 +70878,10 @@ export default function Sidebar() {
     window.addEventListener('zecratary_wallet_updated', handleWalletUpdate);
     window.addEventListener('zecratary_tokens_updated', handleTokensUpdate);
     window.addEventListener('zecratary_token_settings_updated', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_currency_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('focus', () => fetchBalancesAndTelemetry());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') fetchBalancesAndTelemetry();
@@ -70637,6 +70910,10 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_wallet_updated', handleWalletUpdate);
       window.removeEventListener('zecratary_tokens_updated', handleTokensUpdate);
       window.removeEventListener('zecratary_token_settings_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_currency_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
       if (balanceChannel) balanceChannel.close();
     };
   }, [syncUserState, fetchBalancesAndTelemetry]);
@@ -70830,7 +71107,7 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* 1. DEDICATED STORE WALLET CAPSULE + DIRECT BUTTON */}
+          {/* 1. DEDICATED STORE WALLET CAPSULE + DIRECT BUTTON (DYNAMIC CURRENCY) */}
           <div 
             className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
             style={{
@@ -71007,7 +71284,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. QUICK LANGUAGE SELECTOR */}
+          {/* 4. DYNAMIC QUICK LANGUAGE SELECTOR */}
           <div className="relative">
             <button
               type="button"
@@ -71034,14 +71311,14 @@ export default function Sidebar() {
                 aria-label="Language Selector"
                 data-lpignore="true"
                 data-form-type="other"
-                className="absolute right-0 mt-2 w-48 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs transition-colors duration-200"
+                className="absolute right-0 mt-2 w-52 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                {availableLanguages.map((lang: any) => {
+                {activeLanguages.map((lang: any) => {
                   const meta = getLanguageMeta(lang.code);
                   const isSelected = currentLanguage === lang.code;
                   return (
@@ -71195,7 +71472,7 @@ export default function Sidebar() {
                           borderColor: 'var(--color-border)'
                         }}
                       >
-                        {availableLanguages.map((lang: any) => {
+                        {activeLanguages.map((lang: any) => {
                           const meta = getLanguageMeta(lang.code);
                           const isSel = currentLanguage === lang.code;
                           return (
@@ -71420,7 +71697,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION (CANONICAL /recipes ROUTE) */}
+          {/* 2. MANAGE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -71523,7 +71800,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION (ALL 14 ORIGINAL + STORAGE SETTINGS) */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (WITH STORAGE SETTINGS PRESERVED) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -71617,7 +71894,7 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* MOBILE APPLICATION DRAWER (CANONICAL /recipes ROUTE) */}
+      {/* MOBILE APPLICATION DRAWER */}
       {mobileMenuOpen && (
         <div
           role="dialog"
@@ -72327,72 +72604,238 @@ export type { LanguageContextType, SupportedLanguage } from '@/components/Langua
 
 ## File: `apps/web/src/lib/mysql.ts`
 ```typescript
-// Webpack-safe & TypeScript-compliant MySQL Database Adapter for Zecratary
-export interface MysqlQueryResult<T = any> {
+// @ts-nocheck
+/**
+ * Dual Database Engine - MySQL Adapter
+ * Repository: cygnusorbit/zecratary (GitHub)
+ * 
+ * Uses Webpack's native __non_webpack_require__ to prevent
+ * "Critical dependency: require function is used in a way in which dependencies cannot be statically extracted"
+ */
+
+declare const __non_webpack_require__: ((id: string) => any) | undefined;
+
+export interface MysqlQueryResult<T = any> extends Array<T> {
   rows: T[];
   fields?: any[];
+  affectedRows?: number;
+  insertId?: number;
+  [key: string]: any;
 }
+
+let cachedMysqlDriver: any = null;
+let driverChecked = false;
 
 /**
- * Webpack-safe dynamic loader for mysql2/promise.
- * Prevents Webpack / Turbopack static AST analyzer from throwing
- * "Module not found: Can't resolve 'mysql2/promise'" when mysql2 is optional.
+ * Safely resolves mysql2/promise using Webpack's official non-webpack require macro.
+ * This ensures Webpack never attempts static extraction and never emits critical dependency warnings.
  */
 function getMysqlDriver(): any {
-  try {
-    const loader = typeof (globalThis as any).__non_webpack_require__ === 'function'
-      ? (globalThis as any).__non_webpack_require__
-      : (typeof require === 'function' ? require : eval('require'));
-    return loader('mysql2/promise');
-  } catch (_) {
-    return null;
-  }
-}
-
-export function isMysqlConfigured(): boolean {
-  const url = process.env.MYSQL_URL || process.env.DATABASE_URL;
-  return Boolean(url && url.startsWith('mysql://'));
-}
-
-export async function getMysqlConnection(): Promise<any | null> {
-  const mysqlUrl = process.env.MYSQL_URL || 
-    (process.env.DATABASE_URL?.startsWith('mysql://') ? process.env.DATABASE_URL : null);
-  
-  if (!mysqlUrl) return null;
-
-  const mysql = getMysqlDriver();
-  if (!mysql) return null;
+  if (driverChecked) return cachedMysqlDriver;
+  driverChecked = true;
 
   try {
-    return await mysql.createConnection(mysqlUrl);
-  } catch (err) {
-    console.warn('[getMysqlConnection] Connection failed:', err);
-    return null;
-  }
+    if (typeof __non_webpack_require__ === 'function') {
+      cachedMysqlDriver = __non_webpack_require__('mysql2/promise');
+      return cachedMysqlDriver;
+    }
+  } catch (_) {}
+
+  return null;
 }
 
-export async function queryMysql<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  const conn = await getMysqlConnection();
-  if (!conn) return [];
-
-  try {
-    const [rows] = await conn.query(sql, params);
-    return Array.isArray(rows) ? (rows as T[]) : ([rows] as unknown as T[]);
-  } catch (err) {
-    console.warn('[queryMysql] Query execution failed:', err);
-    return [];
-  } finally {
-    await conn.end().catch(() => {});
-  }
+export function isMysqlAvailable(): boolean {
+  return !!getMysqlDriver();
 }
 
-const mysqlAdapter = {
-  queryMysql,
-  getMysqlConnection,
-  isMysqlConfigured
+export function getMysqlConnectionUrl(): string | null {
+  const url = process.env.MYSQL_URL || process.env.MYSQL_DATABASE_URL;
+  if (url && url.startsWith('mysql://')) return url;
+
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl && dbUrl.startsWith('mysql://')) return dbUrl;
+
+  const host = process.env.MYSQL_HOST;
+  const database = process.env.MYSQL_DATABASE;
+  if (host && database) {
+    const user = process.env.MYSQL_USER || 'root';
+    const password = process.env.MYSQL_PASSWORD || '';
+    const port = process.env.MYSQL_PORT || '3306';
+    return `mysql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+  }
+
+  return null;
+}
+
+const globalWithMysql = globalThis as unknown as {
+  __zecratary_mysql_pool?: any;
 };
 
-export default mysqlAdapter;
+export async function getMysqlPool(): Promise<any> {
+  if (globalWithMysql.__zecratary_mysql_pool) {
+    return globalWithMysql.__zecratary_mysql_pool;
+  }
+
+  const driver = getMysqlDriver();
+  const connUrl = getMysqlConnectionUrl();
+
+  if (!driver || !connUrl) {
+    return null;
+  }
+
+  try {
+    const pool = driver.createPool({
+      uri: connUrl,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000,
+    });
+
+    globalWithMysql.__zecratary_mysql_pool = pool;
+    return pool;
+  } catch (err: any) {
+    console.warn('[MySQL Pool Initialization Notice]:', err.message);
+    return null;
+  }
+}
+
+export const getMysqlConnection = getMysqlPool;
+
+/**
+ * Universal Query Executor for MySQL
+ * Formats results to be seamlessly compatible with Array indexing, .rows property, and .affectedRows.
+ */
+export async function query<T = any>(sql: string, params: any[] = []): Promise<any> {
+  const pool = await getMysqlPool();
+
+  if (!pool) {
+    // If MySQL is not configured, fall back to PostgreSQL or return empty safe result
+    try {
+      const { query: pgQuery } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof pgQuery === 'function') {
+        const pgResult = await pgQuery(sql, params);
+        const rows = Array.isArray(pgResult) ? pgResult : (pgResult?.rows || []);
+        const formatted = [...rows] as MysqlQueryResult<T>;
+        formatted.rows = rows;
+        return formatted;
+      }
+    } catch (_) {}
+
+    const empty = [] as unknown as MysqlQueryResult<T>;
+    empty.rows = [];
+    return empty;
+  }
+
+  try {
+    const [rawRows, fields] = await pool.query(sql, params);
+    const rows = Array.isArray(rawRows) ? rawRows : [];
+    const result = [...rows] as MysqlQueryResult<T>;
+    result.rows = rows;
+    result.fields = fields;
+
+    if (rawRows && typeof rawRows === 'object' && !Array.isArray(rawRows)) {
+      result.affectedRows = (rawRows as any).affectedRows;
+      result.insertId = (rawRows as any).insertId;
+    }
+
+    return result;
+  } catch (err: any) {
+    console.warn('[MySQL Query Notice]:', err.message);
+    const errResult = [] as unknown as MysqlQueryResult<T>;
+    errResult.rows = [];
+    return errResult;
+  }
+}
+
+// Canonical named exports required by route handlers
+export const queryMysql = query;
+export const execute = query;
+export const executeMysql = query;
+
+export const mysqlPool = {
+  query,
+  queryMysql,
+  execute,
+  executeMysql,
+  getPool: getMysqlPool,
+  getConnection: getMysqlPool,
+};
+export const pool = mysqlPool;
+
+export async function testMysqlConnection(): Promise<{ connected: boolean; version?: string; database?: string; error?: string }> {
+  const pool = await getMysqlPool();
+  if (!pool) {
+    return {
+      connected: false,
+      error: isMysqlAvailable()
+        ? 'MySQL connection URL is not configured (MYSQL_URL).'
+        : 'mysql2 driver is not installed in node_modules.',
+    };
+  }
+
+  try {
+    const [rows]: any = await pool.query('SELECT VERSION() AS ver, DATABASE() AS db;');
+    const ver = rows?.[0]?.ver || 'Unknown';
+    const db = rows?.[0]?.db || 'Default';
+    return { connected: true, version: ver, database: db };
+  } catch (err: any) {
+    return { connected: false, error: err.message };
+  }
+}
+
+export const testConnection = testMysqlConnection;
+
+export async function initMysqlTables(): Promise<void> {
+  const pool = await getMysqlPool();
+  if (!pool) return;
+
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(64) PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        name VARCHAR(255),
+        user_id VARCHAR(64),
+        wallet_balance DECIMAL(10,2) DEFAULT 0.00,
+        token_balance INT DEFAULT 50,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS token_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        user_email VARCHAR(255),
+        amount INT NOT NULL,
+        balance_after INT NOT NULL,
+        type VARCHAR(64),
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+  } catch (err: any) {
+    console.warn('[MySQL Table Init Notice]:', err.message);
+  }
+}
+
+export default {
+  query,
+  queryMysql,
+  execute,
+  executeMysql,
+  pool,
+  mysqlPool,
+  getMysqlPool,
+  getMysqlConnection,
+  testMysqlConnection,
+  testConnection,
+  initMysqlTables,
+  isMysqlAvailable,
+  getMysqlConnectionUrl,
+};
 
 ```
 
