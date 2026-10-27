@@ -1,14 +1,14 @@
 // @ts-nocheck
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { 
   CreditCard, Shield, CheckCircle2, AlertCircle, Save, RefreshCw, 
   Check, Eye, EyeOff, Globe, Zap, Sliders, ShieldCheck, Terminal, 
   ExternalLink, Code2, AlertTriangle, Activity, DownloadCloud, 
   UploadCloud, Sparkles, Landmark, Clock, X, XCircle, Search, 
-  Filter, Trash2, Edit3, Copy, ChevronDown
+  Filter, Trash2, Edit3, Copy, ChevronDown, CheckCheck, Coins, FileText
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -51,6 +51,32 @@ interface GatewayConfig {
   manualSettlement: ManualSettlementConfig;
 }
 
+interface PaymentTransaction {
+  id: string;
+  customer_name?: string;
+  customerName?: string;
+  customer_email?: string;
+  customerEmail?: string;
+  plan_name?: string;
+  planName?: string;
+  amount?: number;
+  currency?: string;
+  gateway?: string;
+  status: string;
+  test_mode?: boolean;
+  failure_reason?: string;
+  failureReason?: string;
+  transfer_reference?: string;
+  transferReference?: string;
+  confirmed_amount?: number;
+  confirmedAmount?: number;
+  confirmed_at?: string;
+  confirmedAt?: string;
+  notes?: string;
+  created_at?: string;
+  createdAt?: string;
+}
+
 const SUPPORTED_CURRENCIES = [
   { code: 'USD', label: 'USD - United States Dollar ($)', symbol: '$' },
   { code: 'EUR', label: 'EUR - Euro (€)', symbol: '€' },
@@ -83,7 +109,6 @@ export default function AdminPaymentGatewayPage() {
   const [saving, setSaving] = useState(false);
   const [verifyingStripe, setVerifyingStripe] = useState(false);
   const [verifyingPayPal, setVerifyingPayPal] = useState(false);
-  const [verifyingSecret, setVerifyingSecret] = useState(false);
 
   // Modals & Helpers
   const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
@@ -92,6 +117,25 @@ export default function AdminPaymentGatewayPage() {
   const [copiedPpWhUrl, setCopiedPpWhUrl] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
+
+  // Bankwire Queue & Modals State (v8.1.15 Restoration)
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
+  const [settlementFilter, setSettlementFilter] = useState<'all' | 'pending' | 'succeeded' | 'rejected'>('all');
+  const [settlementSearch, setSettlementSearch] = useState('');
+  const [viewTx, setViewTx] = useState<PaymentTransaction | null>(null);
+  const [editTx, setEditTx] = useState<PaymentTransaction | null>(null);
+  const [editForm, setEditForm] = useState({
+    customer_name: '',
+    customer_email: '',
+    plan_name: '',
+    amount: 0,
+    transfer_reference: '',
+    status: 'pending',
+    notes: '',
+    failure_reason: '',
+  });
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Gateway Configuration State
   const [config, setConfig] = useState<GatewayConfig>({
@@ -159,7 +203,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // Fetch Gateway Configuration
+  // Fetch Gateway Configuration and Transactions
   const loadConfig = useCallback(async () => {
     setLoading(true);
     try {
@@ -185,6 +229,9 @@ export default function AdminPaymentGatewayPage() {
             manualSettlement: { ...prev.manualSettlement, ...(s.manualSettlement || {}) },
           }));
         }
+        if (Array.isArray(data.transactions)) {
+          setTransactions(data.transactions);
+        }
       }
     } catch (_) {}
     finally {
@@ -197,9 +244,11 @@ export default function AdminPaymentGatewayPage() {
     const handleSync = () => loadConfig();
     window.addEventListener('zecratary_payment_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_wallet_updated', handleSync);
     return () => {
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_wallet_updated', handleSync);
     };
   }, [loadConfig]);
 
@@ -264,19 +313,16 @@ export default function AdminPaymentGatewayPage() {
     } catch (_) {}
   };
 
-  // Toggle Stripe-Specific Sandbox
   const handleToggleStripeSandbox = () => {
-    const nextStripeMode = !config.stripe.testMode;
     setConfig(prev => ({
       ...prev,
       stripe: {
         ...prev.stripe,
-        testMode: nextStripeMode
+        testMode: !prev.stripe.testMode
       }
     }));
   };
 
-  // Toggle PayPal-Specific Sandbox
   const handleTogglePayPalSandbox = () => {
     const nextPpMode = !config.paypal.testMode;
     setConfig(prev => ({
@@ -364,6 +410,177 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
+  // Bankwire Manual Settlement Approval Queue Logic (v8.1.15)
+  const manualTransactions = useMemo(() => {
+    return transactions.filter(tx => {
+      const gw = (tx.gateway || '').toLowerCase();
+      return gw === 'manual' || gw === 'bank_wire' || gw === 'wire' || gw === 'bank_transfer' || gw === 'manual_settlement' || Boolean(tx.transfer_reference);
+    });
+  }, [transactions]);
+
+  const pendingCount = useMemo(() => {
+    return manualTransactions.filter(tx => {
+      const s = (tx.status || '').toLowerCase();
+      return s === 'pending' || s === 'pending_approval' || s === 'review';
+    }).length;
+  }, [manualTransactions]);
+
+  const filteredManualTransactions = useMemo(() => {
+    return manualTransactions.filter(tx => {
+      const s = (tx.status || '').toLowerCase();
+      if (settlementFilter === 'pending' && !(s === 'pending' || s === 'pending_approval' || s === 'review')) return false;
+      if (settlementFilter === 'succeeded' && !(s === 'succeeded' || s === 'approved' || s === 'completed')) return false;
+      if (settlementFilter === 'rejected' && !(s === 'rejected' || s === 'cancelled' || s === 'failed')) return false;
+
+      if (settlementSearch.trim()) {
+        const q = settlementSearch.toLowerCase().trim();
+        const matchId = tx.id?.toLowerCase().includes(q);
+        const matchName = (tx.customer_name || tx.customerName)?.toLowerCase().includes(q);
+        const matchEmail = (tx.customer_email || tx.customerEmail)?.toLowerCase().includes(q);
+        const matchRef = (tx.transfer_reference || tx.transferReference)?.toLowerCase().includes(q);
+        const matchPlan = (tx.plan_name || tx.planName)?.toLowerCase().includes(q);
+        return matchId || matchName || matchEmail || matchRef || matchPlan;
+      }
+      return true;
+    });
+  }, [manualTransactions, settlementFilter, settlementSearch]);
+
+  const handleApprovePayment = async (tx: PaymentTransaction) => {
+    if (!confirm(tr('confirmApproveWire', "Are you sure you want to approve this bank wire transfer? This will confirm funds and deposit credit into the user's wallet."))) {
+      return;
+    }
+    setActionLoadingId(tx.id);
+    try {
+      const res = await fetch('/api/admin/payment-gateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve_manual_settlement', id: tx.id })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ type: 'success', msg: data.message || 'Manual settlement approved successfully! Funds credited.' });
+        loadConfig();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        }
+        if (viewTx?.id === tx.id) setViewTx(null);
+      } else {
+        setFeedback({ type: 'error', msg: data.error || 'Failed to approve manual settlement.' });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || 'Error communicating with server.' });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleRejectPayment = async (tx: PaymentTransaction) => {
+    const reason = prompt(tr('enterRejectionReasonPrompt', 'Please provide a reason for rejecting this wire transfer (optional):'), 'Bank wire transfer not received or reference mismatched');
+    if (reason === null) return;
+    setActionLoadingId(tx.id);
+    try {
+      const res = await fetch('/api/admin/payment-gateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject_manual_settlement', id: tx.id, failureReason: reason })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ type: 'success', msg: data.message || 'Manual settlement has been rejected.' });
+        loadConfig();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        }
+        if (viewTx?.id === tx.id) setViewTx(null);
+      } else {
+        setFeedback({ type: 'error', msg: data.error || 'Failed to reject manual settlement.' });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || 'Error communicating with server.' });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleDeleteTransaction = async (txId: string) => {
+    if (!confirm(tr('confirmDeleteWire', `Are you sure you want to delete transaction record ${txId}? This cannot be undone.`))) {
+      return;
+    }
+    setActionLoadingId(txId);
+    try {
+      const res = await fetch(`/api/admin/payment-gateway?id=${encodeURIComponent(txId)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: txId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ type: 'success', msg: data.message || 'Transaction record deleted successfully.' });
+        setTransactions(prev => prev.filter(t => t.id !== txId));
+        if (viewTx?.id === txId) setViewTx(null);
+        if (editTx?.id === txId) setEditTx(null);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        }
+      } else {
+        setFeedback({ type: 'error', msg: data.error || 'Failed to delete transaction.' });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || 'Error communicating with server.' });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleOpenEdit = (tx: PaymentTransaction) => {
+    setEditTx(tx);
+    setEditForm({
+      customer_name: tx.customer_name || tx.customerName || '',
+      customer_email: tx.customer_email || tx.customerEmail || '',
+      plan_name: tx.plan_name || tx.planName || 'Bank Wire Deposit',
+      amount: Number(tx.amount || 0),
+      transfer_reference: tx.transfer_reference || tx.transferReference || '',
+      status: tx.status || 'pending',
+      notes: tx.notes || '',
+      failure_reason: tx.failure_reason || tx.failureReason || '',
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editTx) return;
+    setIsSavingEdit(true);
+    try {
+      const res = await fetch('/api/admin/payment-gateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit_transaction',
+          id: editTx.id,
+          ...editForm
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback({ type: 'success', msg: data.message || 'Transaction record updated successfully in PostgreSQL & MySQL!' });
+        setEditTx(null);
+        loadConfig();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        }
+      } else {
+        setFeedback({ type: 'error', msg: data.error || 'Failed to update transaction.' });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', msg: err.message || 'Error communicating with server.' });
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   return (
     <div 
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 pb-24 font-sans transition-colors duration-200 box-border"
@@ -437,7 +654,7 @@ export default function AdminPaymentGatewayPage() {
             )}
             {config.manualSettlement.enabled && (
               <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-purple-500/10 text-purple-400 border border-purple-500/30">
-                BANK WIRE
+                BANK WIRE {pendingCount > 0 && `(${pendingCount} PENDING)`}
               </span>
             )}
           </div>
@@ -556,7 +773,7 @@ export default function AdminPaymentGatewayPage() {
         <button
           type="button"
           onClick={() => setActiveTab('manual')}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer relative"
           style={activeTab === 'manual' ? {
             backgroundColor: 'var(--color-card)',
             color: 'var(--color-primary)',
@@ -565,6 +782,11 @@ export default function AdminPaymentGatewayPage() {
         >
           <Landmark className="h-4 w-4" />
           <span>{tr('tabManual', 'Bank Wire / Manual Settlement')}</span>
+          {pendingCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-500 text-black">
+              {pendingCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -588,7 +810,6 @@ export default function AdminPaymentGatewayPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Stripe Enable Toggle */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -611,7 +832,6 @@ export default function AdminPaymentGatewayPage() {
                 </span>
               </div>
 
-              {/* Verify Stripe Button */}
               <button
                 type="button"
                 onClick={handleVerifyStripe}
@@ -668,7 +888,6 @@ export default function AdminPaymentGatewayPage() {
             </button>
           </div>
 
-          {/* Test Key Warning & Test Card Helper */}
           {config.stripe.testMode && config.stripe.secretKey && !config.stripe.secretKey.startsWith('sk_test_') && (
             <div 
               className="p-3.5 rounded-2xl border flex items-start gap-2.5 text-xs font-semibold shadow-xs"
@@ -810,7 +1029,7 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* Webhook & CLI Setup Guide Footer Card */}
+          {/* Restored Complete Webhook & CLI Setup Guide Footer Card */}
           <div 
             className="p-5 rounded-2xl border space-y-3"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -832,6 +1051,10 @@ export default function AdminPaymentGatewayPage() {
                 <span>{tr('cliGuideBtn', 'CLI & Webhooks Guide')}</span>
               </button>
             </div>
+
+            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+              {tr('stripeWebhookUrlDesc', 'Add this URL in Stripe Dashboard (Developers → Webhooks → Add an endpoint) or use the Stripe CLI command below to forward events locally.')}
+            </p>
 
             <div className="flex items-center gap-2">
               <input
@@ -855,11 +1078,43 @@ export default function AdminPaymentGatewayPage() {
                 <span>{copiedWhUrl ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}</span>
               </button>
             </div>
+
+            {/* Local CLI Command Helper Box */}
+            <div 
+              className="p-3 rounded-xl border flex items-center justify-between gap-2"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center gap-2 overflow-hidden font-mono text-[11px]">
+                <Terminal className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                <code className="truncate select-all">
+                  stripe listen --forward-to {webhookEndpointUrl.replace(/^https?:\/\//, '')}
+                </code>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleCopy(`stripe listen --forward-to ${webhookEndpointUrl.replace(/^https?:\/\//, '')}`, 'listen_inline')}
+                className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
+                style={{
+                  backgroundColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                  borderColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-border)',
+                  color: copiedCliKey === 'listen_inline' ? '#ffffff' : 'var(--color-text)'
+                }}
+              >
+                {copiedCliKey === 'listen_inline' ? tr('copiedBtn', 'Copied!') : tr('copyCommandBtn', 'Copy Command')}
+              </button>
+            </div>
+
+            <div className="text-[10px] flex flex-wrap items-center gap-1.5 opacity-80 pt-0.5">
+              <span className="font-bold">{tr('recommendedEventsTitle', 'Recommended events:')}</span>
+              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">checkout.session.completed</code>
+              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">invoice.payment_succeeded</code>
+              <code className="px-1.5 py-0.5 rounded border text-[10px] font-mono">customer.subscription.deleted</code>
+            </div>
           </div>
         </div>
       )}
 
-      {/* TAB 2: PAYPAL GATEWAY (Dual Sandbox) */}
+      {/* TAB 2: PAYPAL GATEWAY */}
       {activeTab === 'paypal' && (
         <div 
           role="region"
@@ -879,7 +1134,6 @@ export default function AdminPaymentGatewayPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* PayPal Enable Toggle */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -902,7 +1156,6 @@ export default function AdminPaymentGatewayPage() {
                 </span>
               </div>
 
-              {/* Verify PayPal Credentials Button */}
               <button
                 type="button"
                 onClick={handleVerifyPayPal}
@@ -924,7 +1177,6 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* Dedicated PayPal Sandbox Slide-Toggle Card */}
           <div 
             className="p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -959,7 +1211,6 @@ export default function AdminPaymentGatewayPage() {
             </button>
           </div>
 
-          {/* PayPal Sandbox Test Account Helper Box */}
           {config.paypal.testMode && (
             <div 
               className="p-4 rounded-2xl border space-y-2.5"
@@ -1148,123 +1399,432 @@ export default function AdminPaymentGatewayPage() {
         </div>
       )}
 
-      {/* TAB 3: BANK WIRE / MANUAL SETTLEMENT */}
+      {/* TAB 3: BANK WIRE / MANUAL SETTLEMENT (v8.1.15 Restoration) */}
       {activeTab === 'manual' && (
-        <div 
-          role="region"
-          aria-label="Bank Wire Settlement Configuration"
-          className="p-6 rounded-3xl border shadow-xl space-y-6"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 rounded-full bg-purple-500 shrink-0"></div>
-              <div>
-                <h2 className="text-base font-black flex items-center gap-2">
-                  {tr('manualSettlementConfig', 'Bank Wire / Manual Settlement')}
-                </h2>
-                <span className="text-[11px] opacity-70">Direct bank transfer instructions, routing numbers, and approval workflows.</span>
+        <div className="space-y-6 animate-in fade-in">
+          {/* Section 1: Bank Wire Beneficiary Settings Card */}
+          <div 
+            role="region"
+            aria-label="Bank Wire Settlement Configuration"
+            className="p-6 rounded-3xl border shadow-xl space-y-6"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-purple-500 shrink-0"></div>
+                <div>
+                  <h2 className="text-base font-black flex items-center gap-2">
+                    {tr('manualSettlementConfig', 'Bank Wire / Manual Settlement')}
+                  </h2>
+                  <span className="text-[11px] opacity-70">Direct bank transfer instructions, routing numbers, and approval workflows.</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.manualSettlement.enabled}
+                  onClick={() => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, enabled: !config.manualSettlement.enabled }
+                  })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
+                    config.manualSettlement.enabled ? 'bg-[var(--color-emerald,#10b981)]' : 'bg-slate-300 dark:bg-slate-700'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                      config.manualSettlement.enabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+                <span className="text-[11px] font-black uppercase tracking-wider" style={{ color: config.manualSettlement.enabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
+                  {config.manualSettlement.enabled ? tr('enabled', 'Enabled') : tr('disabled', 'Disabled')}
+                </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={config.manualSettlement.enabled}
-                onClick={() => setConfig({
-                  ...config,
-                  manualSettlement: { ...config.manualSettlement, enabled: !config.manualSettlement.enabled }
-                })}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
-                  config.manualSettlement.enabled ? 'bg-[var(--color-emerald,#10b981)]' : 'bg-slate-300 dark:bg-slate-700'
-                }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                    config.manualSettlement.enabled ? 'translate-x-5' : 'translate-x-0'
-                  }`}
+            {/* Bank Wire Details Form */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+              <div>
+                <label className="font-bold block mb-1">Bank Name</label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.bankName}
+                  onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, bankName: e.target.value } })}
+                  className="w-full px-3 py-2 rounded-xl border font-medium outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
-              </button>
-              <span className="text-[11px] font-black uppercase tracking-wider" style={{ color: config.manualSettlement.enabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
-                {config.manualSettlement.enabled ? tr('enabled', 'Enabled') : tr('disabled', 'Disabled')}
-              </span>
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1">Account Holder / Beneficiary</label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.accountHolder}
+                  onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, accountHolder: e.target.value } })}
+                  className="w-full px-3 py-2 rounded-xl border font-medium outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1">Account Number / IBAN</label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.accountNumber}
+                  onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, accountNumber: e.target.value } })}
+                  className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1">Routing Number / Sort Code</label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.routingNumber}
+                  onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, routingNumber: e.target.value } })}
+                  className="w-full px-3 py-2 rounded-xl border font-mono outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1">SWIFT / BIC Code</label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.swiftBic}
+                  onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, swiftBic: e.target.value } })}
+                  className="w-full px-3 py-2 rounded-xl border font-mono outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1">Branch Name</label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.branchName}
+                  onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, branchName: e.target.value } })}
+                  className="w-full px-3 py-2 rounded-xl border font-medium outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            </div>
+
+            {/* Transfer Instructions */}
+            <div className="text-xs">
+              <label className="font-bold block mb-1">Wire Transfer Instructions</label>
+              <textarea
+                rows={3}
+                value={config.manualSettlement.instructions}
+                onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, instructions: e.target.value } })}
+                className="w-full p-3 rounded-xl border outline-none font-medium leading-relaxed"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            {/* Verification Policies */}
+            <div className="p-4 rounded-2xl border space-y-3" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+              <span className="text-xs font-bold uppercase tracking-wider opacity-60">Verification Policies</span>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
+                <div>
+                  <span className="font-bold text-xs block">{tr('requireReferenceLabel', 'Require Customer Reference / Receipt ID')}</span>
+                  <span className="text-[11px] opacity-70">Prompts users to submit their bank transaction reference number upon checkout.</span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.manualSettlement.requireReference}
+                  onClick={() => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, requireReference: !config.manualSettlement.requireReference }
+                  })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
+                    config.manualSettlement.requireReference ? 'bg-[var(--color-emerald,#10b981)]' : 'bg-slate-300 dark:bg-slate-700'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                      config.manualSettlement.requireReference ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <div>
+                  <span className="font-bold text-xs block">{tr('requireApprovalLabel', 'Require Administrative Approval to Credit Wallet')}</span>
+                  <span className="text-[11px] opacity-70">Holds balance credits in pending status until payment arrival is verified in bank account.</span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.manualSettlement.requireApproval}
+                  onClick={() => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, requireApproval: !config.manualSettlement.requireApproval }
+                  })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
+                    config.manualSettlement.requireApproval ? 'bg-[var(--color-emerald,#10b981)]' : 'bg-slate-300 dark:bg-slate-700'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                      config.manualSettlement.requireApproval ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Bank Wire Details Form */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-            <div>
-              <label className="font-bold block mb-1">Bank Name</label>
-              <input
-                type="text"
-                value={config.manualSettlement.bankName}
-                onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, bankName: e.target.value } })}
-                className="w-full px-3 py-2 rounded-xl border font-medium outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
+          {/* Section 2: Manual Settlement Approval Queue (v8.1.15 Restored) */}
+          <div 
+            role="region"
+            aria-label="Manual Settlement Approval Queue"
+            className="p-6 rounded-3xl border shadow-xl space-y-5"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Landmark className="h-5 w-5 text-purple-400" />
+                  <span>{tr('manualQueueTitle', 'Manual Settlement Approval Queue')}</span>
+                  {pendingCount > 0 && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                      {pendingCount} Pending Review
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('manualQueueSubtitle', 'Review, approve, reject, or edit submitted bank wire transfers and credit user balances in PostgreSQL & MySQL.')}
+                </p>
+              </div>
+
+              {/* Search & Filter Toolbar */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 opacity-50" />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={settlementSearch}
+                    onChange={(e) => setSettlementSearch(e.target.value)}
+                    placeholder={tr('searchSettlementsPlaceholder', 'Search by customer, email, tx ID...')}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-xl border text-xs outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={settlementFilter}
+                    onChange={(e) => setSettlementFilter(e.target.value as any)}
+                    className="appearance-none px-3.5 py-1.5 pr-8 rounded-xl border text-xs font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{tr('filterAllStatuses', 'All Statuses')}</option>
+                    <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{tr('filterPending', 'Pending Review')}</option>
+                    <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{tr('filterApproved', 'Approved / Succeeded')}</option>
+                    <option value="rejected" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{tr('filterRejected', 'Rejected / Failed')}</option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none opacity-60" />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={loadConfig}
+                  className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  title="Refresh Queue"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
             </div>
 
-            <div>
-              <label className="font-bold block mb-1">Account Holder / Beneficiary</label>
-              <input
-                type="text"
-                value={config.manualSettlement.accountHolder}
-                onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, accountHolder: e.target.value } })}
-                className="w-full px-3 py-2 rounded-xl border font-medium outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
+            {/* Approval Queue Table */}
+            <div className="border rounded-2xl overflow-hidden shadow-sm" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead 
+                    className="border-b uppercase font-bold text-[10px] tracking-wider"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    <tr>
+                      <th className="px-4 py-3">{tr('colDateId', 'Date & Tx ID')}</th>
+                      <th className="px-4 py-3">{tr('colCustomer', 'Customer')}</th>
+                      <th className="px-4 py-3">{tr('colPurpose', 'Purpose / Plan')}</th>
+                      <th className="px-4 py-3">{tr('colAmount', 'Amount')}</th>
+                      <th className="px-4 py-3">{tr('colReference', 'Transfer Reference')}</th>
+                      <th className="px-4 py-3">{tr('colStatus', 'Status')}</th>
+                      <th className="px-4 py-3 text-right">{tr('colActions', 'Actions')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                    {filteredManualTransactions.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-xs opacity-60">
+                          {tr('noSettlementsFound', 'No bank wire settlement records found matching your filter criteria.')}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredManualTransactions.map(tx => {
+                        const isPending = (tx.status || '').toLowerCase() === 'pending' || (tx.status || '').toLowerCase() === 'pending_approval';
+                        const isApproved = (tx.status || '').toLowerCase() === 'succeeded' || (tx.status || '').toLowerCase() === 'approved';
+                        const isRejected = (tx.status || '').toLowerCase() === 'rejected' || (tx.status || '').toLowerCase() === 'failed';
+                        const ref = tx.transfer_reference || tx.transferReference || '—';
 
-            <div>
-              <label className="font-bold block mb-1">Account Number / IBAN</label>
-              <input
-                type="text"
-                value={config.manualSettlement.accountNumber}
-                onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, accountNumber: e.target.value } })}
-                className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
+                        return (
+                          <tr key={tx.id} className="transition hover:opacity-90">
+                            <td className="px-4 py-3.5">
+                              <span className="block font-mono text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>
+                                {tx.id}
+                              </span>
+                              <span className="text-[10px] opacity-60 font-mono">
+                                {tx.created_at || tx.createdAt || 'Recent'}
+                              </span>
+                            </td>
 
-            <div>
-              <label className="font-bold block mb-1">Routing Number / Sort Code</label>
-              <input
-                type="text"
-                value={config.manualSettlement.routingNumber}
-                onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, routingNumber: e.target.value } })}
-                className="w-full px-3 py-2 rounded-xl border font-mono outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
+                            <td className="px-4 py-3.5">
+                              <span className="font-extrabold block text-xs" style={{ color: 'var(--color-text)' }}>
+                                {tx.customer_name || tx.customerName || 'Customer'}
+                              </span>
+                              <span className="text-[11px] font-mono opacity-70">
+                                {tx.customer_email || tx.customerEmail || '—'}
+                              </span>
+                            </td>
 
-            <div>
-              <label className="font-bold block mb-1">SWIFT / BIC Code</label>
-              <input
-                type="text"
-                value={config.manualSettlement.swiftBic}
-                onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, swiftBic: e.target.value } })}
-                className="w-full px-3 py-2 rounded-xl border font-mono outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
+                            <td className="px-4 py-3.5">
+                              <span className="px-2 py-0.5 rounded-lg border text-[11px] font-bold font-mono inline-block" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                                {tx.plan_name || tx.planName || 'Wallet Deposit'}
+                              </span>
+                            </td>
 
-            <div>
-              <label className="font-bold block mb-1">Branch Name</label>
-              <input
-                type="text"
-                value={config.manualSettlement.branchName}
-                onChange={(e) => setConfig({ ...config, manualSettlement: { ...config.manualSettlement, branchName: e.target.value } })}
-                className="w-full px-3 py-2 rounded-xl border font-medium outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
+                            <td className="px-4 py-3.5 font-mono font-bold text-xs">
+                              {SUPPORTED_CURRENCIES.find(c => c.code === (tx.currency || config.currency))?.symbol || '$'}{Number(tx.amount || 0).toFixed(2)}
+                            </td>
+
+                            <td className="px-4 py-3.5">
+                              <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                                <span className="font-bold select-all">{ref}</span>
+                                {ref !== '—' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopy(ref, `ref_${tx.id}`)}
+                                    className="p-1 rounded hover:opacity-80 cursor-pointer opacity-60"
+                                    title="Copy Reference"
+                                  >
+                                    {copiedCliKey === `ref_${tx.id}` ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3.5">
+                              {isPending ? (
+                                <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1 w-fit">
+                                  <Clock className="h-3 w-3 animate-spin" />
+                                  <span>{tr('pendingReviewBadge', 'Pending Review')}</span>
+                                </span>
+                              ) : isApproved ? (
+                                <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 w-fit">
+                                  <Check className="h-3 w-3" />
+                                  <span>{tr('approvedBadge', 'Approved')}</span>
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-rose-500/10 text-rose-400 border border-rose-500/30 flex items-center gap-1 w-fit">
+                                  <X className="h-3 w-3" />
+                                  <span>{tr('rejectedBadge', 'Rejected')}</span>
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3.5 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {/* View Details Modal Trigger */}
+                                <button
+                                  type="button"
+                                  onClick={() => setViewTx(tx)}
+                                  className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer hover:opacity-80"
+                                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                                  title={tr('btnView', 'View Details')}
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                </button>
+
+                                {/* Edit Modal Trigger */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEdit(tx)}
+                                  className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer hover:opacity-80"
+                                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                                  title={tr('btnEdit', 'Edit')}
+                                >
+                                  <Edit3 className="h-3.5 w-3.5 text-blue-400" />
+                                </button>
+
+                                {/* Quick Approve Action */}
+                                {isPending && (
+                                  <button
+                                    type="button"
+                                    disabled={actionLoadingId === tx.id}
+                                    onClick={() => handleApprovePayment(tx)}
+                                    className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer hover:opacity-80 bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                                    title={tr('btnApprove', 'Approve & Credit')}
+                                  >
+                                    <Check className={`h-3.5 w-3.5 ${actionLoadingId === tx.id ? 'animate-spin' : ''}`} />
+                                  </button>
+                                )}
+
+                                {/* Quick Reject Action */}
+                                {isPending && (
+                                  <button
+                                    type="button"
+                                    disabled={actionLoadingId === tx.id}
+                                    onClick={() => handleRejectPayment(tx)}
+                                    className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer hover:opacity-80 bg-rose-500/10 border-rose-500/30 text-rose-400"
+                                    title={tr('btnReject', 'Reject')}
+                                  >
+                                    <XCircle className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+
+                                {/* Delete Record */}
+                                <button
+                                  type="button"
+                                  disabled={actionLoadingId === tx.id}
+                                  onClick={() => handleDeleteTransaction(tx.id)}
+                                  className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer hover:bg-rose-500/10 border-rose-500/30 text-rose-400"
+                                  title={tr('btnDelete', 'Delete')}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Stripe Guide Modal */}
+      {/* Restored Complete Stripe CLI & Webhooks Guide Modal (v8.1.15) */}
       {showStripeGuideModal && (
         <div 
           role="dialog"
@@ -1298,17 +1858,28 @@ export default function AdminPaymentGatewayPage() {
               </p>
             </div>
 
+            {/* Method 1: Official Stripe CLI (4 Steps) */}
             <div 
               className="p-5 rounded-2xl border space-y-4"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
             >
-              <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Code2 className="h-4 w-4 text-[var(--color-primary)]" />
-                {tr('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
-              </span>
+              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Code2 className="h-4 w-4 text-[var(--color-primary)]" />
+                  {tr('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  {tr('recommendedBadge', 'Recommended')}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('method1Desc', 'The official Stripe CLI securely routes events straight to your localhost without needing to register a public URL or configure an HTTP tunnel.')}
+              </p>
+
+              {/* Step 1 */}
               <div className="space-y-1.5">
                 <div className="font-bold text-xs">
-                  1. {tr('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{tr('step1Desc', 'Download the Stripe CLI on your system:')}</span>
+                  1. {tr('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{tr('step1Desc', 'Download the Stripe CLI on your system (e.g., via Homebrew on macOS):')}</span>
                 </div>
                 <div 
                   className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
@@ -1319,13 +1890,126 @@ export default function AdminPaymentGatewayPage() {
                     type="button"
                     onClick={() => handleCopy('brew install stripe/stripe-cli/stripe', 'cli_install')}
                     className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_install' ? '#ffffff' : 'var(--color-text)'
+                    }}
                   >
                     {copiedCliKey === 'cli_install' ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}
                   </button>
                 </div>
               </div>
+
+              {/* Step 2 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs">
+                  2. {tr('step2Title', 'Log in:')} <span className="font-normal opacity-80">{tr('step2Desc', 'Link your Stripe account by running in your terminal:')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all">stripe login</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy('stripe login', 'cli_login')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_login' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_login' ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}
+                  </button>
+                </div>
+                <p className="text-[10px] opacity-70 italic" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('step2Note', 'Follow the pairing link provided in the terminal to authenticate your Stripe account.')}
+                </p>
+              </div>
+
+              {/* Step 3 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs">
+                  3. {tr('step3Title', 'Forward events:')} <span className="font-normal opacity-80">{tr('step3Desc', 'Start forwarding Stripe events directly to your local endpoint:')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all truncate">
+                    stripe listen --forward-to {webhookEndpointUrl.replace(/^https?:\/\//, '')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(`stripe listen --forward-to ${webhookEndpointUrl.replace(/^https?:\/\//, '')}`, 'cli_listen')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_listen' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_listen' ? tr('copiedBtn', 'Copied!') : tr('copyBtn', 'Copy')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 4 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs">
+                  4. {tr('step4Title', 'Capture the Secret:')} <span className="font-normal opacity-80">{tr('step4Desc', 'The CLI will print a local signing secret (looks like')} <code className="font-mono font-bold text-[10px] px-1 py-0.5 rounded border">whsec_...</code>{tr('step4DescAfter', '). Paste it into the Webhook Secret field below:')}</span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={config.stripe.webhookSecret}
+                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                    placeholder="whsec_..."
+                    className="w-full p-2.5 rounded-xl border text-xs outline-none font-mono"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
             </div>
 
+            {/* Method 2: Stripe Dashboard Links */}
+            <div 
+              className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="space-y-0.5">
+                <span className="font-bold text-xs">{tr('method2Title', 'Production / Dashboard API Keys')}</span>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('method2Desc', 'Retrieve your Secret Key and Publishable Key directly from your Stripe Dashboard.')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={config.stripe.testMode ? "https://dashboard.stripe.com/test/apikeys" : "https://dashboard.stripe.com/apikeys"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{tr('openApiKeysBtn', 'Stripe API Keys')}</span>
+                </a>
+                <a
+                  href={config.stripe.testMode ? "https://dashboard.stripe.com/test/webhooks" : "https://dashboard.stripe.com/webhooks"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{tr('openWebhooksBtn', 'Stripe Webhooks')}</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
@@ -1334,6 +2018,259 @@ export default function AdminPaymentGatewayPage() {
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
               >
                 Close
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowStripeGuideModal(false);
+                  await handleSaveSettings();
+                  await handleVerifyStripe();
+                }}
+                className="px-5 py-2 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Save className="h-4 w-4" />
+                <span>{tr('saveAndConnectBtn', 'Save Settings & Verify Stripe')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Restored View Bank Wire Modal (v8.1.15) */}
+      {viewTx && (
+        <div 
+          role="dialog"
+          aria-label="View Bank Wire Details Modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in"
+        >
+          <div 
+            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-base font-black flex items-center gap-2">
+                <Landmark className="h-5 w-5 text-purple-400" />
+                <span>{tr('modalViewTitle', 'Bank Wire Transfer Details')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setViewTx(null)}
+                className="p-1 rounded-lg hover:opacity-75 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-3 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <span className="block text-[10px] opacity-60 uppercase font-bold">Transaction ID</span>
+                  <span className="font-mono font-bold text-xs select-all">{viewTx.id}</span>
+                </div>
+                <div className="p-3 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <span className="block text-[10px] opacity-60 uppercase font-bold">Status</span>
+                  <span className="font-extrabold text-xs uppercase">{viewTx.status}</span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <span className="block text-[10px] opacity-60 uppercase font-bold">Customer</span>
+                <span className="font-extrabold text-sm block">{viewTx.customer_name || viewTx.customerName || 'Customer'}</span>
+                <span className="font-mono text-[11px] opacity-70 block">{viewTx.customer_email || viewTx.customerEmail || '—'}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-3 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <span className="block text-[10px] opacity-60 uppercase font-bold">Amount</span>
+                  <span className="font-mono font-black text-sm text-emerald-400">
+                    {SUPPORTED_CURRENCIES.find(c => c.code === (viewTx.currency || config.currency))?.symbol || '$'}{Number(viewTx.amount || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div className="p-3 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <span className="block text-[10px] opacity-60 uppercase font-bold">Transfer Reference</span>
+                  <span className="font-mono font-bold text-xs select-all">{viewTx.transfer_reference || viewTx.transferReference || '—'}</span>
+                </div>
+              </div>
+
+              {(viewTx.notes || viewTx.failure_reason || viewTx.failureReason) && (
+                <div className="p-3 rounded-xl border text-[11px]" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <span className="block text-[10px] opacity-60 uppercase font-bold mb-0.5">Notes / Rejection Reason</span>
+                  <p>{viewTx.notes || viewTx.failure_reason || viewTx.failureReason}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              {((viewTx.status || '').toLowerCase() === 'pending' || (viewTx.status || '').toLowerCase() === 'pending_approval') && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleRejectPayment(viewTx)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold border border-rose-500/30 text-rose-400 bg-rose-500/10 hover:opacity-80 cursor-pointer"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApprovePayment(viewTx)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-md cursor-pointer"
+                  >
+                    Approve & Credit
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setViewTx(null)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Restored Edit Bank Wire Modal (v8.1.15) */}
+      {editTx && (
+        <div 
+          role="dialog"
+          aria-label="Edit Bank Wire Transaction Modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in"
+        >
+          <div 
+            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-base font-black flex items-center gap-2">
+                <Edit3 className="h-5 w-5 text-blue-400" />
+                <span>{tr('modalEditTitle', 'Edit Bank Wire Transaction')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditTx(null)}
+                className="p-1 rounded-lg hover:opacity-75 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block font-bold mb-1">{tr('labelCustomerName', 'Customer Name')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={editForm.customer_name}
+                  onChange={(e) => setEditForm({ ...editForm, customer_name: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">{tr('labelCustomerEmail', 'Customer Email')}</label>
+                <input
+                  type="email"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={editForm.customer_email}
+                  onChange={(e) => setEditForm({ ...editForm, customer_email: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1">{tr('labelAmountPaid', 'Amount Paid')}</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={editForm.amount}
+                    onChange={(e) => setEditForm({ ...editForm, amount: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">{tr('labelStatus', 'Status')}</label>
+                  <select
+                    value={editForm.status}
+                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="succeeded">Approved (Succeeded)</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">{tr('labelTransferRef', 'Transfer Reference')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={editForm.transfer_reference}
+                  onChange={(e) => setEditForm({ ...editForm, transfer_reference: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">{tr('labelNotes', 'Notes')}</label>
+                <textarea
+                  rows={2}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border font-medium outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setEditTx(null)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                {tr('btnCancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={isSavingEdit}
+                className="px-5 py-2 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Save className={`h-4 w-4 ${isSavingEdit ? 'animate-spin' : ''}`} />
+                <span>{isSavingEdit ? 'Saving...' : tr('btnSaveChanges', 'Save Changes')}</span>
               </button>
             </div>
           </div>

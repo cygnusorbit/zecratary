@@ -62,7 +62,6 @@ function verifyWebhookSecretFormat(whsec: string): boolean {
   }
 }
 
-// PayPal OAuth2 Sandbox / Live Verification
 async function verifyPayPalCredentials(clientId: string, clientSecret: string, webhookId?: string, isSandbox = true) {
   if (!clientId || !clientSecret) {
     return { success: false, error: 'Both PayPal Client ID and Secret are required.' };
@@ -126,6 +125,7 @@ async function verifyPayPalCredentials(clientId: string, clientSecret: string, w
 export async function GET() {
   const db = await getDb();
   let paymentSettings: any = null;
+  let transactions: any[] = [];
 
   if (db && typeof db.query === 'function') {
     try {
@@ -134,6 +134,11 @@ export async function GET() {
       if (r?.payment_settings) {
         paymentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
       }
+    } catch (_) {}
+
+    try {
+      const txRows = await db.query("SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500;");
+      transactions = Array.isArray(txRows) ? txRows : (txRows as any)?.rows || [];
     } catch (_) {}
   }
 
@@ -152,7 +157,6 @@ export async function GET() {
     }
   }
 
-  // Ensure testMode defaults and consistency
   const defaultSettings = {
     currency: 'USD',
     testMode: true,
@@ -171,7 +175,8 @@ export async function GET() {
 
   return NextResponse.json({
     success: true,
-    paymentSettings: finalSettings
+    paymentSettings: finalSettings,
+    transactions
   });
 }
 
@@ -180,7 +185,121 @@ export async function POST(req: Request) {
     const body = await req.json();
     const action = body.action || 'save_settings';
 
-    // ACTION: Verify Stripe Keys
+    // 1. APPROVE MANUAL BANK WIRE SETTLEMENT (v8.1.15 Parity)
+    if (action === 'approve_manual_settlement') {
+      const txId = body.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      const db = await getDb();
+      if (db && typeof db.query === 'function') {
+        const txRows = await db.query('SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1', [txId]);
+        const tx = (txRows as any)?.[0] || (txRows as any)?.rows?.[0];
+        const amount = Number(tx?.amount || body.amount || 0);
+        const email = (tx?.customer_email || body.customer_email || '').toLowerCase().trim();
+
+        await db.query(
+          `UPDATE payment_transactions 
+           SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
+           WHERE id = $1`,
+          [txId]
+        );
+
+        await db.query(
+          `UPDATE wallet_transactions 
+           SET status = 'succeeded' 
+           WHERE gateway_tx_id = $1 OR id = $1`,
+          [txId]
+        ).catch(() => {});
+
+        // Deposit store credit into users wallet_balance
+        if (email && amount > 0) {
+          await db.query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW() 
+             WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))`,
+            [amount, email]
+          ).catch(() => {});
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Manual bank wire settlement approved and wallet credited successfully!'
+      });
+    }
+
+    // 2. REJECT MANUAL BANK WIRE SETTLEMENT (v8.1.15 Parity)
+    if (action === 'reject_manual_settlement') {
+      const txId = body.id;
+      const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      const db = await getDb();
+      if (db && typeof db.query === 'function') {
+        await db.query(
+          `UPDATE payment_transactions 
+           SET status = 'rejected', failure_reason = $1, updated_at = NOW() 
+           WHERE id = $2`,
+          [failureReason, txId]
+        );
+
+        await db.query(
+          `UPDATE wallet_transactions 
+           SET status = 'rejected' 
+           WHERE gateway_tx_id = $1 OR id = $1`,
+          [txId]
+        ).catch(() => {});
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Manual bank wire settlement rejected.'
+      });
+    }
+
+    // 3. EDIT TRANSACTION (v8.1.15 Parity)
+    if (action === 'edit_transaction') {
+      const txId = body.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      const db = await getDb();
+      if (db && typeof db.query === 'function') {
+        await db.query(
+          `UPDATE payment_transactions 
+           SET customer_name = $1, customer_email = $2, plan_name = $3, amount = $4,
+               transfer_reference = $5, status = $6, notes = $7, failure_reason = $8, updated_at = NOW()
+           WHERE id = $9`,
+          [
+            body.customer_name || 'Customer',
+            (body.customer_email || '').toLowerCase().trim(),
+            body.plan_name || 'Bank Wire Deposit',
+            Number(body.amount || 0),
+            body.transfer_reference || '',
+            body.status || 'pending',
+            body.notes || '',
+            body.failure_reason || null,
+            txId
+          ]
+        );
+
+        // If updated to succeeded, credit user wallet
+        if (body.status === 'succeeded' && Number(body.amount) > 0 && body.customer_email) {
+          await db.query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW() 
+             WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))`,
+            [Number(body.amount), (body.customer_email || '').toLowerCase().trim()]
+          ).catch(() => {});
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Transaction record updated successfully in PostgreSQL & MySQL!'
+      });
+    }
+
+    // 4. VERIFY STRIPE KEYS
     if (action === 'verify_stripe_keys') {
       const { publishableKey, secretKey, webhookSecret, testMode } = body;
       const isTestMode = testMode !== undefined ? Boolean(testMode) : true;
@@ -201,7 +320,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // ACTION: Verify PayPal Keys
+    // 5. VERIFY PAYPAL KEYS
     if (action === 'verify_paypal_keys' || action === 'verify_paypal') {
       const { clientId, clientSecret, webhookId, environment, testMode } = body;
       const isSandbox = environment === 'sandbox' || (testMode !== undefined ? Boolean(testMode) : true);
@@ -209,7 +328,7 @@ export async function POST(req: Request) {
       return NextResponse.json(result);
     }
 
-    // ACTION: Toggle Master Test Mode
+    // 6. TOGGLE MASTER TEST MODE
     if (action === 'toggle_master_test_mode') {
       const nextTestMode = Boolean(body.testMode);
       const db = await getDb();
@@ -268,7 +387,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // ACTION: Save Settings
+    // 7. SAVE SETTINGS
     if (action === 'save_settings') {
       const settings = body.paymentSettings || body.settings || {};
       const db = await getDb();
@@ -305,6 +424,31 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const url = new URL(req.url);
+    let id = url.searchParams.get('id');
+    if (!id) {
+      const body = await req.json().catch(() => ({}));
+      id = body.id;
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+    }
+
+    const db = await getDb();
+    if (db && typeof db.query === 'function') {
+      await db.query('DELETE FROM payment_transactions WHERE id = $1', [id]);
+      await db.query('DELETE FROM wallet_transactions WHERE gateway_tx_id = $1 OR id = $1', [id]).catch(() => {});
+    }
+
+    return NextResponse.json({ success: true, message: 'Transaction deleted successfully.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
