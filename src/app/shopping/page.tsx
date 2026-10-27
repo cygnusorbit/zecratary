@@ -3,11 +3,10 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { 
-  ShoppingCart, Plus, Trash2, Check, CheckSquare, Square, 
-  Search, Edit3, Share2, Copy, Filter, X, RefreshCw, 
-  CheckCircle2, AlertCircle, Bookmark, Utensils, ArrowRight
+  ShoppingCart, Plus, Trash2, Check, CheckSquare, 
+  Search, Edit3, Copy, Bookmark, X, RefreshCw, 
+  CheckCircle2, AlertCircle
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useIngredientCategories, DEFAULT_CATEGORIES } from '@/lib/categories';
@@ -27,6 +26,23 @@ interface ShoppingItem {
   recipeTitle?: string;
 }
 
+// Pure Category Name Normalizer: Extracts clean string names from primitives or entity objects
+const getCategoryName = (cat: any): string => {
+  if (!cat) return 'Produce';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    if (trimmed === '[object Object]' || trimmed === '') return 'Produce';
+    return trimmed;
+  }
+  if (typeof cat === 'object') {
+    const candidate = cat.name || cat.label || cat.title || cat.slug || cat.id;
+    if (typeof candidate === 'string' && candidate.trim() && candidate !== '[object Object]') {
+      return candidate.trim();
+    }
+  }
+  return 'Produce';
+};
+
 export default function ShoppingPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -39,17 +55,34 @@ export default function ShoppingPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Normalize remote category objects into deduplicated clean strings
   const remoteCategories = useIngredientCategories();
   const categoriesList = useMemo(() => {
-    return Array.isArray(remoteCategories) && remoteCategories.length > 0 
+    const source = Array.isArray(remoteCategories) && remoteCategories.length > 0 
       ? remoteCategories 
-      : DEFAULT_CATEGORIES;
+      : (Array.isArray(DEFAULT_CATEGORIES) && DEFAULT_CATEGORIES.length > 0 ? DEFAULT_CATEGORIES : []);
+    
+    const set = new Set<string>();
+    const list: string[] = [];
+
+    source.forEach((c: any) => {
+      const name = getCategoryName(c);
+      if (name && !set.has(name)) {
+        set.add(name);
+        list.push(name);
+      }
+    });
+
+    return list.length > 0 
+      ? list 
+      : ['Produce', 'Meat & Seafood', 'Dairy & Eggs', 'Pantry Staples', 'Bakery', 'Frozen', 'Beverages', 'Condiments & Spices', 'Snacks', 'Other'];
   }, [remoteCategories]);
 
   const safeDefaultCategory = categoriesList[0] || 'Produce';
 
   // Category Translation Helper
-  const getCategoryLabel = useCallback((cat: string) => {
+  const getCategoryLabel = useCallback((cat: any): string => {
+    const catName = getCategoryName(cat);
     const keyMap: Record<string, string> = {
       'Produce': 'catProduce',
       'Meat & Seafood': 'catMeatSeafood',
@@ -62,11 +95,11 @@ export default function ShoppingPage() {
       'Snacks': 'catSnacks',
       'Other': 'catOther'
     };
-    const transKey = keyMap[cat];
-    return transKey ? t(transKey, cat) : cat;
+    const transKey = keyMap[catName];
+    return transKey ? String(t(transKey, catName)) : catName;
   }, [t]);
 
-  // Add Item Modal State (Form-Free Container)
+  // Add Item Modal State (Form-Free Accessible Container)
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [itemName, setItemName] = useState<string>('');
   const [itemAmount, setItemAmount] = useState<string>('1');
@@ -93,20 +126,26 @@ export default function ShoppingPage() {
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.items)) {
-          fetchedItems = data.items;
-          // Synchronize cache directly with the server result
+          fetchedItems = data.items.map((i: any) => ({
+            ...i,
+            category: getCategoryName(i.category)
+          }));
           try {
             localStorage.setItem('zecratary_shopping_list', JSON.stringify(fetchedItems));
             localStorage.setItem('zecratary_shopping', JSON.stringify(fetchedItems));
           } catch (_) {}
         }
       } else {
-        // Fall back to offline cache ONLY when network request is not ok
         if (typeof window !== 'undefined') {
           const raw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
           if (raw) {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) fetchedItems = parsed;
+            if (Array.isArray(parsed)) {
+              fetchedItems = parsed.map((i: any) => ({
+                ...i,
+                category: getCategoryName(i.category)
+              }));
+            }
           }
         }
       }
@@ -119,7 +158,12 @@ export default function ShoppingPage() {
         if (raw) {
           try {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) setItems(parsed);
+            if (Array.isArray(parsed)) {
+              setItems(parsed.map((i: any) => ({
+                ...i,
+                category: getCategoryName(i.category)
+              })));
+            }
           } catch (_) {}
         }
       }
@@ -140,7 +184,6 @@ export default function ShoppingPage() {
     loadShoppingData(user);
 
     const handleSync = (e: any) => {
-      // Ignore local optimistic mutation triggers to prevent reverting checkboxes
       if (e?.detail?.source === 'local_mutation') return;
       const active = getCurrentUser();
       if (active) {
@@ -177,13 +220,17 @@ export default function ShoppingPage() {
   }, []);
 
   const saveItemsList = async (updatedList: ShoppingItem[], notifyOtherTabs = true) => {
-    setItems(updatedList);
+    const sanitizedList = updatedList.map(item => ({
+      ...item,
+      category: getCategoryName(item.category)
+    }));
+    setItems(sanitizedList);
     const targetUserId = currentUser?.id || 'usr_admin_1';
 
     if (typeof window !== 'undefined') {
       try {
-        localStorage.setItem('zecratary_shopping_list', JSON.stringify(updatedList));
-        localStorage.setItem('zecratary_shopping', JSON.stringify(updatedList));
+        localStorage.setItem('zecratary_shopping_list', JSON.stringify(sanitizedList));
+        localStorage.setItem('zecratary_shopping', JSON.stringify(sanitizedList));
       } catch (_) {}
     }
 
@@ -191,7 +238,7 @@ export default function ShoppingPage() {
       await fetch('/api/shopping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: targetUserId, items: updatedList })
+        body: JSON.stringify({ userId: targetUserId, items: sanitizedList })
       });
     } catch (_) {}
 
@@ -215,13 +262,15 @@ export default function ShoppingPage() {
     const activeUser = currentUser || getCurrentUser();
     if (!itemName.trim() || !activeUser) return;
 
+    const chosenCategory = getCategoryName(itemCategory) || safeDefaultCategory;
+
     const newItem: ShoppingItem = {
       id: 'shop_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
       userId: activeUser.id || 'usr_admin_1',
       name: itemName.trim(),
       amount: itemAmount.trim() || '1',
       unit: itemUnit.trim() || '',
-      category: itemCategory || safeDefaultCategory,
+      category: chosenCategory,
       staple: itemStaple,
       checked: false
     };
@@ -242,7 +291,12 @@ export default function ShoppingPage() {
   const handleUpdateItem = async () => {
     if (!editingItem || !editingItem.name.trim()) return;
 
-    const updated = items.map(i => i.id === editingItem.id ? editingItem : i);
+    const sanitizedEditingItem = {
+      ...editingItem,
+      category: getCategoryName(editingItem.category) || safeDefaultCategory
+    };
+
+    const updated = items.map(i => i.id === sanitizedEditingItem.id ? sanitizedEditingItem : i);
     await saveItemsList(updated);
     setEditingItem(null);
     showToast(t('itemUpdatedToast', 'Item updated successfully!'));
@@ -283,15 +337,16 @@ export default function ShoppingPage() {
     showToast(t('completedClearedToast', 'Completed items cleared.'));
   };
 
-  // Filtered Pipeline
+  // Filtered Pipeline with Pure String Comparison
   const filteredActiveItems = useMemo(() => {
     return items.filter(i => {
       if (i.checked) return false;
       if (filterStaplesOnly && !i.staple) return false;
-      if (selectedCategory !== 'All' && i.category !== selectedCategory) return false;
+      const itemCat = getCategoryName(i.category);
+      if (selectedCategory !== 'All' && itemCat !== selectedCategory) return false;
       if (search.trim()) {
         const q = search.toLowerCase().trim();
-        return i.name.toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q);
+        return i.name.toLowerCase().includes(q) || itemCat.toLowerCase().includes(q);
       }
       return true;
     });
@@ -301,10 +356,11 @@ export default function ShoppingPage() {
     return items.filter(i => {
       if (!i.checked) return false;
       if (filterStaplesOnly && !i.staple) return false;
-      if (selectedCategory !== 'All' && i.category !== selectedCategory) return false;
+      const itemCat = getCategoryName(i.category);
+      if (selectedCategory !== 'All' && itemCat !== selectedCategory) return false;
       if (search.trim()) {
         const q = search.toLowerCase().trim();
-        return i.name.toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q);
+        return i.name.toLowerCase().includes(q) || itemCat.toLowerCase().includes(q);
       }
       return true;
     });
@@ -340,7 +396,7 @@ export default function ShoppingPage() {
     if (activeList.length > 0) {
       const groups: Record<string, ShoppingItem[]> = {};
       activeList.forEach(item => {
-        const cat = item.category || 'Produce';
+        const cat = getCategoryName(item.category);
         if (!groups[cat]) groups[cat] = [];
         groups[cat].push(item);
       });
@@ -392,13 +448,13 @@ export default function ShoppingPage() {
     }
   };
 
-  // Group Active Items by Category
+  // Group Active Items by Normalized Category String
   const groupedActiveItems = useMemo(() => {
     const groups: Record<string, ShoppingItem[]> = {};
     filteredActiveItems.forEach(item => {
-      const cat = item.category || 'Produce';
+      const cat = getCategoryName(item.category);
       if (!groups[cat]) groups[cat] = [];
-      groups[cat].push(item);
+      groups[cat].push({ ...item, category: cat });
     });
     return groups;
   }, [filteredActiveItems]);
@@ -504,7 +560,10 @@ export default function ShoppingPage() {
 
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setItemCategory(safeDefaultCategory);
+              setShowAddModal(true);
+            }}
             className="text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg cursor-pointer hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
@@ -550,8 +609,8 @@ export default function ShoppingPage() {
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               <option value="All">{t('allCategories', 'All Categories')}</option>
-              {categoriesList.map(cat => (
-                <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
+              {categoriesList.map((cat, idx) => (
+                <option key={`filter_cat_${cat}_${idx}`} value={cat}>{getCategoryLabel(cat)}</option>
               ))}
             </select>
 
@@ -572,10 +631,10 @@ export default function ShoppingPage() {
         {/* Counter Pills Strip */}
         <div className="flex items-center justify-between pt-2 border-t text-xs font-bold" style={{ borderColor: 'var(--color-border)' }}>
           <span style={{ color: 'var(--color-primary)' }}>
-            {(t('activeItemsCount', '{count} Items to Buy')).replace('{count}', String(totalActive))}
+            {(t('activeItemsCount', '{count} Items to Buy') || '{count} Items to Buy').replace('{count}', String(totalActive))}
           </span>
           <span style={{ color: 'var(--color-emerald)' }}>
-            {(t('completedItemsCount', '{count} Items Purchased')).replace('{count}', String(totalCompleted))}
+            {(t('completedItemsCount', '{count} Items Purchased') || '{count} Items Purchased').replace('{count}', String(totalCompleted))}
           </span>
         </div>
       </div>
@@ -593,7 +652,10 @@ export default function ShoppingPage() {
           </p>
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setItemCategory(safeDefaultCategory);
+              setShowAddModal(true);
+            }}
             className="text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
@@ -607,7 +669,7 @@ export default function ShoppingPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
               {Object.entries(groupedActiveItems).map(([catName, catItems]) => (
                 <div 
-                  key={catName}
+                  key={`group_${catName}`}
                   className="border rounded-3xl p-5 space-y-3 shadow-xs transition-colors duration-200 flex flex-col justify-between"
                   style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', boxSizing: 'border-box' }}
                 >
@@ -655,7 +717,7 @@ export default function ShoppingPage() {
 
                             <button
                               type="button"
-                              onClick={() => setEditingItem(item)}
+                              onClick={() => setEditingItem({ ...item, category: getCategoryName(item.category) })}
                               className="p-1.5 rounded-lg border transition hover:opacity-80 cursor-pointer"
                               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                               title={t('editItemTooltip', 'Edit item')}
@@ -840,8 +902,8 @@ export default function ShoppingPage() {
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
-                  {categoriesList.map(cat => (
-                    <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
+                  {categoriesList.map((cat, idx) => (
+                    <option key={`add_cat_${cat}_${idx}`} value={cat}>{getCategoryLabel(cat)}</option>
                   ))}
                 </select>
               </div>
@@ -977,13 +1039,13 @@ export default function ShoppingPage() {
               <div>
                 <label className="block font-bold mb-1 opacity-80">{t('categoryLabel', 'Category')}</label>
                 <select
-                  value={editingItem.category}
+                  value={getCategoryName(editingItem.category)}
                   onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
-                  {categoriesList.map(cat => (
-                    <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
+                  {categoriesList.map((cat, idx) => (
+                    <option key={`edit_cat_${cat}_${idx}`} value={cat}>{getCategoryLabel(cat)}</option>
                   ))}
                 </select>
               </div>
