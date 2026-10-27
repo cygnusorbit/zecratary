@@ -61,7 +61,7 @@
       "tokenReimburseFrequency": "monthly"
     }
   ],
-  "updatedAt": "2026-10-03T05:23:52.799Z",
+  "updatedAt": "2026-10-27T19:35:35.924Z",
   "chefAiSettings": {
     "model": "gemini-3.5-flash-lite",
     "apiKey": "AQ.Ab8RN6IhH6iaU_4chRKwnTIyKxG4bBTJURnex1GtD9nPAttcOQ",
@@ -244,5 +244,51 @@
   "meta_keywords": "culinary ai, recipe generator, meal planner, pantry management",
   "metaAuthor": "Zecratary Culinary Intelligence Inc.",
   "meta_author": "Zecratary Culinary Intelligence Inc.",
-  "updated_at": "2026-10-27T16:44:13.879Z"
+  "updated_at": "2026-10-27T16:44:13.879Z",
+  "tokenSettings": {
+    "tokenName": "Foodie Token",
+    "tokenSymbol": "💎",
+    "startingBalance": 100,
+    "isEnabled": true,
+    "importUrlCost": 5,
+    "importTextCost": 2,
+    "importPhotoCost": 10,
+    "aiChefCost": 2,
+    "mealPlannerCost": 5,
+    "macroAnalysisCost": 3,
+    "planAllocations": {
+      "free": 50,
+      "nutrition-pro": 750,
+      "vip-chef": 3000
+    },
+    "packages": [
+      {
+        "id": "pkg_starter",
+        "name": "Starter Spark",
+        "tokenAmount": 250,
+        "priceDollars": 4.99,
+        "badge": "Popular",
+        "bonusTokens": 0,
+        "isPopular": true
+      },
+      {
+        "id": "pkg_chef",
+        "name": "Culinary Master",
+        "tokenAmount": 1000,
+        "priceDollars": 14.99,
+        "badge": "Best Value",
+        "bonusTokens": 150,
+        "isPopular": false
+      },
+      {
+        "id": "pkg_executive",
+        "name": "Kitchen Enterprise",
+        "tokenAmount": 5000,
+        "priceDollars": 49.99,
+        "badge": "VIP",
+        "bonusTokens": 1000,
+        "isPopular": false
+      }
+    ]
+  }
 }
