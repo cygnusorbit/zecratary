@@ -48,6 +48,12 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "bonusTokensBadge": "+{bonus} Bonus Tokens",
+    "oneTimePayment": "one-time",
+    "mealPlannerCostLabel": "Weekly Meal Plan",
+    "macroAnalysisCostLabel": "Macro Nutritional Analysis",
+    "filterTypePlanner": "Meal Planner",
+    "filterTypeMacro": "Macro Analysis",
     "reconcilePaymentsBtn": "Reconcile Payments",
     "reconciling": "Reconciling...",
     "filterAdjustment": "Adjustments",
