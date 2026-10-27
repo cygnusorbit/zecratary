@@ -48,6 +48,22 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "btnUpdatePackage": "Update Package",
+    "btnCancelEdit": "Cancel Edit",
+    "planAllocationsHeading": "Subscription Plan Monthly Included Tokens",
+    "planAllocationsDesc": "Define recurring token quotas automatically refreshed for active subscription tiers.",
+    "colPlanPrice": "Plan Price",
+    "colMonthlyTokens": "Monthly Token Allowance",
+    "filterAllTypes": "All Transaction Types",
+    "filterPurchases": "Purchases",
+    "filterDeductions": "Consumption / Deductions",
+    "filterGrants": "Grants & Signups",
+    "btnClearLedger": "Clear Audit Trail",
+    "confirmClearLedger": "Are you sure you want to clear recent token transactions? This cannot be undone.",
+    "toastLedgerCleared": "Token transaction audit trail cleared successfully.",
+    "noPlansFound": "No subscription plans detected in database.",
+    "tabTokenPlans": "Plan Monthly Grants",
+    "tokensPerMonth": "tokens/mo",
     "manualQueueTitle": "Manual Settlement Approval Queue",
     "manualQueueSubtitle": "Review, approve, reject, or edit submitted bank wire transfers and credit user balances in PostgreSQL & MySQL.",
     "pendingReviewBadge": "Pending Review",
