@@ -5777,5 +5777,12 @@
       "zoomLabel": "Taille du Texte",
       "closeModalBtn": "Fermer"
     }
+  },
+  "storage_settings": {
+    "localhost": {
+      "uploadDir": "apps/web/public/recipes/images",
+      "recipesJsonDir": "apps/web/public/recipes",
+      "publicPrefix": "/recipes/images"
+    }
   }
 }

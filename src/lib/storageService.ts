@@ -1,5 +1,5 @@
-// Centralized Media Storage Engine (Canonical apps/web/public/recipes)
-// GitHub: cygnusorbit/zecratary (Constraints 8, 9, 10)
+// Centralized Media Storage Engine (Canonical apps/web/public/recipes/images)
+// GitHub: cygnusorbit/zecratary
 
 import fs from 'fs';
 import path from 'path';
@@ -151,7 +151,6 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
   return merged;
 }
 
-// Native AWS S3 SigV4 Upload Implementation for Supabase S3 Gateway
 export async function uploadToSupabaseS3(
   buffer: Buffer,
   filename: string,
@@ -243,52 +242,13 @@ export async function uploadMediaFile(
     }
   }
 
+  // Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
   const targetDir = path.join(getCanonicalWebPublicDir(), 'recipes', 'images');
   if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
   fs.writeFileSync(path.join(targetDir, cleanName), buffer);
 
   const prefix = settings.localhost.publicPrefix || '/recipes/images';
   return `${prefix}/${cleanName}`;
-}
-
-export function cleanOrphanRecipeImages(): { removedCount: number; remainingCount: number; recipesCount: number } {
-  const publicDir = getCanonicalWebPublicDir();
-  const recipesDir = path.join(publicDir, 'recipes');
-  const imagesDir = path.join(recipesDir, 'images');
-
-  if (!fs.existsSync(imagesDir) || !fs.existsSync(recipesDir)) {
-    return { removedCount: 0, remainingCount: 0, recipesCount: 0 };
-  }
-
-  const jsonFiles = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json') && !f.includes('index.json') && !f.startsWith('package'));
-  const activeImageFilenames = new Set<string>();
-
-  jsonFiles.forEach(jf => {
-    try {
-      const raw = fs.readFileSync(path.join(recipesDir, jf), 'utf-8');
-      const data = JSON.parse(raw);
-      const imgUrl = data.imageUrl || data.image || data.image_url;
-      if (imgUrl && typeof imgUrl === 'string') {
-        const basename = path.basename(imgUrl.split('?')[0]);
-        if (basename) activeImageFilenames.add(basename);
-      }
-    } catch (_) {}
-  });
-
-  const diskImages = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f));
-  let removedCount = 0;
-
-  diskImages.forEach(img => {
-    if (!activeImageFilenames.has(img)) {
-      try {
-        fs.unlinkSync(path.join(imagesDir, img));
-        removedCount++;
-      } catch (_) {}
-    }
-  });
-
-  const remainingCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f)).length;
-  return { removedCount, remainingCount, recipesCount: jsonFiles.length };
 }
 
 export function getUniversalDiskDiagnostics() {
@@ -303,14 +263,14 @@ export function getUniversalDiskDiagnostics() {
 
   try {
     if (!fs.existsSync(recipesDir)) fs.mkdirSync(recipesDir, { recursive: true });
-    recipesCount = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json') && !f.startsWith('package')).length;
+    recipesCount = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json')).length;
     fs.accessSync(recipesDir, fs.constants.W_OK);
     jsonDirWritable = true;
   } catch (_) {}
 
   try {
     if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
-    imagesCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f)).length;
+    imagesCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(f)).length;
     fs.accessSync(imagesDir, fs.constants.W_OK);
     imagesDirWritable = true;
   } catch (_) {}
