@@ -1,8 +1,8 @@
 {
-  "siteName": "Zecratary",
+  "siteName": "Zecratary!",
   "siteDescription": "Smart Meal Planning & Recipe Assistant",
-  "titlebarEmoji": "🍳",
-  "faviconEmoji": "🍳",
+  "titlebarEmoji": "🍅",
+  "faviconEmoji": "🍅",
   "aiProvider": "gemini",
   "aiModel": "gemini-3.5-flash-lite",
   "currency": "USD",
@@ -88,19 +88,17 @@
   "titlebarImage": "",
   "faviconImage": "",
   "themeColors": {
-    "accent": "#10b981",
-    "primary": "#E05638",
-    "cardBorder": "#1e293b",
-    "accentColor": "#10b981",
-    "sidebarIcon": "#10b981",
-    "primaryColor": "#E05638",
+    "name": "Coral Glow (Default)",
+    "primary": "#9529c7",
     "primaryHover": "#c94529",
     "accentEmerald": "#10b981",
+    "background": "#070b13",
+    "card": "#0d131f",
+    "innerDark": "#080d16",
+    "border": "#1a2234",
+    "text": "#ffffff",
     "textSecondary": "#94a3b8",
-    "backgroundDark": "#070b13",
-    "cardBackground": "#0b0f17",
-    "backgroundColor": "#070b13",
-    "sidebarIconColor": "#10b981"
+    "bg": "#070b13"
   },
   "supportedLanguages": [
     {
@@ -216,5 +214,35 @@
       "bucket": "recipes",
       "publicUrl": "https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes"
     }
-  }
+  },
+  "site_name": "Zecratary!",
+  "siteTagline": "Autonomous Culinary Intelligence & Precision Meal Planning",
+  "site_tagline": "Autonomous Culinary Intelligence & Precision Meal Planning",
+  "tagline": "Autonomous Culinary Intelligence & Precision Meal Planning",
+  "titlebar_emoji": "🍅",
+  "titlebar_image": "",
+  "favicon_emoji": "🍅",
+  "favicon_image": "",
+  "fontFamily": "Inter, sans-serif",
+  "font_family": "Inter, sans-serif",
+  "theme_colors": {
+    "name": "Coral Glow (Default)",
+    "primary": "#9529c7",
+    "primaryHover": "#c94529",
+    "accentEmerald": "#10b981",
+    "background": "#070b13",
+    "card": "#0d131f",
+    "innerDark": "#080d16",
+    "border": "#1a2234",
+    "text": "#ffffff",
+    "textSecondary": "#94a3b8",
+    "bg": "#070b13"
+  },
+  "metaDescription": "Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.",
+  "meta_description": "Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.",
+  "metaKeywords": "culinary ai, recipe generator, meal planner, pantry management",
+  "meta_keywords": "culinary ai, recipe generator, meal planner, pantry management",
+  "metaAuthor": "Zecratary Culinary Intelligence Inc.",
+  "meta_author": "Zecratary Culinary Intelligence Inc.",
+  "updated_at": "2026-10-27T16:44:13.879Z"
 }

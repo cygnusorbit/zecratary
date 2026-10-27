@@ -1,3 +1,4 @@
+import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 import fs from 'fs';

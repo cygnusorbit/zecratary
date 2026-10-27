@@ -1,270 +1,227 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import fs from 'fs';
+import { NextResponse } from 'next/server';
 import path from 'path';
+import fs from 'fs';
+import { query } from '@/lib/db';
 
-export const dynamic = 'force-dynamic';
-
-function getLocalSettingsPath(): string {
-  const possiblePaths = [
-    path.join(process.cwd(), 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    path.join(process.cwd(), '..', 'data', 'admin_settings.json')
-  ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return p;
-  }
-  const defaultPath = path.join(process.cwd(), 'data', 'admin_settings.json');
-  fs.mkdirSync(path.dirname(defaultPath), { recursive: true });
-  return defaultPath;
+function getJsonStorePath() {
+  const p1 = path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json');
+  if (fs.existsSync(path.dirname(p1))) return p1;
+  return path.join(process.cwd(), 'data', 'admin_settings.json');
 }
 
-function readLocalSettings(): any {
+function readJsonStore() {
+  const p = getJsonStorePath();
   try {
-    const p = getLocalSettingsPath();
     if (fs.existsSync(p)) {
-      const raw = fs.readFileSync(p, 'utf-8');
-      return JSON.parse(raw);
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
     }
   } catch (_) {}
   return {};
 }
 
-function writeLocalSettings(data: any): void {
+function writeJsonStore(data: any) {
+  const p = getJsonStorePath();
   try {
-    const p = getLocalSettingsPath();
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
+    fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
   } catch (_) {}
 }
 
-async function ensureAdminSettingsTable(): Promise<void> {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(100) PRIMARY KEY,
-        value JSONB,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    await query(`
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS chef_ai_settings JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_model VARCHAR(100);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50);
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-    `);
-  } catch (err) {
-    console.warn('[PostgreSQL] admin_settings table setup warning:', err);
-  }
-}
-
 export async function GET() {
-  await ensureAdminSettingsTable();
-  const diskData = readLocalSettings();
+  let settings: any = readJsonStore();
 
   try {
-    const rows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    if (rows.length > 0) {
+    const rows = await query(`
+      SELECT * FROM admin_settings 
+      WHERE id = 'primary_settings' OR id = '1' 
+      ORDER BY updated_at DESC LIMIT 1;
+    `);
+
+    if (rows && rows.length > 0) {
       const row = rows[0];
-      let chefAiSettings = row.chef_ai_settings;
-      if (typeof chefAiSettings === 'string') {
-        try { chefAiSettings = JSON.parse(chefAiSettings); } catch (_) { chefAiSettings = {}; }
-      } else if (!chefAiSettings && row.value) {
-        chefAiSettings = typeof row.value === 'string' ? JSON.parse(row.value).chefAiSettings || {} : row.value.chefAiSettings || {};
-      }
-      chefAiSettings = chefAiSettings || {};
+      const parsedTheme = typeof row.theme_colors === 'string'
+        ? JSON.parse(row.theme_colors)
+        : (row.theme_colors || settings.themeColors || {});
 
-      let recUrls: string[] = [];
-      if (Array.isArray(chefAiSettings.recommendedRecipeUrls)) {
-        recUrls = chefAiSettings.recommendedRecipeUrls.filter(Boolean);
-      } else if (Array.isArray(chefAiSettings.recommendedRecipesUrls)) {
-        recUrls = chefAiSettings.recommendedRecipesUrls.filter(Boolean);
-      } else if (Array.isArray(diskData.recommendedRecipeUrls)) {
-        recUrls = diskData.recommendedRecipeUrls.filter(Boolean);
-      }
+      const parsedTrans = typeof row.translations === 'string'
+        ? JSON.parse(row.translations)
+        : (row.translations || settings.translations || {});
 
-      // Extract and preserve themeColors
-      let themeColors: any = null;
-      if (row.theme_colors) {
-        try {
-          themeColors = typeof row.theme_colors === 'string' ? JSON.parse(row.theme_colors) : row.theme_colors;
-        } catch (_) {}
-      }
-      if (!themeColors && row.value) {
-        const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-        themeColors = val?.themeColors || val?.theme_colors || null;
-      }
-      if (!themeColors && diskData.themeColors) {
-        themeColors = diskData.themeColors;
-      }
-      if (!themeColors && diskData.settings?.themeColors) {
-        themeColors = diskData.settings.themeColors;
-      }
-
-      const settingsPayload = row.value || diskData.settings || {};
-
-      return NextResponse.json({
-        success: true,
-        themeColors: themeColors || null,
-        theme_colors: themeColors || null,
-        aiProvider: row.ai_provider || chefAiSettings.provider || diskData.aiProvider || 'gemini',
-        aiModel: row.ai_model || chefAiSettings.model || diskData.aiModel || 'gemini-2.5-flash',
-        chefAiSettings: {
-          ...diskData.chefAiSettings,
-          ...chefAiSettings,
-          recommendedRecipeUrls: recUrls
-        },
-        recommendedRecipeUrls: recUrls,
-        settings: {
-          ...settingsPayload,
-          themeColors: themeColors || settingsPayload.themeColors || null
-        }
-      }, { headers: { 'Cache-Control': 'no-store' } });
+      settings = {
+        ...settings,
+        siteName: row.site_name || settings.siteName || 'Zecratary',
+        site_name: row.site_name || settings.site_name || 'Zecratary',
+        tagline: row.tagline || settings.tagline || 'Autonomous Culinary Intelligence & Precision Meal Planning',
+        siteTagline: row.tagline || settings.siteTagline || 'Autonomous Culinary Intelligence & Precision Meal Planning',
+        site_tagline: row.tagline || settings.site_tagline || 'Autonomous Culinary Intelligence & Precision Meal Planning',
+        titlebarEmoji: row.titlebar_emoji || settings.titlebarEmoji || '👨‍🍳',
+        titlebar_emoji: row.titlebar_emoji || settings.titlebar_emoji || '👨‍🍳',
+        titlebarImage: row.titlebar_image || settings.titlebarImage || '',
+        titlebar_image: row.titlebar_image || settings.titlebar_image || '',
+        faviconEmoji: row.favicon_emoji || settings.faviconEmoji || '👨‍🍳',
+        favicon_emoji: row.favicon_emoji || settings.favicon_emoji || '👨‍🍳',
+        faviconImage: row.favicon_image || settings.faviconImage || '',
+        favicon_image: row.favicon_image || settings.favicon_image || '',
+        fontFamily: row.font_family || settings.fontFamily || 'Inter, sans-serif',
+        font_family: row.font_family || settings.font_family || 'Inter, sans-serif',
+        themeColors: parsedTheme,
+        theme_colors: parsedTheme,
+        metaDescription: row.meta_description || settings.metaDescription || 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.',
+        meta_description: row.meta_description || settings.meta_description || 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.',
+        metaKeywords: row.meta_keywords || settings.metaKeywords || 'culinary ai, recipe generator, meal planner, pantry management',
+        meta_keywords: row.meta_keywords || settings.meta_keywords || 'culinary ai, recipe generator, meal planner, pantry management',
+        metaAuthor: row.meta_author || settings.metaAuthor || 'Zecratary Culinary Intelligence Inc.',
+        meta_author: row.meta_author || settings.meta_author || 'Zecratary Culinary Intelligence Inc.',
+        translations: parsedTrans
+      };
     }
-  } catch (dbErr) {
-    console.warn('[PostgreSQL] GET fallback to filesystem:', dbErr);
+  } catch (err: any) {
+    console.warn('[PostgreSQL] Settings GET notice:', err.message);
   }
-
-  // Filesystem fallback
-  const recUrls = Array.isArray(diskData.recommendedRecipeUrls) 
-    ? diskData.recommendedRecipeUrls.filter(Boolean) 
-    : (diskData.chefAiSettings?.recommendedRecipeUrls || []);
-
-  const diskTheme = diskData.themeColors || diskData.settings?.themeColors || null;
 
   return NextResponse.json({
     success: true,
-    themeColors: diskTheme,
-    theme_colors: diskTheme,
-    aiProvider: diskData.aiProvider || diskData.chefAiSettings?.provider || 'gemini',
-    aiModel: diskData.aiModel || diskData.chefAiSettings?.model || 'gemini-2.5-flash',
-    chefAiSettings: {
-      ...(diskData.chefAiSettings || {}),
-      recommendedRecipeUrls: recUrls
-    },
-    recommendedRecipeUrls: recUrls,
-    settings: {
-      ...(diskData.settings || {}),
-      themeColors: diskTheme
-    }
-  }, { headers: { 'Cache-Control': 'no-store' } });
+    settings,
+    ...settings
+  }, {
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+  });
 }
 
-export async function POST(req: NextRequest) {
-  return handleSaveSettings(req);
-}
-
-export async function PUT(req: NextRequest) {
-  return handleSaveSettings(req);
-}
-
-async function handleSaveSettings(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const { aiProvider, aiModel, chefAiSettings, recommendedRecipeUrls, themeColors, theme_colors } = body;
+    const body = await req.json();
+    const existing = readJsonStore();
 
-    await ensureAdminSettingsTable();
-    const diskData = readLocalSettings();
+    const siteName = body.siteName || body.site_name || existing.siteName || 'Zecratary';
+    const tagline = body.siteTagline || body.tagline || body.site_tagline || existing.tagline || 'Autonomous Culinary Intelligence & Precision Meal Planning';
+    const titlebarEmoji = body.titlebarEmoji || body.titlebar_emoji || existing.titlebarEmoji || '👨‍🍳';
+    const titlebarImage = body.titlebarImage !== undefined ? body.titlebarImage : (body.titlebar_image !== undefined ? body.titlebar_image : (existing.titlebarImage || ''));
+    const faviconEmoji = body.faviconEmoji || body.favicon_emoji || existing.faviconEmoji || '👨‍🍳';
+    const faviconImage = body.faviconImage !== undefined ? body.faviconImage : (body.favicon_image !== undefined ? body.favicon_image : (existing.faviconImage || ''));
+    const fontFamily = body.fontFamily || body.font_family || existing.fontFamily || 'Inter, sans-serif';
+    const themeColors = body.themeColors || body.theme_colors || existing.themeColors || {};
+    const metaDescription = body.metaDescription || body.meta_description || existing.metaDescription || 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.';
+    const metaKeywords = body.metaKeywords || body.meta_keywords || existing.metaKeywords || 'culinary ai, recipe generator, meal planner, pantry management';
+    const metaAuthor = body.metaAuthor || body.meta_author || existing.metaAuthor || 'Zecratary Culinary Intelligence Inc.';
 
-    let existingChefSettings: any = diskData.chefAiSettings || {};
-    let existingValue: any = diskData.value || diskData.settings || {};
-    let existingThemeColors: any = diskData.themeColors || diskData.settings?.themeColors || null;
-
-    try {
-      const existingRows = await query('SELECT * FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-      if (existingRows.length > 0) {
-        const row = existingRows[0];
-        if (row.theme_colors) {
-          try {
-            existingThemeColors = typeof row.theme_colors === 'string' ? JSON.parse(row.theme_colors) : row.theme_colors;
-          } catch (_) {}
-        }
-        if (typeof row.chef_ai_settings === 'string') {
-          try { existingChefSettings = JSON.parse(row.chef_ai_settings); } catch (_) {}
-        } else if (row.chef_ai_settings) {
-          existingChefSettings = row.chef_ai_settings;
-        }
-
-        if (typeof row.value === 'string') {
-          try { existingValue = JSON.parse(row.value); } catch (_) {}
-        } else if (row.value) {
-          existingValue = row.value;
-        }
-      }
-    } catch (_) {}
-
-    const resolvedThemeColors = themeColors || theme_colors || existingThemeColors || existingValue.themeColors || existingValue.theme_colors || null;
-
-    const mergedChefSettings = {
-      ...existingChefSettings,
-      ...(chefAiSettings || {})
-    };
-
-    if (Array.isArray(recommendedRecipeUrls)) {
-      mergedChefSettings.recommendedRecipeUrls = recommendedRecipeUrls.filter(Boolean);
-    } else if (Array.isArray(chefAiSettings?.recommendedRecipeUrls)) {
-      mergedChefSettings.recommendedRecipeUrls = chefAiSettings.recommendedRecipeUrls.filter(Boolean);
-    }
-
-    const providerToSave = aiProvider || chefAiSettings?.provider || existingChefSettings.provider || 'gemini';
-    const modelToSave = aiModel || chefAiSettings?.model || existingChefSettings.model || 'gemini-2.5-flash';
-
-    const mergedValue = {
-      ...existingValue,
+    const updated = {
+      ...existing,
       ...body,
-      themeColors: resolvedThemeColors,
-      theme_colors: resolvedThemeColors,
-      chefAiSettings: mergedChefSettings,
-      recommendedRecipeUrls: mergedChefSettings.recommendedRecipeUrls || []
+      siteName,
+      site_name: siteName,
+      tagline,
+      siteTagline: tagline,
+      site_tagline: tagline,
+      titlebarEmoji,
+      titlebar_emoji: titlebarEmoji,
+      titlebarImage,
+      titlebar_image: titlebarImage,
+      faviconEmoji,
+      favicon_emoji: faviconEmoji,
+      faviconImage,
+      favicon_image: faviconImage,
+      fontFamily,
+      font_family: fontFamily,
+      themeColors,
+      theme_colors: themeColors,
+      metaDescription,
+      meta_description: metaDescription,
+      metaKeywords,
+      meta_keywords: metaKeywords,
+      metaAuthor,
+      meta_author: metaAuthor,
+      updated_at: new Date().toISOString()
     };
 
-    // 1. Dual-mirror to filesystem
-    writeLocalSettings({
-      aiProvider: providerToSave,
-      aiModel: modelToSave,
-      themeColors: resolvedThemeColors,
-      theme_colors: resolvedThemeColors,
-      chefAiSettings: mergedChefSettings,
-      recommendedRecipeUrls: mergedChefSettings.recommendedRecipeUrls || [],
-      value: mergedValue,
-      settings: mergedValue,
-      updatedAt: new Date().toISOString()
-    });
+    writeJsonStore(updated);
 
-    // 2. Persist to PostgreSQL (COALESCE preserves theme_colors if omitted)
     try {
+      // 1. Ensure table structure exists
       await query(`
-        INSERT INTO admin_settings (id, chef_ai_settings, ai_model, ai_provider, value, theme_colors, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          chef_ai_settings = EXCLUDED.chef_ai_settings,
-          ai_model = EXCLUDED.ai_model,
-          ai_provider = EXCLUDED.ai_provider,
-          value = EXCLUDED.value,
-          theme_colors = COALESCE(EXCLUDED.theme_colors, admin_settings.theme_colors),
-          updated_at = NOW()
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id VARCHAR(255) PRIMARY KEY,
+          site_name VARCHAR(255) DEFAULT 'Zecratary',
+          tagline TEXT DEFAULT 'Autonomous Culinary Intelligence & Precision Meal Planning',
+          titlebar_emoji VARCHAR(50) DEFAULT '👨‍🍳',
+          titlebar_image TEXT DEFAULT '',
+          favicon_emoji VARCHAR(50) DEFAULT '👨‍🍳',
+          favicon_image TEXT DEFAULT '',
+          font_family VARCHAR(100) DEFAULT 'Inter, sans-serif',
+          theme_colors JSONB DEFAULT '{}'::jsonb,
+          meta_description TEXT DEFAULT 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.',
+          meta_keywords TEXT DEFAULT 'culinary ai, recipe generator, meal planner, pantry management',
+          meta_author TEXT DEFAULT 'Zecratary Culinary Intelligence Inc.',
+          translations JSONB DEFAULT '{}'::jsonb,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+
+      // 2. Ensure each column exists individually without parameter conflicts
+      const columnsToAdd = [
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS tagline TEXT DEFAULT 'Autonomous Culinary Intelligence & Precision Meal Planning';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name VARCHAR(255) DEFAULT 'Zecratary';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_emoji VARCHAR(50) DEFAULT '👨‍🍳';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS titlebar_image TEXT DEFAULT '';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_emoji VARCHAR(50) DEFAULT '👨‍🍳';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS favicon_image TEXT DEFAULT '';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS font_family VARCHAR(100) DEFAULT 'Inter, sans-serif';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB DEFAULT '{}'::jsonb;",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS meta_description TEXT DEFAULT 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS meta_keywords TEXT DEFAULT 'culinary ai, recipe generator, meal planner, pantry management';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS meta_author TEXT DEFAULT 'Zecratary Culinary Intelligence Inc.';",
+        "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;"
+      ];
+
+      for (const colQuery of columnsToAdd) {
+        try {
+          await query(colQuery);
+        } catch (_) {}
+      }
+
+      // 3. Perform Upsert with Adaptive Driver
+      await query(`
+        INSERT INTO admin_settings (
+          id, site_name, tagline, titlebar_emoji, titlebar_image,
+          favicon_emoji, favicon_image, font_family, theme_colors,
+          meta_description, meta_keywords, meta_author, updated_at
+        ) VALUES (
+          'primary_settings', $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, NOW()
+        ) ON CONFLICT (id) DO UPDATE SET
+          site_name = EXCLUDED.site_name,
+          tagline = EXCLUDED.tagline,
+          titlebar_emoji = EXCLUDED.titlebar_emoji,
+          titlebar_image = EXCLUDED.titlebar_image,
+          favicon_emoji = EXCLUDED.favicon_emoji,
+          favicon_image = EXCLUDED.favicon_image,
+          font_family = EXCLUDED.font_family,
+          theme_colors = EXCLUDED.theme_colors,
+          meta_description = EXCLUDED.meta_description,
+          meta_keywords = EXCLUDED.meta_keywords,
+          meta_author = EXCLUDED.meta_author,
+          updated_at = NOW();
       `, [
-        'primary_settings',
-        JSON.stringify(mergedChefSettings),
-        modelToSave,
-        providerToSave,
-        JSON.stringify(mergedValue),
-        resolvedThemeColors ? JSON.stringify(resolvedThemeColors) : null
+        siteName,
+        tagline,
+        titlebarEmoji,
+        titlebarImage,
+        faviconEmoji,
+        faviconImage,
+        fontFamily,
+        JSON.stringify(themeColors),
+        metaDescription,
+        metaKeywords,
+        metaAuthor
       ]);
-    } catch (pgErr) {
-      console.warn('[PostgreSQL] Save warning, filesystem fallback active:', pgErr);
+    } catch (dbErr: any) {
+      console.warn('[PostgreSQL] Settings POST notice:', dbErr.message);
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Admin settings persisted successfully',
-      themeColors: resolvedThemeColors,
-      theme_colors: resolvedThemeColors,
-      chefAiSettings: mergedChefSettings,
-      recommendedRecipeUrls: mergedChefSettings.recommendedRecipeUrls || []
-    }, { headers: { 'Cache-Control': 'no-store' } });
+      settings: updated,
+      ...updated
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
