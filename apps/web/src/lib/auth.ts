@@ -235,11 +235,38 @@ export function loginUser(
 
 export async function logoutUser(): Promise<void> {
   try {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' });
   } catch (_) {}
+
+  if (typeof window !== 'undefined') {
+    const keys = [
+      'zecratary_current_user',
+      'zecratary_session',
+      'zecratary_auth_session',
+      'currentUser',
+      'user',
+      'zec_login_bounce_ts',
+      'zec_login_bounce_count'
+    ];
+    keys.forEach(k => {
+      try { localStorage.removeItem(k); } catch (_) {}
+      try { sessionStorage.removeItem(k); } catch (_) {}
+      document.cookie = `${k}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    });
+
+    try {
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('zecratary_tokens_') || k.startsWith('zecratary_wallet_')) {
+          localStorage.removeItem(k);
+        }
+      });
+    } catch (_) {}
+  }
+
   setCurrentUser(null);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('zecratary_auth_changed'));
+    window.dispatchEvent(new Event('storage'));
   }
 }
 

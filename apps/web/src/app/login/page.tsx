@@ -121,6 +121,18 @@ function LoginForm() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  useEffect(() => {
+    if (searchParams.get('logout') === 'true') {
+      try {
+        localStorage.removeItem('zecratary_current_user');
+        localStorage.removeItem('zecratary_session');
+        localStorage.removeItem('currentUser');
+        sessionStorage.clear();
+      } catch (_) {}
+      setSuccessMsg(t('loggedOutSuccess', 'You have been logged out successfully.'));
+    }
+  }, [searchParams, t]);
+
   const isRedirectingRef = useRef(false);
   const hasExchangedCodeRef = useRef(false);
   const isFetchingSocialRef = useRef(false);
@@ -315,6 +327,7 @@ function LoginForm() {
 
   // 7. Session Verification Guard: Forward active sessions to /dashboard
   const verifySession = useCallback(() => {
+    if (searchParams.get('logout') === 'true') return;
     if (isRedirectingRef.current) return;
     initAuthStorage();
     const active = getCurrentUser();

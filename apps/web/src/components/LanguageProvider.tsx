@@ -48,6 +48,19 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "topbarTopUpWallet": "Add Funds",
+    "topbarGetTokens": "Get Tokens",
+    "topbarContactSupport": "Contact Support",
+    "contactSupport": "Contact Support",
+    "contactUs": "Contact Support",
+    "topbarSubscriptions": "Subscriptions",
+    "expandSidebar": "Expand Menu",
+    "collapseSidebar": "Collapse Menu",
+    "preferences": "Preferences",
+    "themeMode": "Theme Mode",
+    "interfaceLanguage": "Interface Language",
+    "loggedOutSuccess": "You have been logged out successfully",
+    "userGreeting": "Signed in as",
     "topbarUserMenu": "User Menu",
     "topbarAccountSettings": "Account Settings",
     "topbarBilling": "Billing & Invoices",
