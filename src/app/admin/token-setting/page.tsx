@@ -79,6 +79,29 @@ const DEFAULT_SETTINGS: TokenSettings = {
   packages: DEFAULT_TOKEN_PACKAGES
 };
 
+
+/**
+ * Dynamically synchronizes any token emoji/symbol in transaction descriptions
+ * with the active token symbol from /admin/token-setting.
+ */
+function formatLedgerDescription(desc: string | undefined | null, symbol: string): string {
+  if (!desc) return '—';
+  const cleanSym = symbol && !symbol.startsWith('http') && !symbol.startsWith('/') ? symbol.trim() : '🪙';
+  
+  // 1. If description has (+100 🪙) or (+100 <any_old_symbol>), replace the old symbol with cleanSym
+  let formatted = desc.replace(/(\([+-]?[\d,]+(?:\.\d+)?\s*)([^\w\s\)]+)(\))/g, `$1${cleanSym}$3`);
+  
+  // 2. If description has (+2,000) with numbers only, inject cleanSym: (+2,000 💎)
+  formatted = formatted.replace(/(\([+-]?[\d,]+(?:\.\d+)?\))(?!\s*[^\w\s\)])/g, (match) => {
+    return match.slice(0, -1) + ` ${cleanSym})`;
+  });
+
+  // 3. Replace any standalone 🪙
+  formatted = formatted.replace(/🪙/g, cleanSym);
+
+  return formatted;
+}
+
 export default function AdminTokenSettingPage() {
   const { t, locale } = useTranslation();
 
@@ -1172,7 +1195,7 @@ export default function AdminTokenSettingPage() {
                         </td>
 
                         <td className="px-5 py-4 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                          {tx.description}
+                          {formatLedgerDescription(tx.description, activeTokenSymbol)}
                         </td>
                       </tr>
                     );
