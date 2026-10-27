@@ -1,6 +1,5 @@
+// Generated / Updated by AI Collaborator - Production Build Compliant
 'use client';
-
-// Generated / Updated by AI Collaborator
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -36,8 +35,11 @@ function persistSessionUniversally(user: any) {
   } catch (_) {}
 }
 
+/**
+ * Sanitizes destination and guarantees redirection to /dashboard
+ */
 function sanitizeDestination(targetUrl: string | null | undefined, userRole?: string): string {
-  const fallback = userRole === 'admin' ? '/admin' : '/profile';
+  const fallback = '/dashboard';
   if (!targetUrl) return fallback;
 
   const trimmed = targetUrl.trim();
@@ -53,7 +55,9 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
         path.startsWith('/login/') || 
         path === '/register' || 
         path === '/register/' || 
-        path.startsWith('/register/')
+        path.startsWith('/register/') ||
+        path === '/' ||
+        path === ''
       ) {
         return fallback;
       }
@@ -76,6 +80,8 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
     lower.startsWith('/register/') ||
     lower === 'login' ||
     lower === 'register' ||
+    lower === '/' ||
+    lower === '' ||
     lower.includes('%2flogin') ||
     lower.includes('%2fregister')
   ) {
@@ -90,13 +96,11 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const langContext = useTranslation();
   const rawT = langContext?.t;
-  const currentLangCode = (langContext as any)?.locale || (langContext as any)?.language || (langContext as any)?.currentLanguage || 'en';
+  const currentLangCode = langContext?.locale || langContext?.currentLanguage || 'en';
 
-  // Dynamic server-backed custom dictionary cache
   const [dynamicDict, setDynamicDict] = useState<Record<string, string>>({});
   const [, setRerenderTrigger] = useState(0);
 
-  // Translation helper resolving: PostgreSQL dynamic phrases -> Context t() -> Fallback
   const t = useCallback((key: string, fallback?: string): string => {
     if (dynamicDict && dynamicDict[key]) {
       return dynamicDict[key];
@@ -212,7 +216,7 @@ function LoginForm() {
     }
   }, []);
 
-  // 4. Automated Code Exchange
+  // 4. Automated Google Code Exchange
   useEffect(() => {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
@@ -225,7 +229,7 @@ function LoginForm() {
     }
   }, [searchParams, t]);
 
-  // 5. Map Error Parameters
+  // 5. Error Banner Mapping
   useEffect(() => {
     const err = searchParams.get('error');
     if (err) {
@@ -233,7 +237,7 @@ function LoginForm() {
       if (err === 'missing_google_client_id') {
         setErrorMsg(t('missingGoogleClientId', 'Google Client ID is not configured. Please add your OAuth Client ID in /admin/social-login-setting.'));
       } else if (err === 'missing_google_client_secret') {
-        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured in /admin/social-login-setting. Click Google to sign in directly.'));
+        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured. Click Google to sign in directly.'));
       } else if (err === 'google_access_denied') {
         setErrorMsg(t('googleAccessDenied', 'Google sign-in was canceled.'));
       } else if (err === 'token_exchange_failed' || err === 'oauth_handshake_error') {
@@ -283,7 +287,7 @@ function LoginForm() {
         }
       }
     } catch (err) {
-      console.error('[login] Failed to load dynamic social login settings:', err);
+      console.error('[login] Failed to load social login settings:', err);
     } finally {
       isFetchingSocialRef.current = false;
       setSocialLoaded(true);
@@ -309,7 +313,7 @@ function LoginForm() {
     };
   }, [fetchSocialConfig]);
 
-  // 7. Session Verification Guard
+  // 7. Session Verification Guard: Forward active sessions to /dashboard
   const verifySession = useCallback(() => {
     if (isRedirectingRef.current) return;
     initAuthStorage();
@@ -366,31 +370,58 @@ function LoginForm() {
     };
   }, [verifySession]);
 
-  // 8. Credentials Submission (Decoupled from native form)
+  // 8. Credentials Submission: Authenticates with PostgreSQL/MySQL API & redirects to /dashboard
   const handleSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
     if (e && 'preventDefault' in e) e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    if (!email.trim() || !password) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
       setErrorMsg(t('fillRequiredFields', 'Please provide both email and password.'));
       return;
     }
 
     setLoading(true);
     try {
-      const user = await Promise.resolve(loginUser(email.trim(), password));
-      if (user) {
+      let resolvedUser: any = null;
+
+      // Layer 1: Query server database authentication API (/api/auth/login)
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, password: password.trim() })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.user) {
+            resolvedUser = data.user;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('[login] Server API call encountered network error, trying local adapter:', apiErr);
+      }
+
+      // Layer 2: Client auth fallback
+      if (!resolvedUser && typeof loginUser === 'function') {
+        const localAuth = await Promise.resolve(loginUser(cleanEmail, password.trim()));
+        if (localAuth) {
+          resolvedUser = localAuth;
+        }
+      }
+
+      if (resolvedUser) {
         setSuccessMsg(t('loginSuccess', 'Signing in...'));
-        persistSessionUniversally(user);
+        persistSessionUniversally(resolvedUser);
         window.dispatchEvent(new Event('zecratary_auth_changed'));
 
         const rawCb = searchParams.get('callbackUrl');
-        const dest = sanitizeDestination(rawCb, user.role);
+        const dest = sanitizeDestination(rawCb, resolvedUser.role);
 
         setTimeout(() => {
           window.location.replace(dest);
-        }, 300);
+        }, 250);
       } else {
         setErrorMsg(t('invalidCredentials', 'Invalid email or password.'));
         setLoading(false);
@@ -401,7 +432,7 @@ function LoginForm() {
     }
   };
 
-  // 9. GIS Authentication Trigger
+  // 9. GIS Authentication Trigger: Redirects directly to /dashboard
   const handleSocialClick = (provider: 'google' | 'facebook' | 'apple') => {
     const rawCb = searchParams.get('callbackUrl');
     const dest = sanitizeDestination(rawCb, 'user');
@@ -485,7 +516,11 @@ function LoginForm() {
   ].filter(Boolean).length;
 
   return (
-    <div className="w-full max-w-md mx-auto space-y-6">
+    <div 
+      role="region" 
+      aria-label="Sign In Container" 
+      className="w-full max-w-md mx-auto space-y-6"
+    >
       {/* Brand Header */}
       <div className="text-center space-y-2">
         <div 
@@ -563,8 +598,12 @@ function LoginForm() {
           </div>
         )}
 
-        {/* Credentials Container (No Native Form) */}
-        <div className="space-y-4 text-xs">
+        {/* Credentials Container with Autofill Guardrail (Constraint 9) */}
+        <div 
+          role="region" 
+          aria-label="Credentials Form" 
+          className="space-y-4 text-xs"
+        >
           <div>
             <label 
               className="block font-bold mb-1.5 transition-colors duration-200"
@@ -580,7 +619,12 @@ function LoginForm() {
               <input 
                 type="email"
                 required
-                autoComplete="email"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 placeholder={t('emailPlaceholder', 'you@example.com')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -624,7 +668,12 @@ function LoginForm() {
               <input 
                 type={showPassword ? 'text' : 'password'}
                 required
-                autoComplete="current-password"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 placeholder={t('passwordPlaceholder', '••••••••••••')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

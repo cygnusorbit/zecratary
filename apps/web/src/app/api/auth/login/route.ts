@@ -1,136 +1,153 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export const dynamic = 'force-dynamic';
-
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
-  try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (err) {
-    console.error('[PostgreSQL] Connection pool error in /api/auth/login:', err);
-    return null;
-  }
-}
-
-async function ensureUsersTable(pool: any) {
-  if (!pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id VARCHAR(100) PRIMARY KEY,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        name VARCHAR(255),
-        role VARCHAR(50) DEFAULT 'user',
-        password VARCHAR(255),
-        subscription_plan VARCHAR(100) DEFAULT 'taster',
-        token_balance INT DEFAULT 50,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-  } catch (_) {}
-}
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const email = (body.email || '').trim().toLowerCase();
-    const password = (body.password || '').trim();
+    const { email, password } = body || {};
 
-    if (!email) {
-      return NextResponse.json({ success: false, error: 'Email is required' }, { status: 400 });
+    if (!email || !password) {
+      return NextResponse.json({ success: false, error: 'Email and password are required' }, { status: 400 });
     }
 
-    const pool = await getPostgresPool();
-    let authenticatedUser: any = null;
+    const cleanEmail = String(email).toLowerCase().trim();
+    const cleanPassword = String(password).trim();
+    let matchedUser: any = null;
 
-    if (pool) {
-      await ensureUsersTable(pool);
-
-      const userRes = await pool.query(
-        'SELECT id, email, name, role, subscription_plan, token_balance FROM users WHERE LOWER(email) = $1 LIMIT 1',
-        [email]
-      );
-
-      if (userRes.rows.length > 0) {
-        const row = userRes.rows[0];
-        authenticatedUser = {
-          id: row.id,
-          email: row.email,
-          name: row.name || row.email.split('@')[0],
-          role: row.role || 'user',
-          subscriptionPlan: row.subscription_plan || 'taster',
-          tokenBalance: Number(row.token_balance ?? 50)
-        };
-
-        await pool.query('UPDATE users SET updated_at = NOW() WHERE id = $1', [row.id]);
-      } else {
-        // Auto-provision if initial administrator or first login
-        const isAdmin = email.includes('admin');
-        const newId = isAdmin ? 'usr_admin_1' : `usr_${Date.now()}`;
-        const newName = isAdmin ? 'System Admin' : email.split('@')[0];
-        const newRole = isAdmin ? 'admin' : 'user';
-        const newPlan = isAdmin ? 'nutrition-pro-monthly' : 'taster';
-        const newTokens = isAdmin ? 1000 : 50;
-
-        await pool.query(
-          `INSERT INTO users (id, email, name, role, subscription_plan, token_balance, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW())
-           ON CONFLICT (id) DO UPDATE SET updated_at = NOW();`,
-          [newId, email, newName, newRole, newPlan, newTokens]
+    // 1. Check PostgreSQL users database table
+    try {
+      const { query } = await import('@/lib/db');
+      if (typeof query === 'function') {
+        const rows = await query(
+          'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+          [cleanEmail]
         );
+        if (rows && rows.length > 0) {
+          const dbUser = rows[0];
+          if (!dbUser.password || dbUser.password === cleanPassword) {
+            matchedUser = {
+              id: String(dbUser.id),
+              name: dbUser.name || 'User',
+              email: dbUser.email,
+              role: dbUser.role || 'user',
+              avatar: dbUser.avatar || '',
+              provider: dbUser.provider || 'local',
+              token_balance: Number(dbUser.token_balance ?? 50000),
+              subscription_plan: dbUser.subscription_plan || 'free'
+            };
 
-        authenticatedUser = {
-          id: newId,
-          email,
-          name: newName,
-          role: newRole,
-          subscriptionPlan: newPlan,
-          tokenBalance: newTokens
+            // Update last_login_at in PostgreSQL
+            try {
+              await query('UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1', [dbUser.id]);
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (pgErr) {
+      console.warn('[auth:login] PostgreSQL check bypassed or unavailable:', pgErr);
+    }
+
+    // 2. MySQL fallback check (Constraint 8)
+    if (!matchedUser) {
+      try {
+        const mysqlModule = await import('@/lib/mysql');
+        if (mysqlModule && typeof mysqlModule.queryMysql === 'function') {
+          const myRows: any = await mysqlModule.queryMysql(
+            'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1',
+            [cleanEmail]
+          );
+          if (Array.isArray(myRows) && myRows.length > 0) {
+            const myUser = myRows[0];
+            if (!myUser.password || myUser.password === cleanPassword) {
+              matchedUser = {
+                id: String(myUser.id),
+                name: myUser.name || 'User',
+                email: myUser.email,
+                role: myUser.role || 'user',
+                avatar: myUser.avatar || '',
+                provider: myUser.provider || 'local',
+                token_balance: Number(myUser.token_balance ?? 50000),
+                subscription_plan: myUser.subscription_plan || 'free'
+              };
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Fallback to default user presets & local users.json
+    if (!matchedUser) {
+      if (cleanEmail === 'admin@zecratary.com' && (cleanPassword === 'admin' || cleanPassword === 'admin123')) {
+        matchedUser = {
+          id: 'usr_admin_1',
+          name: 'System Administrator',
+          email: 'admin@zecratary.com',
+          role: 'admin',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+          provider: 'local',
+          token_balance: 1000000,
+          subscription_plan: 'nutrition-pro'
         };
+      } else if (cleanEmail === 'user@zecratary.com' && (cleanPassword === 'password' || cleanPassword === 'user123')) {
+        matchedUser = {
+          id: 'usr_demo_1',
+          name: 'Chef Jordan',
+          email: 'user@zecratary.com',
+          role: 'user',
+          avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150',
+          provider: 'local',
+          token_balance: 50000,
+          subscription_plan: 'taster'
+        };
+      } else {
+        const jsonCandidates = ['data/users.json', 'apps/web/data/users.json'];
+        for (const jPath of jsonCandidates) {
+          if (fs.existsSync(jPath)) {
+            try {
+              const fileData = JSON.parse(fs.readFileSync(jPath, 'utf-8'));
+              if (Array.isArray(fileData)) {
+                const found = fileData.find((u: any) => u.email?.toLowerCase().trim() === cleanEmail);
+                if (found && (!found.password || found.password === cleanPassword)) {
+                  matchedUser = { ...found };
+                  delete matchedUser.password;
+                  break;
+                }
+              }
+            } catch (_) {}
+          }
+        }
       }
     }
 
-    if (!authenticatedUser) {
-      const isAdmin = email.includes('admin');
-      authenticatedUser = {
-        id: isAdmin ? 'usr_admin_1' : `usr_${Date.now()}`,
-        email,
-        name: isAdmin ? 'System Admin' : email.split('@')[0],
-        role: isAdmin ? 'admin' : 'user',
-        subscriptionPlan: isAdmin ? 'nutrition-pro-monthly' : 'taster',
-        tokenBalance: isAdmin ? 1000 : 50
-      };
+    if (!matchedUser) {
+      return NextResponse.json({ success: false, error: 'Invalid email or password' }, { status: 401 });
     }
 
+    // Prepare unified response with destination set to /dashboard
     const response = NextResponse.json({
       success: true,
-      message: 'Login successful',
-      user: authenticatedUser
+      user: matchedUser,
+      redirectUrl: '/dashboard'
     });
 
-    response.cookies.set('zecratary_session', JSON.stringify(authenticatedUser), {
-      path: '/',
-      httpOnly: false,
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60
+    const userRaw = JSON.stringify(matchedUser);
+    const userEncoded = encodeURIComponent(userRaw);
+    const cookieKeys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+
+    cookieKeys.forEach(k => {
+      response.cookies.set({
+        name: k,
+        value: userEncoded,
+        path: '/',
+        maxAge: 604800,
+        sameSite: 'lax'
+      });
     });
 
     return response;
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Internal Server Error' }, { status: 500 });
+  } catch (error: any) {
+    console.error('[api/auth/login] Error during authentication:', error);
+    return NextResponse.json({ success: false, error: 'Internal server authentication error' }, { status: 500 });
   }
 }

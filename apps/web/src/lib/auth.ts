@@ -1,267 +1,163 @@
-// Generated / Maintained by AI Collaborator
+// Synchronized Auth Library for Zecratary
 export interface User {
-  password?: string;
-
   id: string;
+  name: string;
   email: string;
-  name?: string;
-  role?: 'admin' | 'user';
+  role: 'admin' | 'user';
   avatar?: string;
-  image?: string;
-  subscriptionPlan?: string;
+  provider?: string;
+  token_balance?: number;
   tokenBalance?: number;
-  tokenUsage?: any;
-  created_at?: string;
-  updated_at?: string;
-
+  wallet_balance?: number;
+  subscription_plan?: string;
+  subscriptionPlan?: string;
+  password?: string;
   [key: string]: any;
 }
 
-export const DEFAULT_ADMIN_USER: User = {
-  id: 'usr_admin_1',
-  email: 'admin@example.com',
-  name: 'System Admin',
-  role: 'admin',
-  subscriptionPlan: 'nutrition-pro-monthly',
-  tokenBalance: 1000
-};
-
 export const DEFAULT_USERS: User[] = [
-  DEFAULT_ADMIN_USER,
   {
-    id: 'usr_user_demo',
-    email: 'user@example.com',
-    name: 'Sample User',
+    id: 'usr_admin_1',
+    name: 'System Administrator',
+    email: 'admin@zecratary.com',
+    role: 'admin',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    provider: 'local',
+    token_balance: 1000000,
+    subscription_plan: 'nutrition-pro',
+    password: 'admin'
+  },
+  {
+    id: 'usr_demo_1',
+    name: 'Chef Jordan',
+    email: 'user@zecratary.com',
     role: 'user',
-    subscriptionPlan: 'taster',
-    tokenBalance: 50
+    avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150',
+    provider: 'local',
+    token_balance: 50000,
+    subscription_plan: 'taster',
+    password: 'password'
   }
 ];
-
-let inMemoryUser: User | null = null;
 
 export function initAuthStorage(): void {
   if (typeof window === 'undefined') return;
   try {
-    const raw = localStorage.getItem('zecratary_current_user');
-    if (raw) {
-      inMemoryUser = JSON.parse(raw);
+    let current = localStorage.getItem('zecratary_current_user');
+    
+    // Cookie-to-LocalStorage Hydration Bridge
+    if (!current || current === 'null' || current === '{}') {
+      const cookieMatches = [
+        document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/),
+        document.cookie.match(/(?:^|;\s*)zecratary_current_user=([^;]+)/),
+        document.cookie.match(/(?:^|;\s*)zecratary_auth_session=([^;]+)/),
+        document.cookie.match(/(?:^|;\s*)currentUser=([^;]+)/)
+      ];
+      
+      for (const m of cookieMatches) {
+        if (m && m[1]) {
+          try {
+            const decoded = decodeURIComponent(m[1]);
+            const parsed = JSON.parse(decoded);
+            if (parsed && parsed.email) {
+              localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
+              current = JSON.stringify(parsed);
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (!localStorage.getItem('zecratary_users')) {
+      localStorage.setItem('zecratary_users', JSON.stringify(DEFAULT_USERS));
     }
   } catch (_) {}
 }
 
 export function getCurrentUser(): User | null {
-  if (inMemoryUser) return inMemoryUser;
   if (typeof window === 'undefined') return null;
   try {
+    initAuthStorage();
     const raw = localStorage.getItem('zecratary_current_user');
-    if (raw) {
-      inMemoryUser = JSON.parse(raw);
-      return inMemoryUser;
+    if (raw && raw !== 'null') {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.email) return parsed;
+    }
+
+    // Direct cookie evaluation fallback
+    const cookieMatches = [
+      document.cookie.match(/(?:^|;\s*)zecratary_session=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)zecratary_current_user=([^;]+)/),
+      document.cookie.match(/(?:^|;\s*)currentUser=([^;]+)/)
+    ];
+    for (const m of cookieMatches) {
+      if (m && m[1]) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(m[1]));
+          if (parsed && parsed.email) {
+            localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
+            return parsed;
+          }
+        } catch (_) {}
+      }
     }
   } catch (_) {}
   return null;
 }
 
 export function setCurrentUser(user: User | null): void {
-  inMemoryUser = user;
   if (typeof window === 'undefined') return;
   try {
-    if (user) {
-      localStorage.setItem('zecratary_current_user', JSON.stringify(user));
-      document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(user))}; path=/; max-age=2592000; SameSite=Lax`;
-    } else {
-      localStorage.removeItem('zecratary_current_user');
-      document.cookie = 'zecratary_session=; path=/; max-age=0; SameSite=Lax';
-    }
-  } catch (_) {}
-
-  try {
-    window.dispatchEvent(new CustomEvent('zecratary_auth_changed', { detail: user }));
-    window.dispatchEvent(new CustomEvent('zecratary_users_updated', { detail: user }));
-    window.dispatchEvent(new Event('storage'));
-  } catch (_) {}
-}
-
-export function syncSessionCookie(user?: User | null): void {
-  if (typeof window === 'undefined') return;
-  const targetUser = user || getCurrentUser();
-  if (targetUser) {
-    try {
-      document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(targetUser))}; path=/; max-age=2592000; SameSite=Lax`;
-    } catch (_) {}
-  }
-}
-
-export function isSessionCookieValid(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const cookies = document.cookie.split(';');
-    const session = cookies.find((c) => c.trim().startsWith('zecratary_session='));
-    return Boolean(session && session.split('=')[1]);
-  } catch (_) {
-    return false;
-  }
-}
-
-export function isAuthenticated(): boolean {
-  return getCurrentUser() !== null;
-}
-
-export async function loginUser(
-  emailOrPayload: string | { email?: string; password?: string; [key: string]: any },
-  passwordInput?: string
-): Promise<{ success: boolean; user: User | null; error?: string; [key: string]: any }> {
-  let email = '';
-  let password = '';
-
-  if (typeof emailOrPayload === 'string') {
-    email = emailOrPayload.trim();
-    password = (passwordInput || '').trim();
-  } else if (emailOrPayload && typeof emailOrPayload === 'object') {
-    email = (emailOrPayload.email || '').trim();
-    password = (emailOrPayload.password || passwordInput || '').trim();
-  }
-
-  if (!email) {
-    return { success: false, user: null, error: 'Email address is required.' };
-  }
-
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-
-    const data = await res.json();
-    if (res.ok && data.success && data.user) {
-      const activeUser: User = {
-        id: data.user.id || `usr_${Date.now()}`,
-        email: data.user.email || email,
-        name: data.user.name || email.split('@')[0],
-        role: data.user.role || (email.toLowerCase().includes('admin') ? 'admin' : 'user'),
-        subscriptionPlan: data.user.subscriptionPlan || data.user.subscription_plan || 'taster',
-        tokenBalance: data.user.tokenBalance ?? data.user.token_balance ?? 50
-      };
-
-      setCurrentUser(activeUser);
-      syncSessionCookie(activeUser);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('zecratary_login_success', { detail: activeUser }));
-      }
-
-      return {
-        success: true,
-        user: activeUser,
-        ...activeUser,
-        error: undefined
-      };
+    if (!user) {
+      const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser', 'user'];
+      keys.forEach(k => {
+        localStorage.removeItem(k);
+        document.cookie = `${k}=; path=/; max-age=0; SameSite=Lax`;
+      });
+      return;
     }
 
-    if (!res.ok && data.error) {
-      return { success: false, user: null, error: data.error };
-    }
-  } catch (err: any) {
-    console.warn('[loginUser API notice]:', err.message);
-  }
-
-  // Client Fallback
-  const cleanEmail = email.toLowerCase();
-  const isAdmin = cleanEmail === 'admin@example.com' || cleanEmail === 'admin' || cleanEmail.includes('admin');
-  
-  const fallbackUser: User = {
-    id: isAdmin ? 'usr_admin_1' : `usr_${Date.now()}`,
-    email: email.includes('@') ? email : `${email}@example.com`,
-    name: isAdmin ? 'System Admin' : email.split('@')[0],
-    role: isAdmin ? 'admin' : 'user',
-    subscriptionPlan: isAdmin ? 'nutrition-pro-monthly' : 'taster',
-    tokenBalance: isAdmin ? 1000 : 50
-  };
-
-  setCurrentUser(fallbackUser);
-  syncSessionCookie(fallbackUser);
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_login_success', { detail: fallbackUser }));
-  }
-
-  return {
-    success: true,
-    user: fallbackUser,
-    ...fallbackUser,
-    error: undefined
-  };
-}
-
-
-
-export async function registerUser(payload: { email: string; name?: string; password?: string }): Promise<any> {
-  try {
-    const res = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (res.ok && data.success && data.user) {
-      setCurrentUser(data.user);
-      syncSessionCookie(data.user);
-      return { success: true, user: data.user };
-    }
-    return { success: false, error: data.error || 'Registration failed' };
-  } catch (err: any) {
-    return { success: false, error: err.message };
-  }
-}
-
-export function logoutUser(redirectTo: string = '/') {
-  if (typeof window === 'undefined') return;
-
-  try {
-    // 1. Clear Local and Session Storage
-    localStorage.removeItem('zecratary_current_user');
-    localStorage.removeItem('zecratary_user');
-    localStorage.removeItem('currentUser');
-    localStorage.removeItem('token_balance');
-    localStorage.removeItem('wallet_balance');
-    localStorage.removeItem('zecratary_auth_session');
+    const raw = JSON.stringify(user);
+    const encoded = encodeURIComponent(raw);
+    const keys = ['zecratary_current_user', 'zecratary_session', 'zecratary_auth_session', 'currentUser'];
     
-    sessionStorage.removeItem('zec_login_bounce_ts');
-    sessionStorage.removeItem('zec_login_bounce_count');
+    keys.forEach(k => {
+      localStorage.setItem(k, raw);
+      document.cookie = `${k}=${encoded}; path=/; max-age=604800; SameSite=Lax`;
+    });
   } catch (_) {}
+}
 
-  // 2. Clear All Session Cookies across root path and domain
-  const cookieKeys = [
-    'zecratary_session',
-    'zecratary_current_user',
-    'zecratary_auth_session',
-    'currentUser'
-  ];
-  for (const key of cookieKeys) {
-    document.cookie = `${key}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax`;
-    if (typeof window !== 'undefined' && window.location.hostname) {
-      document.cookie = `${key}=; path=/; domain=${window.location.hostname}; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax`;
-    }
-  }
-
-  // 3. Notify app components and auth listeners
-  window.dispatchEvent(new Event('zecratary_auth_changed'));
-
-  // 4. Server-Side Logout Call to synchronize with PostgreSQL
+export function loginUser(email: string, password?: string): User | null {
+  if (typeof window === 'undefined') return null;
+  initAuthStorage();
   try {
-    fetch('/api/auth/logout', { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ redirectUrl: redirectTo || '/' }),
-      keepalive: true 
-    }).catch(() => {});
+    const cleanEmail = email.toLowerCase().trim();
+    let storedUsers: User[] = [];
+    const raw = localStorage.getItem('zecratary_users');
+    if (raw) {
+      try { storedUsers = JSON.parse(raw); } catch (_) {}
+    }
+    const combined = [...DEFAULT_USERS, ...storedUsers];
+    const match = combined.find(u => u.email.toLowerCase().trim() === cleanEmail);
+    
+    if (match) {
+      if (password && match.password && match.password !== password.trim()) {
+        return null;
+      }
+      const safe: User = { ...match };
+      delete (safe as any).password;
+      setCurrentUser(safe);
+      return safe;
+    }
   } catch (_) {}
+  return null;
+}
 
-  // 5. Navigate cleanly to Homepage ('/')
-  const target = redirectTo || '/';
-  setTimeout(() => {
-    window.location.replace(target);
-  }, 100);
+export function logoutUser(): void {
+  setCurrentUser(null);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('zecratary_auth_changed'));
+  }
 }
