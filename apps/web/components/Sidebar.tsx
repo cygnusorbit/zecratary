@@ -865,7 +865,7 @@ export default function Sidebar() {
                     <CreditCard className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('plans', 'Subscription Plans')}</span>}
                   </Link>
-                  <Link href="/admin/payment" className={navClass('/admin/payment')} style={navStyle('/admin/payment')} title={t('payments', 'Payments')}>
+                  <Link href="/admin/payment-gateway" className={navClass('/admin/payment-gateway')} style={navStyle('/admin/payment-gateway')} title={t('payments', 'Payments')}>
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
                   </Link>
@@ -974,7 +974,7 @@ export default function Sidebar() {
                 <Link href="/admin/users" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/users')} style={navStyle('/admin/users')}>
                   <UserPlus className="h-4 w-4" /> <span>{t('users', 'User Accounts')}</span>
                 </Link>
-                <Link href="/admin/payment" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/payment')} style={navStyle('/admin/payment')}>
+                <Link href="/admin/payment-gateway" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/payment-gateway')} style={navStyle('/admin/payment-gateway')}>
                   <ShieldCheck className="h-4 w-4" /> <span>{t('payments', 'Payment Gateway')}</span>
                 </Link>
               </div>

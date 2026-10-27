@@ -5523,7 +5523,7 @@
       "depositFunds": "เติมเงินเข้ากระเป๋า",
       "selectPresetAmount": "เลือกจำนวนเงินสำเร็จรูป",
       "orCustomAmount": "หรือระบุจำนวนเงินกำหนดเอง",
-      "paymentGateway": "ช่องทางชำระเงิน",
+      "paymentGateway": "เกตเวย์การชำระเงิน",
       "depositBonusBadge": "โบนัส {percent}% กำลังใช้งาน",
       "depositBonusDesc": "เติมเงินตั้งแต่ {min} ขึ้นไป รับเครดิตโบนัสเพิ่ม {bonus}!",
       "addFundsBtn": "เติมเงินเข้ากระเป๋าเงิน",
