@@ -48,6 +48,15 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "viewFullRecipe": "View Full Recipe",
+    "noIngredientsRecorded": "No specific ingredients recorded for this dish.",
+    "noInstructionsRecorded": "No instructions recorded for this dish.",
+    "sourceUrlLabel": "Original Recipe Source",
+    "cookWithAiChef": "Cook with AI Chef",
+    "storagePillLabel": "Storage Directory",
+    "servingsCountLabel": "Servings",
+    "zoomLabel": "Text Size",
+    "closeModalBtn": "Close",
     "durationDaysLabel": "Duration (Days)",
     "goToDashboardBtn": "Go to Dashboard",
     "authenticatingSession": "Authenticating session...",

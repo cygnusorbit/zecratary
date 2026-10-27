@@ -7,10 +7,20 @@ import Link from 'next/link';
 import { 
   Search, Plus, Trash2, Edit3, CalendarPlus, 
   Sparkles, Check, X, BookOpen, RefreshCw, 
-  CheckCircle2, AlertCircle, ChevronRight
+  CheckCircle2, AlertCircle, ChevronRight,
+  Clock, Flame, Users, ExternalLink, ChefHat,
+  Eye, HardDrive, Type, Minus
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage, setCurrentUser } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+
+interface StorageSettings {
+  provider?: string;
+  uploadDir?: string;
+  recipesJsonDir?: string;
+  publicPrefix?: string;
+  cdnUrl?: string;
+}
 
 interface TemplateMeal {
   id: string;
@@ -25,6 +35,8 @@ interface TemplateMeal {
   prepMinutes?: number;
   cookMinutes?: number;
   notes?: string;
+  ingredients?: any[];
+  instructions?: any[];
 }
 
 interface MealTemplate {
@@ -51,9 +63,74 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
     category: 'High-Protein',
     totalDays: 7,
     meals: [
-      { id: 'm_1_0', dayIndex: 0, mealType: 'Dinner', recipeName: 'Garlic Butter Chicken Breast', prepMinutes: 15, cookMinutes: 20, servings: 2 },
-      { id: 'm_1_1', dayIndex: 1, mealType: 'Dinner', recipeName: 'Grilled Salmon with Asparagus', prepMinutes: 10, cookMinutes: 15, servings: 2 },
-      { id: 'm_1_2', dayIndex: 2, mealType: 'Dinner', recipeName: 'Lean Beef & Broccoli Stir-Fry', prepMinutes: 15, cookMinutes: 15, servings: 2 }
+      { 
+        id: 'm_1_0', 
+        dayIndex: 0, 
+        mealType: 'Dinner', 
+        recipeName: 'Garlic Butter Chicken Breast', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 15, 
+        cookMinutes: 20, 
+        servings: 2,
+        ingredients: [
+          { name: 'Chicken Breast', amount: 2, unit: 'pieces' },
+          { name: 'Garlic Cloves (minced)', amount: 4, unit: 'cloves' },
+          { name: 'Butter', amount: 2, unit: 'tbsp' },
+          { name: 'Olive Oil', amount: 1, unit: 'tbsp' },
+          { name: 'Fresh Parsley', amount: 1, unit: 'handful' }
+        ],
+        instructions: [
+          'Season chicken breasts generously with salt, pepper, and garlic powder.',
+          'Heat olive oil and 1 tbsp butter in a large skillet over medium-high heat.',
+          'Sear chicken for 6-8 minutes per side until golden brown and cooked through.',
+          'Add remaining butter and minced garlic; baste chicken continuously for 1-2 minutes.',
+          'Garnish with chopped parsley and serve warm.'
+        ]
+      },
+      { 
+        id: 'm_1_1', 
+        dayIndex: 1, 
+        mealType: 'Dinner', 
+        recipeName: 'Grilled Salmon with Asparagus', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 10, 
+        cookMinutes: 15, 
+        servings: 2,
+        ingredients: [
+          { name: 'Salmon Fillets', amount: 2, unit: 'fillets' },
+          { name: 'Fresh Asparagus', amount: 1, unit: 'bunch' },
+          { name: 'Lemon Juice', amount: 2, unit: 'tbsp' },
+          { name: 'Olive Oil', amount: 1, unit: 'tbsp' }
+        ],
+        instructions: [
+          'Preheat grill or grill pan to medium-high heat.',
+          'Toss asparagus with olive oil, salt, and pepper.',
+          'Season salmon with lemon juice, salt, and black pepper.',
+          'Grill salmon and asparagus for 4-5 minutes per side until salmon flakes easily.'
+        ]
+      },
+      { 
+        id: 'm_1_2', 
+        dayIndex: 2, 
+        mealType: 'Dinner', 
+        recipeName: 'Lean Beef & Broccoli Stir-Fry', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 15, 
+        cookMinutes: 15, 
+        servings: 2,
+        ingredients: [
+          { name: 'Flank Steak (sliced thin)', amount: 300, unit: 'g' },
+          { name: 'Broccoli Florets', amount: 2, unit: 'cups' },
+          { name: 'Soy Sauce', amount: 3, unit: 'tbsp' },
+          { name: 'Sesame Oil', amount: 1, unit: 'tsp' }
+        ],
+        instructions: [
+          'Whisk soy sauce, sesame oil, and garlic in a small bowl.',
+          'Stir-fry flank steak in a hot wok for 3-4 minutes until browned.',
+          'Add broccoli florets and 2 tablespoons of water; steam for 3 minutes.',
+          'Pour sauce over mixture and toss until glossy.'
+        ]
+      }
     ]
   },
   {
@@ -64,8 +141,49 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
     category: 'Quick & Easy',
     totalDays: 5,
     meals: [
-      { id: 'm_2_0', dayIndex: 0, mealType: 'Dinner', recipeName: 'Creamy Pesto Penne Pasta', prepMinutes: 5, cookMinutes: 15, servings: 4 },
-      { id: 'm_2_1', dayIndex: 1, mealType: 'Dinner', recipeName: 'Quick Thai Basil Tofu Stir-Fry', prepMinutes: 10, cookMinutes: 10, servings: 2 }
+      { 
+        id: 'm_2_0', 
+        dayIndex: 0, 
+        mealType: 'Dinner', 
+        recipeName: 'Creamy Pesto Penne Pasta', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 5, 
+        cookMinutes: 15, 
+        servings: 4,
+        ingredients: [
+          { name: 'Penne Pasta', amount: 400, unit: 'g' },
+          { name: 'Basil Pesto', amount: 1, unit: 'jar' },
+          { name: 'Heavy Cream', amount: 0.5, unit: 'cup' },
+          { name: 'Parmesan Cheese', amount: 0.5, unit: 'cup' }
+        ],
+        instructions: [
+          'Boil penne pasta in salted water until al dente.',
+          'Drain pasta, reserving 1/4 cup of starchy pasta water.',
+          'Stir in basil pesto, heavy cream, and parmesan until velvety.',
+          'Season with freshly cracked pepper.'
+        ]
+      },
+      { 
+        id: 'm_2_1', 
+        dayIndex: 1, 
+        mealType: 'Dinner', 
+        recipeName: 'Quick Thai Basil Tofu Stir-Fry', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 10, 
+        cookMinutes: 10, 
+        servings: 2,
+        ingredients: [
+          { name: 'Firm Tofu (cubed)', amount: 300, unit: 'g' },
+          { name: 'Thai Holy Basil', amount: 1, unit: 'cup' },
+          { name: 'Garlic & Chili Paste', amount: 1, unit: 'tbsp' },
+          { name: 'Soy Sauce', amount: 2, unit: 'tbsp' }
+        ],
+        instructions: [
+          'Pan-fry tofu cubes until golden crisp on all sides.',
+          'Add chili garlic paste and toss quickly.',
+          'Turn off heat, fold in fresh Thai basil leaves, and wilt naturally.'
+        ]
+      }
     ]
   }
 ];
@@ -75,6 +193,14 @@ export default function TemplatesPage() {
   const { t } = useTranslation();
   const [currentUser, setCurrentUserState] = useState<User | null>(null);
   const [authHydrated, setAuthHydrated] = useState<boolean>(false);
+
+  // Storage configuration loaded dynamically from /admin/storage
+  const [storageSettings, setStorageSettings] = useState<StorageSettings>({
+    provider: 'localhost',
+    uploadDir: 'apps/web/public/recipes/images',
+    recipesJsonDir: 'apps/web/public/recipes',
+    publicPrefix: '/recipes/images'
+  });
 
   const [templates, setTemplates] = useState<MealTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -110,6 +236,15 @@ export default function TemplatesPage() {
   const [showApplyModal, setShowApplyModal] = useState<boolean>(false);
   const [applyStartDate, setApplyStartDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
 
+  // Modal 5: Full Recipe Card Modal (READ-ONLY, WITHOUT EDITING BUTTON)
+  const [showRecipeDetailModal, setShowRecipeDetailModal] = useState<boolean>(false);
+  const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<any | null>(null);
+  const [modalServings, setModalServings] = useState<number>(4);
+  const [modalBaseServings, setModalBaseServings] = useState<number>(4);
+  const [fontSizeScale, setFontSizeScale] = useState<number>(100);
+  const [checkedIngredients, setCheckedIngredients] = useState<Record<string, boolean>>({});
+  const [checkedSteps, setCheckedSteps] = useState<Record<number, boolean>>({});
+
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 3500);
@@ -123,11 +258,38 @@ export default function TemplatesPage() {
         setShowMealModal(false);
         setShowRecipePicker(false);
         setShowApplyModal(false);
+        setShowRecipeDetailModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Fetch active storage configuration from /api/admin/storage
+  const loadStorageSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/storage', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.storage_settings) {
+          setStorageSettings(data.storage_settings);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // Resolve recipe image URL based on setting from /admin/storage
+  const resolveRecipeImageUrl = useCallback((img?: string) => {
+    const publicPrefix = storageSettings.publicPrefix || '/recipes/images';
+    if (!img || img === 'default.jpg' || img === '/uploads/recipes/default.jpg' || img === '/recipes/images/default.jpg') {
+      return `${publicPrefix}/default.jpg`;
+    }
+    if (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('data:')) {
+      return img;
+    }
+    const cleanPath = img.replace(/^\/?(recipes\/images\/|uploads\/recipes\/)?/, '');
+    return `${publicPrefix}/${cleanPath}`;
+  }, [storageSettings]);
 
   // Fetch live templates from /api/templates
   const loadTemplatesData = useCallback(async (user: User | null) => {
@@ -177,10 +339,11 @@ export default function TemplatesPage() {
     }
   }, [selectedTemplateId]);
 
-  // Robust session resolution
+  // Robust session resolution & storage hydration
   useEffect(() => {
     document.title = `${t('mealBlueprintsTitle', 'Meal Blueprints')} - Zecratary`;
     initAuthStorage();
+    loadStorageSettings();
 
     let resolvedUser = getCurrentUser();
 
@@ -212,6 +375,7 @@ export default function TemplatesPage() {
       if (active) {
         setCurrentUserState(active);
         loadTemplatesData(active);
+        loadStorageSettings();
       }
     };
 
@@ -220,6 +384,7 @@ export default function TemplatesPage() {
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_storage_updated', loadStorageSettings);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -227,8 +392,9 @@ export default function TemplatesPage() {
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_storage_updated', loadStorageSettings);
     };
-  }, [loadTemplatesData, router, t]);
+  }, [loadStorageSettings, loadTemplatesData, router, t]);
 
   const activeTemplate = useMemo(() => {
     return templates.find(tpl => tpl.id === selectedTemplateId) || templates[0] || null;
@@ -253,6 +419,58 @@ export default function TemplatesPage() {
     } catch (_) {}
 
     window.dispatchEvent(new Event('storage'));
+  };
+
+  // Open Full Recipe Modal without editing controls (Task 2)
+  const handleOpenRecipeModal = (meal: TemplateMeal) => {
+    // 1. Search for matching recipe in savedRecipes
+    const matched = savedRecipes.find(r => 
+      (meal.recipeId && r.id === meal.recipeId) ||
+      (r.title && r.title.toLowerCase() === meal.recipeName.toLowerCase()) ||
+      (r.name && r.name.toLowerCase() === meal.recipeName.toLowerCase())
+    );
+
+    const baseServings = Number(matched?.servings || meal.servings || 4);
+
+    const fullRecipePayload = {
+      id: matched?.id || meal.recipeId || meal.id,
+      title: matched?.title || matched?.name || meal.recipeName,
+      image: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image,
+      imageUrl: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image,
+      category: matched?.category || matched?.recipeType || meal.mealType || 'Main Dish',
+      prepTimeMinutes: matched?.prepTimeMinutes || meal.prepMinutes || 15,
+      cookTimeMinutes: matched?.cookTimeMinutes || meal.cookMinutes || 25,
+      calories: matched?.calories || matched?.nutrition?.calories || 480,
+      servings: baseServings,
+      sourceUrl: matched?.sourceUrl || matched?.source_url || '',
+      ingredients: (matched?.ingredients && matched.ingredients.length > 0)
+        ? matched.ingredients
+        : (meal.ingredients && meal.ingredients.length > 0)
+          ? meal.ingredients
+          : [
+              { name: meal.recipeName, amount: baseServings, unit: 'servings' },
+              { name: 'Olive Oil or Cooking Spray', amount: 1, unit: 'tbsp' },
+              { name: 'Salt & Black Pepper', amount: 1, unit: 'pinch' }
+            ],
+      instructions: (matched?.instructions && matched.instructions.length > 0)
+        ? matched.instructions
+        : (meal.instructions && meal.instructions.length > 0)
+          ? meal.instructions
+          : [
+              `Prepare all fresh ingredients for ${meal.recipeName}.`,
+              `Cook according to preference for approximately ${(meal.prepMinutes || 15) + (meal.cookMinutes || 25)} minutes.`,
+              `Season to taste and serve warm.`
+            ],
+      notes: meal.notes || matched?.notes || ''
+    };
+
+    setSelectedRecipeForModal(fullRecipePayload);
+    setModalServings(baseServings);
+    setModalBaseServings(baseServings);
+    setFontSizeScale(100);
+    setCheckedIngredients({});
+    setCheckedSteps({});
+    setShowRecipeDetailModal(true);
   };
 
   const handleSaveTemplateModal = async () => {
@@ -342,14 +560,15 @@ export default function TemplatesPage() {
       mealType: targetMealType,
       recipeId: selectedRecipeForMeal?.id || null,
       recipeName: targetDishTitle.trim(),
-      title: targetDishTitle.trim(),
-      image: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/uploads/recipes/default.jpg',
-      imageUrl: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/uploads/recipes/default.jpg',
+      image: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/recipes/images/default.jpg',
+      imageUrl: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/recipes/images/default.jpg',
       time: targetTime || '19:00',
       servings: Number(targetServings || 4),
       prepMinutes: Number(selectedRecipeForMeal?.prepTimeMinutes || 15),
       cookMinutes: Number(selectedRecipeForMeal?.cookTimeMinutes || 25),
-      notes: targetNotes.trim()
+      notes: targetNotes.trim(),
+      ingredients: selectedRecipeForMeal?.ingredients || [],
+      instructions: selectedRecipeForMeal?.instructions || []
     };
 
     const updatedMeals = [...(activeTemplate.meals || []), newMeal];
@@ -385,10 +604,10 @@ export default function TemplatesPage() {
         createdBy: currentUser?.email || 'admin@zecratary.com',
         date: dateStr,
         recipeId: meal.recipeId || null,
-        recipeName: meal.recipeName || meal.title || 'Scheduled Dish',
-        title: meal.recipeName || meal.title || 'Scheduled Dish',
-        image: meal.image || meal.imageUrl || '/uploads/recipes/default.jpg',
-        imageUrl: meal.image || meal.imageUrl || '/uploads/recipes/default.jpg',
+        recipeName: meal.recipeName,
+        title: meal.recipeName,
+        image: meal.image || meal.imageUrl || '/recipes/images/default.jpg',
+        imageUrl: meal.image || meal.imageUrl || '/recipes/images/default.jpg',
         mealType: meal.mealType || 'Dinner',
         time: meal.time || '19:00',
         servings: Number(meal.servings || 4),
@@ -478,10 +697,20 @@ export default function TemplatesPage() {
       {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div>
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {t('mealBlueprintsTitle', 'Meal Blueprints')}
-          </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+              {t('mealBlueprintsTitle', 'Meal Blueprints')}
+            </h1>
+            <span 
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] font-mono opacity-80"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              title={`${t('storagePillLabel', 'Storage Directory')}: ${storageSettings.publicPrefix || '/recipes/images'}`}
+            >
+              <HardDrive className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+              <span>{storageSettings.publicPrefix || '/recipes/images'}</span>
+            </span>
+          </div>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             {t('mealBlueprintsSubtitle', 'Create, customize, and apply multi-day meal planning blueprints to your calendar.')}
           </p>
         </div>
@@ -502,7 +731,10 @@ export default function TemplatesPage() {
 
           <button
             type="button"
-            onClick={() => loadTemplatesData(currentUser)}
+            onClick={() => {
+              loadTemplatesData(currentUser);
+              loadStorageSettings();
+            }}
             disabled={loading}
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
             style={{
@@ -710,42 +942,70 @@ export default function TemplatesPage() {
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                          {dayMeals.map(meal => (
-                            <div 
-                              key={meal.id}
-                              className="p-3 rounded-xl border space-y-1.5 flex items-start justify-between gap-2 shadow-xs group"
-                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                            >
-                              <div className="space-y-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded border text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
-                                    {t(`slot${meal.mealType}`, meal.mealType)}
-                                  </span>
-                                  {meal.time && (
-                                    <span className="text-[10px] font-mono opacity-60">
-                                      {meal.time}
-                                    </span>
-                                  )}
+                          {dayMeals.map(meal => {
+                            const resolvedThumb = resolveRecipeImageUrl(meal.imageUrl || meal.image);
+                            return (
+                              <div 
+                                key={meal.id}
+                                onClick={() => handleOpenRecipeModal(meal)}
+                                className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs group cursor-pointer hover:border-[var(--color-primary)] transition-all duration-200"
+                                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                              >
+                                <div className="flex items-center gap-3 min-w-0 flex-1">
+                                  {/* Recipe Thumbnail (Task 1 & 3) */}
+                                  <div 
+                                    className="w-16 h-16 sm:w-18 sm:h-18 rounded-xl overflow-hidden shrink-0 border relative bg-slate-900/40"
+                                    style={{ borderColor: 'var(--color-border)' }}
+                                  >
+                                    <img 
+                                      src={resolvedThumb} 
+                                      alt={meal.recipeName}
+                                      referrerPolicy="no-referrer"
+                                      onError={(e) => {
+                                        const target = e.target as HTMLImageElement;
+                                        target.src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                                      }}
+                                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                    />
+                                    <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors" />
+                                  </div>
+
+                                  {/* Recipe Details */}
+                                  <div className="space-y-1 min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded border text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
+                                        {t(`slot${meal.mealType}`, meal.mealType)}
+                                      </span>
+                                      {meal.time && (
+                                        <span className="text-[10px] font-mono opacity-60">
+                                          {meal.time}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <h5 className="font-bold text-xs truncate group-hover:text-[var(--color-primary)] transition-colors" style={{ color: 'var(--color-text)' }}>
+                                      {meal.recipeName}
+                                    </h5>
+                                    <div className="flex items-center gap-3 text-[10px] opacity-75 font-mono">
+                                      <span>{meal.servings || 4} serv</span>
+                                      <span>{(meal.prepMinutes || 15) + (meal.cookMinutes || 25)}m</span>
+                                    </div>
+                                  </div>
                                 </div>
-                                <h5 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
-                                  {meal.recipeName}
-                                </h5>
-                                <div className="flex items-center gap-3 text-[10px] opacity-75 font-mono">
-                                  <span>{meal.servings || 4} serv</span>
-                                  <span>{(meal.prepMinutes || 15) + (meal.cookMinutes || 25)}m</span>
+
+                                {/* Remove Meal Button */}
+                                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveMealFromBlueprint(meal.id)}
+                                    className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition cursor-pointer"
+                                    title={t('removeMealTitle', 'Remove meal')}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
                                 </div>
                               </div>
-
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveMealFromBlueprint(meal.id)}
-                                className="p-1 rounded text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                                title={t('removeMealTitle', 'Remove meal')}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -760,6 +1020,285 @@ export default function TemplatesPage() {
           )}
         </div>
       </div>
+
+      {/* MODAL 5: FULL RECIPE CARD MODAL (READ-ONLY, WITHOUT EDITING BUTTON) - Task 2 */}
+      {showRecipeDetailModal && selectedRecipeForModal && (
+        <div 
+          onClick={() => setShowRecipeDetailModal(false)}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 cursor-pointer animate-in fade-in duration-200"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipe-detail-title"
+            data-lpignore="true"
+            className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl overflow-hidden border shadow-2xl relative text-xs cursor-default transition-colors duration-200"
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
+          >
+            {/* Full Hero Image Banner */}
+            <div className="relative h-56 sm:h-64 w-full shrink-0 overflow-hidden bg-slate-900">
+              <img 
+                src={resolveRecipeImageUrl(selectedRecipeForModal.imageUrl || selectedRecipeForModal.image)} 
+                alt={selectedRecipeForModal.title}
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                }}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent" />
+
+              {/* Close Button Top Right */}
+              <button 
+                type="button" 
+                onClick={() => setShowRecipeDetailModal(false)}
+                className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/80 transition cursor-pointer z-10 border border-white/20"
+                title={t('closeModalBtn', 'Close')}
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              {/* Header Metadata Over Hero */}
+              <div className="absolute bottom-4 left-6 right-6 space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-white tracking-wider border border-white/30" style={{ backgroundColor: 'var(--color-primary)' }}>
+                    {selectedRecipeForModal.category || 'Main Dish'}
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono text-white/90 bg-white/10 backdrop-blur-xs flex items-center gap-1 border border-white/15">
+                    <Clock className="h-3 w-3" />
+                    <span>{t('prepTimeLabel', 'Prep')}: {selectedRecipeForModal.prepTimeMinutes || 15}m</span>
+                    <span className="opacity-40">•</span>
+                    <span>{t('cookTimeLabel', 'Cook')}: {selectedRecipeForModal.cookTimeMinutes || 25}m</span>
+                  </span>
+                  {selectedRecipeForModal.calories && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono text-white/90 bg-white/10 backdrop-blur-xs flex items-center gap-1 border border-white/15">
+                      <Flame className="h-3 w-3 text-orange-400" />
+                      <span>{selectedRecipeForModal.calories} kcal</span>
+                    </span>
+                  )}
+                </div>
+
+                <h2 id="recipe-detail-title" className="text-xl sm:text-2xl font-black text-white tracking-tight leading-tight">
+                  {selectedRecipeForModal.title}
+                </h2>
+              </div>
+            </div>
+
+            {/* Interactive Tools Row: Servings Stepper & Zoom Controls */}
+            <div 
+              className="p-3.5 border-b flex items-center justify-between gap-4 shrink-0 flex-wrap"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              {/* Servings Stepper */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold opacity-75 flex items-center gap-1">
+                  <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                  {t('servingsCountLabel', 'Servings')}:
+                </span>
+                <div className="flex items-center border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setModalServings(prev => Math.max(1, prev - 1))}
+                    className="p-1.5 hover:opacity-80 transition cursor-pointer"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </button>
+                  <span className="px-3 font-bold font-mono text-xs text-[var(--color-primary)]">
+                    {modalServings}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setModalServings(prev => prev + 1)}
+                    className="p-1.5 hover:opacity-80 transition cursor-pointer"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Text Zoom Stepper */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold opacity-75 flex items-center gap-1">
+                  <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                  {t('zoomLabel', 'Text Size')}:
+                </span>
+                <div className="flex items-center border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setFontSizeScale(prev => Math.max(80, prev - 10))}
+                    className="p-1.5 hover:opacity-80 transition cursor-pointer"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </button>
+                  <span className="px-2 font-mono text-xs opacity-80">{fontSizeScale}%</span>
+                  <button
+                    type="button"
+                    onClick={() => setFontSizeScale(prev => Math.min(140, prev + 10))}
+                    className="p-1.5 hover:opacity-80 transition cursor-pointer"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Scrollable Content: Ingredients & Instructions */}
+            <div 
+              className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar"
+              style={{ fontSize: `${(fontSizeScale / 100) * 0.75}rem` }}
+            >
+              {/* Ingredients Section */}
+              <div className="space-y-3">
+                <h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                  <span>{t('ingredientsTitle', 'Ingredients')}</span>
+                  <span className="text-[10px] font-normal opacity-60">({selectedRecipeForModal.ingredients?.length || 0})</span>
+                </h3>
+
+                {(!selectedRecipeForModal.ingredients || selectedRecipeForModal.ingredients.length === 0) ? (
+                  <p className="opacity-60 italic">{t('noIngredientsRecorded', 'No specific ingredients recorded for this dish.')}</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {selectedRecipeForModal.ingredients.map((ing, idx) => {
+                      const isChecked = !!checkedIngredients[`ing_${idx}`];
+                      const rawAmt = typeof ing.amount === 'number' ? ing.amount : parseFloat(ing.amount);
+                      const scaledAmt = !isNaN(rawAmt) 
+                        ? (rawAmt * (modalServings / modalBaseServings)).toFixed(1).replace(/\.0$/, '')
+                        : ing.amount;
+
+                      return (
+                        <div 
+                          key={idx}
+                          onClick={() => setCheckedIngredients(prev => ({ ...prev, [`ing_${idx}`]: !prev[`ing_${idx}`] }))}
+                          className="p-2.5 rounded-xl border flex items-center gap-3 cursor-pointer transition hover:border-[var(--color-primary)]"
+                          style={{ 
+                            backgroundColor: isChecked ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            opacity: isChecked ? 0.6 : 1
+                          }}
+                        >
+                          <div 
+                            className="w-4 h-4 rounded border flex items-center justify-center shrink-0 transition"
+                            style={{ 
+                              borderColor: isChecked ? 'var(--color-emerald)' : 'var(--color-border)',
+                              backgroundColor: isChecked ? 'var(--color-emerald)' : 'transparent'
+                            }}
+                          >
+                            {isChecked && <Check className="h-3 w-3 text-white" />}
+                          </div>
+                          <div className={`min-w-0 flex-1 ${isChecked ? 'line-through opacity-70' : ''}`}>
+                            <span className="font-bold text-[var(--color-primary)] mr-1.5">{scaledAmt} {ing.unit}</span>
+                            <span className="font-medium">{ing.name || ing}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Instructions Section */}
+              <div className="space-y-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                  <span>{t('instructionsTitle', 'Step-by-Step Instructions')}</span>
+                </h3>
+
+                {(!selectedRecipeForModal.instructions || selectedRecipeForModal.instructions.length === 0) ? (
+                  <p className="opacity-60 italic">{t('noInstructionsRecorded', 'No instructions recorded for this dish.')}</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {selectedRecipeForModal.instructions.map((step, idx) => {
+                      const isChecked = !!checkedSteps[idx];
+                      const stepText = typeof step === 'string' ? step : step.text || step.instruction;
+
+                      return (
+                        <div 
+                          key={idx}
+                          onClick={() => setCheckedSteps(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                          className="p-3.5 rounded-2xl border flex items-start gap-3.5 cursor-pointer transition hover:border-[var(--color-primary)]"
+                          style={{ 
+                            backgroundColor: isChecked ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            opacity: isChecked ? 0.6 : 1
+                          }}
+                        >
+                          <span 
+                            className="w-5 h-5 rounded-full border flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5"
+                            style={{ 
+                              borderColor: isChecked ? 'var(--color-emerald)' : 'var(--color-primary)',
+                              backgroundColor: isChecked ? 'var(--color-emerald)' : 'transparent',
+                              color: isChecked ? '#fff' : 'var(--color-primary)'
+                            }}
+                          >
+                            {isChecked ? <Check className="h-3 w-3" /> : idx + 1}
+                          </span>
+                          <p className={`text-xs leading-relaxed flex-1 ${isChecked ? 'line-through opacity-70' : ''}`}>
+                            {stepText}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Personal Notes (if present) */}
+              {selectedRecipeForModal.notes && (
+                <div className="p-3 rounded-2xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <span className="font-bold text-[10px] uppercase text-amber-400">Blueprint Notes</span>
+                  <p className="text-xs opacity-80">{selectedRecipeForModal.notes}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Read-Only Modal Footer (Strictly WITHOUT Editing Button) */}
+            <div 
+              className="p-4 border-t flex items-center justify-between gap-4 shrink-0"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div>
+                {selectedRecipeForModal.sourceUrl ? (
+                  <a
+                    href={selectedRecipeForModal.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1.5"
+                  >
+                    <span>{t('sourceUrlLabel', 'Original Recipe Source')}</span>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                ) : (
+                  <span className="text-[11px] opacity-40">Zecratary Blueprint Catalog</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/chef?recipe=${encodeURIComponent(selectedRecipeForModal.title)}`}
+                  className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow transition hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  <ChefHat className="h-4 w-4" />
+                  <span>{t('cookWithAiChef', 'Cook with AI Chef')}</span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => setShowRecipeDetailModal(false)}
+                  className="px-4 py-2 border rounded-xl font-bold text-xs hover:opacity-80 transition cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  {t('closeModalBtn', 'Close')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: CREATE / EDIT BLUEPRINT */}
       {showTemplateModal && (
@@ -1063,34 +1602,41 @@ export default function TemplatesPage() {
                   {t('noRecipesFound', 'No recipes found.')}
                 </div>
               ) : (
-                filteredPickerRecipes.map(recipe => (
-                  <div
-                    key={recipe.id}
-                    onClick={() => {
-                      setSelectedRecipeForMeal(recipe);
-                      setTargetDishTitle(recipe.title || recipe.name);
-                      setTargetServings(Number(recipe.servings || 4));
-                      setTargetCookingTime((recipe.prepTimeMinutes || 15) + (recipe.cookTimeMinutes || 25));
-                      setShowRecipePicker(false);
-                    }}
-                    className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <img 
-                        src={recipe.imageUrl || recipe.image || '/uploads/recipes/default.jpg'} 
-                        alt={recipe.title} 
-                        className="w-10 h-10 rounded-lg object-cover border shrink-0" 
-                        style={{ borderColor: 'var(--color-border)' }} 
-                      />
-                      <div className="min-w-0">
-                        <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
-                        <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
+                filteredPickerRecipes.map(recipe => {
+                  const pickerThumb = resolveRecipeImageUrl(recipe.imageUrl || recipe.image);
+                  return (
+                    <div
+                      key={recipe.id}
+                      onClick={() => {
+                        setSelectedRecipeForMeal(recipe);
+                        setTargetDishTitle(recipe.title || recipe.name);
+                        setTargetServings(Number(recipe.servings || 4));
+                        setTargetCookingTime((recipe.prepTimeMinutes || 15) + (recipe.cookTimeMinutes || 25));
+                        setShowRecipePicker(false);
+                      }}
+                      className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img 
+                          src={pickerThumb} 
+                          alt={recipe.title} 
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                          }}
+                          className="w-10 h-10 rounded-lg object-cover border shrink-0" 
+                          style={{ borderColor: 'var(--color-border)' }} 
+                        />
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
+                          <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
+                        </div>
                       </div>
+                      <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
                     </div>
-                    <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
