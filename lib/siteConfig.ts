@@ -1,4 +1,4 @@
-// Site identity and configuration management (Constraint 8)
+// Site identity, configuration, SEO, and branding management (Constraint 8)
 // Repository: cygnusorbit/zecratary (GitHub)
 
 export interface SiteIdentityConfig {
@@ -15,8 +15,18 @@ export interface SiteIdentityConfig {
   favicon_emoji?: string;
   faviconImage?: string;
   favicon_image?: string;
+  fontFamily?: string;
+  font_family?: string;
+  metaDescription?: string;
+  meta_description?: string;
+  metaKeywords?: string;
+  meta_keywords?: string;
+  metaAuthor?: string;
+  meta_author?: string;
   [key: string]: any;
 }
+
+export interface SiteBrandingConfig extends SiteIdentityConfig {}
 
 export interface SiteConfig {
   siteName: string;
@@ -34,6 +44,14 @@ export interface SiteConfig {
   favicon_emoji?: string;
   faviconImage?: string;
   favicon_image?: string;
+  fontFamily?: string;
+  font_family?: string;
+  metaDescription?: string;
+  meta_description?: string;
+  metaKeywords?: string;
+  meta_keywords?: string;
+  metaAuthor?: string;
+  meta_author?: string;
   currency?: string;
   themeMode?: string;
   theme_mode?: string;
@@ -42,17 +60,38 @@ export interface SiteConfig {
 
 export const DEFAULT_SITE_NAME = 'Zecratary';
 export const DEFAULT_SITE_ICON = '🍳';
+export const DEFAULT_SITE_TAGLINE = 'Autonomous Culinary Intelligence & Precision Meal Planning';
+export const DEFAULT_TITLEBAR_EMOJI = '👨‍🍳';
+export const DEFAULT_FAVICON_EMOJI = '👨‍🍳';
+export const DEFAULT_FONT_FAMILY = 'Inter, sans-serif';
+export const DEFAULT_META_DESCRIPTION = 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.';
+export const DEFAULT_META_KEYWORDS = 'culinary ai, recipe generator, meal planner, pantry management';
+export const DEFAULT_META_AUTHOR = 'Zecratary Culinary Intelligence Inc.';
 
 export const DEFAULT_SITE_CONFIG: SiteConfig = {
   siteName: DEFAULT_SITE_NAME,
   siteIcon: DEFAULT_SITE_ICON,
   site_name: DEFAULT_SITE_NAME,
   site_icon: DEFAULT_SITE_ICON,
-  siteTagline: 'Autonomous AI Culinary Assistant',
-  titlebarEmoji: DEFAULT_SITE_ICON,
-  titlebar_emoji: DEFAULT_SITE_ICON,
-  faviconEmoji: DEFAULT_SITE_ICON,
-  favicon_emoji: DEFAULT_SITE_ICON,
+  siteTagline: DEFAULT_SITE_TAGLINE,
+  site_tagline: DEFAULT_SITE_TAGLINE,
+  tagline: DEFAULT_SITE_TAGLINE,
+  titlebarEmoji: DEFAULT_TITLEBAR_EMOJI,
+  titlebar_emoji: DEFAULT_TITLEBAR_EMOJI,
+  titlebarImage: '',
+  titlebar_image: '',
+  faviconEmoji: DEFAULT_FAVICON_EMOJI,
+  favicon_emoji: DEFAULT_FAVICON_EMOJI,
+  faviconImage: '',
+  favicon_image: '',
+  fontFamily: DEFAULT_FONT_FAMILY,
+  font_family: DEFAULT_FONT_FAMILY,
+  metaDescription: DEFAULT_META_DESCRIPTION,
+  meta_description: DEFAULT_META_DESCRIPTION,
+  metaKeywords: DEFAULT_META_KEYWORDS,
+  meta_keywords: DEFAULT_META_KEYWORDS,
+  metaAuthor: DEFAULT_META_AUTHOR,
+  meta_author: DEFAULT_META_AUTHOR,
   currency: 'USD',
   themeMode: 'dark',
 };
@@ -64,7 +103,12 @@ export function getSiteName(): string {
 }
 
 export function getSiteIcon(): string {
-  return memorySiteConfig.siteIcon || DEFAULT_SITE_ICON;
+  return (
+    memorySiteConfig.titlebarImage ||
+    memorySiteConfig.titlebarEmoji ||
+    memorySiteConfig.siteIcon ||
+    DEFAULT_SITE_ICON
+  );
 }
 
 export function getSiteConfig(fallback?: Partial<SiteConfig>): SiteConfig {
@@ -102,20 +146,97 @@ export function setMemorySiteConfig(cfgOrName?: any, icon?: string): void {
   }
 }
 
+export function updateFavicon(faviconUrlOrEmoji?: string): void {
+  if (typeof document === 'undefined') return;
+  try {
+    const iconToUse =
+      faviconUrlOrEmoji ||
+      memorySiteConfig.faviconImage ||
+      memorySiteConfig.faviconEmoji ||
+      memorySiteConfig.titlebarEmoji ||
+      DEFAULT_SITE_ICON;
+
+    const existing = document.querySelectorAll("link[rel*='icon']");
+    existing.forEach((el) => el.parentNode?.removeChild(el));
+
+    const link: HTMLLinkElement = document.createElement('link');
+    link.rel = 'icon';
+
+    if (iconToUse.startsWith('data:image/svg+xml') || iconToUse.includes('<svg')) {
+      link.type = 'image/svg+xml';
+      link.href = iconToUse.startsWith('data:')
+        ? iconToUse
+        : `data:image/svg+xml,${encodeURIComponent(iconToUse)}`;
+    } else if (iconToUse.startsWith('data:image/png')) {
+      link.type = 'image/png';
+      link.href = iconToUse;
+    } else if (iconToUse.startsWith('/') || iconToUse.startsWith('http')) {
+      link.href = iconToUse;
+    } else {
+      link.type = 'image/svg+xml';
+      link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${iconToUse}</text></svg>`;
+    }
+
+    document.head.appendChild(link);
+  } catch (_) {}
+}
+
 export async function fetchSiteConfig(): Promise<SiteConfig> {
   if (typeof window !== 'undefined') {
     try {
-      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
+      const res = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         const settings = data.settings || data;
+        const resolvedTagline =
+          settings.siteTagline || settings.tagline || settings.site_tagline || DEFAULT_SITE_TAGLINE;
         const mapped: Partial<SiteConfig> = {
           siteName: settings.siteName || settings.site_name || memorySiteConfig.siteName,
           site_name: settings.siteName || settings.site_name || memorySiteConfig.siteName,
-          siteIcon: settings.titlebarEmoji || settings.titlebar_emoji || settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.siteIcon,
-          site_icon: settings.titlebarEmoji || settings.titlebar_emoji || settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.siteIcon,
-          titlebarEmoji: settings.titlebarEmoji || settings.titlebar_emoji || memorySiteConfig.titlebarEmoji,
-          faviconEmoji: settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.faviconEmoji,
+          siteTagline: resolvedTagline,
+          site_tagline: resolvedTagline,
+          tagline: resolvedTagline,
+          siteIcon:
+            settings.titlebarEmoji ||
+            settings.titlebar_emoji ||
+            settings.faviconEmoji ||
+            settings.favicon_emoji ||
+            memorySiteConfig.siteIcon,
+          site_icon:
+            settings.titlebarEmoji ||
+            settings.titlebar_emoji ||
+            settings.faviconEmoji ||
+            settings.favicon_emoji ||
+            memorySiteConfig.siteIcon,
+          titlebarEmoji:
+            settings.titlebarEmoji || settings.titlebar_emoji || memorySiteConfig.titlebarEmoji,
+          titlebarImage:
+            settings.titlebarImage !== undefined
+              ? settings.titlebarImage
+              : settings.titlebar_image || '',
+          faviconEmoji:
+            settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.faviconEmoji,
+          faviconImage:
+            settings.faviconImage !== undefined
+              ? settings.faviconImage
+              : settings.favicon_image || '',
+          fontFamily:
+            settings.fontFamily || settings.font_family || memorySiteConfig.fontFamily,
+          metaDescription:
+            settings.metaDescription ||
+            settings.meta_description ||
+            settings.seoDescription ||
+            memorySiteConfig.metaDescription,
+          metaKeywords:
+            settings.metaKeywords ||
+            settings.meta_keywords ||
+            settings.seoKeywords ||
+            memorySiteConfig.metaKeywords,
+          metaAuthor:
+            settings.metaAuthor ||
+            settings.meta_author ||
+            settings.author ||
+            memorySiteConfig.metaAuthor,
           currency: settings.currency || memorySiteConfig.currency,
         };
         memorySiteConfig = { ...memorySiteConfig, ...mapped };
@@ -128,8 +249,34 @@ export async function fetchSiteConfig(): Promise<SiteConfig> {
 export async function saveSiteConfig(newConfig: any): Promise<SiteConfig> {
   const cfg = newConfig || {};
   const resolvedName = cfg.siteName || cfg.site_name || memorySiteConfig.siteName;
-  const resolvedIcon = cfg.siteIcon || cfg.site_icon || cfg.titlebarEmoji || cfg.titlebar_emoji || cfg.faviconEmoji || cfg.favicon_emoji || memorySiteConfig.siteIcon;
-  const resolvedTagline = cfg.siteTagline || cfg.site_tagline || cfg.tagline || memorySiteConfig.siteTagline;
+  const resolvedIcon =
+    cfg.siteIcon ||
+    cfg.site_icon ||
+    cfg.titlebarEmoji ||
+    cfg.titlebar_emoji ||
+    cfg.faviconEmoji ||
+    cfg.favicon_emoji ||
+    memorySiteConfig.siteIcon;
+  const resolvedTagline =
+    cfg.siteTagline ||
+    cfg.site_tagline ||
+    cfg.tagline ||
+    memorySiteConfig.siteTagline;
+  const resolvedDescription =
+    cfg.metaDescription ||
+    cfg.meta_description ||
+    cfg.seoDescription ||
+    memorySiteConfig.metaDescription;
+  const resolvedKeywords =
+    cfg.metaKeywords ||
+    cfg.meta_keywords ||
+    cfg.seoKeywords ||
+    memorySiteConfig.metaKeywords;
+  const resolvedAuthor =
+    cfg.metaAuthor ||
+    cfg.meta_author ||
+    cfg.author ||
+    memorySiteConfig.metaAuthor;
 
   memorySiteConfig = {
     ...memorySiteConfig,
@@ -140,35 +287,71 @@ export async function saveSiteConfig(newConfig: any): Promise<SiteConfig> {
     site_icon: resolvedIcon,
     siteTagline: resolvedTagline,
     site_tagline: resolvedTagline,
-    titlebarEmoji: resolvedIcon,
-    faviconEmoji: resolvedIcon,
+    tagline: resolvedTagline,
+    titlebarEmoji: cfg.titlebarEmoji || cfg.titlebar_emoji || resolvedIcon,
+    faviconEmoji: cfg.faviconEmoji || cfg.favicon_emoji || resolvedIcon,
+    titlebarImage:
+      cfg.titlebarImage !== undefined
+        ? cfg.titlebarImage
+        : cfg.titlebar_image !== undefined
+        ? cfg.titlebar_image
+        : memorySiteConfig.titlebarImage,
+    faviconImage:
+      cfg.faviconImage !== undefined
+        ? cfg.faviconImage
+        : cfg.favicon_image !== undefined
+        ? cfg.favicon_image
+        : memorySiteConfig.faviconImage,
+    metaDescription: resolvedDescription,
+    meta_description: resolvedDescription,
+    metaKeywords: resolvedKeywords,
+    meta_keywords: resolvedKeywords,
+    metaAuthor: resolvedAuthor,
+    meta_author: resolvedAuthor,
   };
 
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem('zecratary_site_config', JSON.stringify(memorySiteConfig));
-      window.dispatchEvent(new CustomEvent('zecratary_site_settings_changed', { detail: memorySiteConfig }));
-      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: memorySiteConfig }));
+      window.dispatchEvent(
+        new CustomEvent('zecratary_site_config_updated', { detail: memorySiteConfig })
+      );
+      window.dispatchEvent(
+        new CustomEvent('zecratary_site_settings_changed', { detail: memorySiteConfig })
+      );
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      if (resolvedIcon) {
-        updateFavicon(resolvedIcon);
+      if (memorySiteConfig.faviconImage) {
+        updateFavicon(memorySiteConfig.faviconImage);
+      } else if (memorySiteConfig.faviconEmoji) {
+        updateFavicon(memorySiteConfig.faviconEmoji);
       }
     } catch (_) {}
 
-    // Persist to database via /api/admin/settings (Constraint 8)
     try {
       await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...cfg,
           siteName: resolvedName,
           site_name: resolvedName,
           siteTagline: resolvedTagline,
           site_tagline: resolvedTagline,
-          titlebarEmoji: resolvedIcon,
-          titlebar_emoji: resolvedIcon,
-          faviconEmoji: resolvedIcon,
-          favicon_emoji: resolvedIcon,
+          tagline: resolvedTagline,
+          titlebarEmoji: memorySiteConfig.titlebarEmoji,
+          titlebar_emoji: memorySiteConfig.titlebarEmoji,
+          titlebarImage: memorySiteConfig.titlebarImage,
+          titlebar_image: memorySiteConfig.titlebarImage,
+          faviconEmoji: memorySiteConfig.faviconEmoji,
+          favicon_emoji: memorySiteConfig.faviconEmoji,
+          faviconImage: memorySiteConfig.faviconImage,
+          favicon_image: memorySiteConfig.faviconImage,
+          metaDescription: resolvedDescription,
+          meta_description: resolvedDescription,
+          metaKeywords: resolvedKeywords,
+          meta_keywords: resolvedKeywords,
+          metaAuthor: resolvedAuthor,
+          meta_author: resolvedAuthor,
           currency: memorySiteConfig.currency,
         }),
       });
@@ -185,24 +368,6 @@ export function setSiteConfig(newConfig: Partial<SiteConfig>): SiteConfig {
 
 export const persistSiteConfig = saveSiteConfig;
 
-export function updateFavicon(iconUrlOrEmoji?: string): void {
-  if (typeof document === 'undefined') return;
-  try {
-    const iconToUse = iconUrlOrEmoji || memorySiteConfig.faviconImage || memorySiteConfig.faviconEmoji || DEFAULT_SITE_ICON;
-    let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
-    if (!link) {
-      link = document.createElement('link');
-      link.rel = 'shortcut icon';
-      document.head.appendChild(link);
-    }
-    if (iconToUse.startsWith('/') || iconToUse.startsWith('http')) {
-      link.href = iconToUse;
-    } else {
-      link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${iconToUse}</text></svg>`;
-    }
-  } catch (_) {}
-}
-
 export default {
   getSiteConfig,
   saveSiteConfig,
@@ -215,5 +380,12 @@ export default {
   updateFavicon,
   DEFAULT_SITE_NAME,
   DEFAULT_SITE_ICON,
+  DEFAULT_SITE_TAGLINE,
+  DEFAULT_TITLEBAR_EMOJI,
+  DEFAULT_FAVICON_EMOJI,
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_META_DESCRIPTION,
+  DEFAULT_META_KEYWORDS,
+  DEFAULT_META_AUTHOR,
   DEFAULT_SITE_CONFIG,
 };
