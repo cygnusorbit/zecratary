@@ -33,24 +33,30 @@ export async function POST(req: NextRequest) {
     fs.writeFileSync(filePath, buffer);
     const publicUrl = `/uploads/${filename}`;
 
-    // Update PostgreSQL admin_settings table directly
     const targetColumn = type === 'favicon' ? 'favicon_image' : 'titlebar_image';
     try {
-      const existing = await query(`SELECT id FROM admin_settings LIMIT 1;`);
-      const targetId = existing && existing.length > 0 && existing[0]?.id ? existing[0].id : 'primary_settings';
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id VARCHAR(255) PRIMARY KEY,
+          titlebar_image TEXT DEFAULT '',
+          favicon_image TEXT DEFAULT '',
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS ${targetColumn} TEXT DEFAULT '';`);
 
       await query(`
         INSERT INTO admin_settings (id, ${targetColumn}, updated_at)
-        VALUES ($1, $2, NOW())
+        VALUES ('primary_settings', $1, NOW())
         ON CONFLICT (id) DO UPDATE
         SET ${targetColumn} = EXCLUDED.${targetColumn},
             updated_at = NOW();
-      `, [targetId, publicUrl]);
-    } catch (dbErr) {
-      console.warn('[upload-branding] PostgreSQL update fallback warning:', dbErr);
+      `, [publicUrl]);
+    } catch (dbErr: any) {
+      console.warn('[upload-branding] DB warning:', dbErr.message);
     }
 
-    // Optional synchronization to dual-path static JSON stores
+    // Mirror to JSON stores
     const settingsPaths = [
       path.join(process.cwd(), 'apps/web/data/admin_settings.json'),
       path.join(process.cwd(), 'data/admin_settings.json')
@@ -61,8 +67,10 @@ export async function POST(req: NextRequest) {
           const current = JSON.parse(fs.readFileSync(sp, 'utf-8'));
           if (type === 'titlebar') {
             current.titlebarImage = publicUrl;
+            current.titlebar_image = publicUrl;
           } else if (type === 'favicon') {
             current.faviconImage = publicUrl;
+            current.favicon_image = publicUrl;
           }
           fs.writeFileSync(sp, JSON.stringify(current, null, 2));
         } catch (_) {}
@@ -72,10 +80,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       url: publicUrl,
-      message: `${type} branding image updated in PostgreSQL.`
+      message: `${type} branding image successfully uploaded and persisted.`
     });
   } catch (err: any) {
-    console.error('[Upload Branding Error]:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

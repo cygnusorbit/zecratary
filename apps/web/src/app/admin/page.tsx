@@ -1,1980 +1,1223 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import Link from 'next/link';
 import { 
-  ShieldCheck, 
-  Upload, 
-  Trash2, 
-  CheckCircle2, 
-  RefreshCw, 
-  Palette,
-  AlertCircle,
-  Type
+  Sparkles, Save, RotateCcw, Globe, Search, Tag, User, 
+  CheckCircle2, AlertCircle, Palette, Type, Sliders, ExternalLink, 
+  ShieldCheck, Upload, UploadCloud, Image as ImageIcon, Trash2, Eye, RefreshCw
 } from 'lucide-react';
-import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
-import { 
-  getSiteConfig, 
-  saveSiteConfig, 
-  setMemorySiteConfig, 
-  updateFavicon, 
-  SiteIdentityConfig, 
-  DEFAULT_SITE_NAME, 
-  DEFAULT_SITE_ICON 
-} from '@/lib/siteConfig';
-import { 
-  applyThemeToDocument, 
-  saveThemeColors, 
-  setMemoryThemeColors,
-  getMemoryThemeColors,
-  applyGlobalFont,
-  AVAILABLE_FONTS
-} from '@/lib/themeConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
-  purgeLegacyBrowserAdminStorage, 
-  fetchServerAdminSettings, 
-  persistServerAdminSettings 
-} from '@/lib/adminSync';
-
-const PRESET_PALETTES = [
-  { 
-    name: 'Zecratary Coral', 
-    primary: '#E05638', 
-    primaryHover: '#c94529', 
-    accent: '#10b981', 
-    sidebarIcon: '#10b981',
-    background: '#070b13',
-    card: '#0b0f17',
-    border: '#1e293b',
-    textSecondary: '#94a3b8'
-  },
-  { 
-    name: 'Emerald Forest', 
-    primary: '#10b981', 
-    primaryHover: '#059669', 
-    accent: '#3b82f6', 
-    sidebarIcon: '#10b981',
-    background: '#06130d',
-    card: '#0a1d14',
-    border: '#133526',
-    textSecondary: '#86efac'
-  },
-  { 
-    name: 'Cyber Blue', 
-    primary: '#2563eb', 
-    primaryHover: '#1d4ed8', 
-    accent: '#10b981', 
-    sidebarIcon: '#38bdf8',
-    background: '#080d1a',
-    card: '#0c152b',
-    border: '#1e293b',
-    textSecondary: '#93c5fd'
-  },
-  { 
-    name: 'Royal Purple', 
-    primary: '#8b5cf6', 
-    primaryHover: '#7c3aed', 
-    accent: '#ec4899', 
-    sidebarIcon: '#c084fc',
-    background: '#0f081c',
-    card: '#180d2e',
-    border: '#2a1650',
-    textSecondary: '#d8b4fe'
-  },
-  { 
-    name: 'Amber Gold', 
-    primary: '#f59e0b', 
-    primaryHover: '#d97706', 
-    accent: '#10b981', 
-    sidebarIcon: '#fbbf24',
-    background: '#120d04',
-    card: '#1c1507',
-    border: '#36270a',
-    textSecondary: '#fcd34d'
-  },
-  { 
-    name: 'Deep Midnight', 
-    primary: '#38bdf8', 
-    primaryHover: '#0284c7', 
-    accent: '#a855f7', 
-    sidebarIcon: '#38bdf8',
-    background: '#020617',
-    card: '#080e22',
-    border: '#172554',
-    textSecondary: '#7dd3fc'
-  },
-];
+  fetchSiteConfig, saveSiteConfig, updateFavicon, 
+  DEFAULT_SITE_NAME, DEFAULT_SITE_TAGLINE, DEFAULT_TITLEBAR_EMOJI, DEFAULT_FAVICON_EMOJI 
+} from '@/lib/siteConfig';
 
 const FONT_OPTIONS = [
-  { id: 'Inter', name: 'Inter', family: "'Inter', system-ui, -apple-system, sans-serif", description: 'Clean, modern, optimized for screens' },
-  { id: 'Plus Jakarta Sans', name: 'Plus Jakarta Sans', family: "'Plus Jakarta Sans', system-ui, sans-serif", description: 'Geometric, stylish, high legibility' },
-  { id: 'Outfit', name: 'Outfit', family: "'Outfit', system-ui, sans-serif", description: 'Contemporary, smooth, elegant curves' },
-  { id: 'Poppins', name: 'Poppins', family: "'Poppins', system-ui, sans-serif", description: 'Friendly, geometric, distinctive accents' },
-  { id: 'Roboto', name: 'Roboto', family: "'Roboto', system-ui, sans-serif", description: 'Neutral, neo-grotesque, highly versatile' },
-  { id: 'System Default', name: 'System Default', family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", description: 'Native operating system typography' },
+  { id: 'Inter, sans-serif', label: 'Inter (Modern Sans)' },
+  { id: 'system-ui, -apple-system, sans-serif', label: 'System Native' },
+  { id: "'Plus Jakarta Sans', sans-serif", label: 'Plus Jakarta Sans' },
+  { id: "'Playfair Display', serif", label: 'Playfair Display (Editorial)' },
+  { id: 'monospace', label: 'Monospace (Terminal)' }
 ];
 
-const FONT_SIZES = [
-  { id: '14px', label: 'Compact', scaleDesc: 'High information density' },
-  { id: '16px', label: 'Standard', scaleDesc: 'Default balanced readability' },
-  { id: '18px', label: 'Comfortable', scaleDesc: 'Relaxed, enhanced legibility' },
-];
-
-const LETTER_SPACINGS = [
-  { id: '-0.025em', label: 'Tight' },
-  { id: '0em', label: 'Normal' },
-  { id: '0.025em', label: 'Wide' },
+const PRESET_THEMES = [
+  {
+    name: 'Coral Glow (Default)',
+    primary: '#E05638',
+    primaryHover: '#c94529',
+    accentEmerald: '#10b981',
+    background: '#070b13',
+    card: '#0d131f',
+    innerDark: '#080d16',
+    border: '#1a2234',
+    text: '#ffffff',
+    textSecondary: '#94a3b8'
+  },
+  {
+    name: 'Emerald Forest',
+    primary: '#10b981',
+    primaryHover: '#059669',
+    accentEmerald: '#34d399',
+    background: '#06130d',
+    card: '#0a1f16',
+    innerDark: '#04100b',
+    border: '#133526',
+    text: '#ffffff',
+    textSecondary: '#86efac'
+  },
+  {
+    name: 'Cyber Blue / Sapphire',
+    primary: '#3b82f6',
+    primaryHover: '#2563eb',
+    accentEmerald: '#10b981',
+    background: '#070d18',
+    card: '#0c172a',
+    innerDark: '#050a14',
+    border: '#1e293b',
+    text: '#ffffff',
+    textSecondary: '#93c5fd'
+  },
+  {
+    name: 'Amber Harvest',
+    primary: '#f59e0b',
+    primaryHover: '#d97706',
+    accentEmerald: '#10b981',
+    background: '#140c04',
+    card: '#221608',
+    innerDark: '#0d0802',
+    border: '#3b250d',
+    text: '#ffffff',
+    textSecondary: '#fcd34d'
+  },
+  {
+    name: 'Sunset Rose / Crimson',
+    primary: '#f43f5e',
+    primaryHover: '#e11d48',
+    accentEmerald: '#10b981',
+    background: '#16080c',
+    card: '#230c14',
+    innerDark: '#0f0508',
+    border: '#3b1522',
+    text: '#ffffff',
+    textSecondary: '#fda4af'
+  },
+  {
+    name: 'Violet Neon / Amethyst',
+    primary: '#8b5cf6',
+    primaryHover: '#7c3aed',
+    accentEmerald: '#10b981',
+    background: '#0c0817',
+    card: '#150d26',
+    innerDark: '#090510',
+    border: '#271747',
+    text: '#ffffff',
+    textSecondary: '#c4b5fd'
+  },
+  {
+    name: 'Obsidian Stealth',
+    primary: '#e2e8f0',
+    primaryHover: '#cbd5e1',
+    accentEmerald: '#10b981',
+    background: '#09090b',
+    card: '#141417',
+    innerDark: '#09090b',
+    border: '#27272a',
+    text: '#fafafa',
+    textSecondary: '#a1a1aa'
+  },
+  {
+    name: 'Nordic Frost',
+    primary: '#06b6d4',
+    primaryHover: '#0891b2',
+    accentEmerald: '#10b981',
+    background: '#061217',
+    card: '#0a1d26',
+    innerDark: '#040b0f',
+    border: '#123342',
+    text: '#ffffff',
+    textSecondary: '#a5f3fc'
+  }
 ];
 
 export default function AdminSettingsPage() {
-  const langContext = useTranslation();
-  const translate = langContext?.t;
-  const t = useCallback((key: string, fallback: string) => {
-    if (typeof translate === 'function') {
-      const val = translate(key, fallback);
-      if (val && val !== key) return val;
-    }
-    return fallback;
-  }, [translate]);
+  const { t } = useTranslation();
 
-  const [activeTab, setActiveTab] = useState<'branding' | 'theme' | 'font'>('branding');
-  const [user, setUser] = useState<User | null>(null);
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
-  const [saved, setSaved] = useState<boolean>(false);
-  const [saveError, setSaveError] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isSaving, setIsSaving] = useState<boolean>(false);
+  // Branding States
+  const [siteName, setSiteName] = useState('Zecratary');
+  const [siteTagline, setSiteTagline] = useState('Autonomous Culinary Intelligence & Precision Meal Planning');
+  const [titlebarEmoji, setTitlebarEmoji] = useState('👨‍🍳');
+  const [titlebarImage, setTitlebarImage] = useState('');
+  const [faviconEmoji, setFaviconEmoji] = useState('👨‍🍳');
+  const [faviconImage, setFaviconImage] = useState('');
+  const [fontFamily, setFontFamily] = useState('Inter, sans-serif');
 
-  const isSavingRef = useRef<boolean>(false);
+  // Basic SEO States (Task 3)
+  const [metaDescription, setMetaDescription] = useState('Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.');
+  const [metaKeywords, setMetaKeywords] = useState('culinary ai, recipe generator, meal planner, pantry management');
+  const [metaAuthor, setMetaAuthor] = useState('Zecratary Culinary Intelligence Inc.');
 
-  // Site Identity State
-  const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
-  const [siteTagline, setSiteTagline] = useState<string>('');
-  const [titlebarEmoji, setTitlebarEmoji] = useState<string>(DEFAULT_SITE_ICON);
-  const [titlebarImage, setTitlebarImage] = useState<string>('');
-  const [faviconEmoji, setFaviconEmoji] = useState<string>(DEFAULT_SITE_ICON);
-  const [faviconImage, setFaviconImage] = useState<string>('');
-
-  // Extended Theme Color State
-  const [primaryColor, setPrimaryColor] = useState<string>('#E05638');
-  const [primaryHoverColor, setPrimaryHoverColor] = useState<string>('#c94529');
-  const [accentColor, setAccentColor] = useState<string>('#10b981');
-  const [sidebarIconColor, setSidebarIconColor] = useState<string>('#10b981');
-  const [backgroundColor, setBackgroundColor] = useState<string>('#070b13');
-  const [cardBackgroundColor, setCardBackgroundColor] = useState<string>('#0b0f17');
-  const [cardBorderColor, setCardBorderColor] = useState<string>('#1e293b');
-  const [secondaryTextColor, setSecondaryTextColor] = useState<string>('#94a3b8');
-
-  // Font Setting State
-  const [fontFamily, setFontFamily] = useState<string>('Inter');
-  const [fontSize, setFontSize] = useState<string>('16px');
-  const [fontLetterSpacing, setFontLetterSpacing] = useState<string>('0em');
-
-  const titlebarFileRef = useRef<HTMLInputElement>(null);
-  const faviconFileRef = useRef<HTMLInputElement>(null);
-
-  const colorsRef = useRef({
-    primary: primaryColor,
-    primaryHover: primaryHoverColor,
-    accent: accentColor,
-    sidebarIcon: sidebarIconColor,
-    background: backgroundColor,
-    card: cardBackgroundColor,
-    border: cardBorderColor,
-    textSecondary: secondaryTextColor,
+  // Theme Elements Colors State (Multi-Element Variation)
+  const [themeColors, setThemeColors] = useState({
+    primary: '#E05638',
+    primaryHover: '#c94529',
+    accentEmerald: '#10b981',
+    background: '#070b13',
+    card: '#0d131f',
+    innerDark: '#080d16',
+    border: '#1a2234',
+    text: '#ffffff',
+    textSecondary: '#94a3b8'
   });
 
+  const [activeTab, setActiveTab] = useState<'branding' | 'theme' | 'seo' | 'typography'>('branding');
+  const [saving, setSaving] = useState(false);
+  const [uploadingTitlebar, setUploadingTitlebar] = useState(false);
+  const [uploadingFavicon, setUploadingFavicon] = useState(false);
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  const titlebarFileInputRef = useRef<HTMLInputElement>(null);
+  const faviconFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Dynamic Header Title String: <Display Name> - <Tagline> (Task 2)
+  const dynamicHeaderTitle = `${siteName.trim() || DEFAULT_SITE_NAME} - ${siteTagline.trim() || DEFAULT_SITE_TAGLINE}`;
+
+  // Synchronize document.title dynamically
   useEffect(() => {
-    colorsRef.current = {
-      primary: primaryColor,
-      primaryHover: primaryHoverColor,
-      accent: accentColor,
-      sidebarIcon: sidebarIconColor,
-      background: backgroundColor,
-      card: cardBackgroundColor,
-      border: cardBorderColor,
-      textSecondary: secondaryTextColor,
-    };
-  }, [primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor]);
+    document.title = dynamicHeaderTitle;
+  }, [dynamicHeaderTitle]);
 
-  const applyColorsLocally = (
-    primary: string, 
-    hover: string, 
-    accent: string, 
-    sidebarIcon: string,
-    bg: string,
-    card: string,
-    border: string,
-    textSec: string
-  ) => {
-    const root = typeof document !== 'undefined' ? document.documentElement : null;
-    const isDay = typeof window !== 'undefined' 
-      ? (localStorage.getItem('zecratary_theme_mode') === 'light' || localStorage.getItem('zecratary_theme_mode') === 'day' || (root && root.classList.contains('light')))
-      : false;
-
-    applyThemeToDocument({
-      primary,
-      primaryColor: primary,
-      primaryHover: hover,
-      accentEmerald: accent,
-      accentColor: accent,
-      accent: accent,
-      sidebarIconColor: sidebarIcon,
-      sidebarIcon: sidebarIcon,
-      backgroundColor: bg,
-      backgroundDark: bg,
-      cardBackground: card,
-      cardBorder: border,
-      textSecondary: textSec
-    });
-
-    if (root) {
-      if (isDay) {
-        root.classList.remove('dark');
-        root.classList.add('light');
-        if (document.body) {
-          document.body.style.backgroundColor = 'var(--color-bg)';
-          document.body.style.color = 'var(--color-text)';
-        }
-      } else {
-        root.classList.remove('light');
-        root.classList.add('dark');
-        if (document.body) {
-          document.body.style.backgroundColor = bg || 'var(--color-bg)';
-          document.body.style.color = 'var(--color-text)';
-        }
-      }
+  // Apply theme custom properties to document root dynamically
+  const applyThemeVariables = useCallback((colors: typeof themeColors, font?: string) => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    if (colors.primary) root.style.setProperty('--color-primary', colors.primary);
+    if (colors.primaryHover) root.style.setProperty('--color-primary-hover', colors.primaryHover);
+    if (colors.accentEmerald) {
+      root.style.setProperty('--color-emerald', colors.accentEmerald);
+      root.style.setProperty('--color-accent', colors.accentEmerald);
     }
-  };
+    if (colors.background) root.style.setProperty('--color-bg', colors.background);
+    if (colors.card) root.style.setProperty('--color-card', colors.card);
+    if (colors.innerDark) root.style.setProperty('--color-inner-dark', colors.innerDark);
+    if (colors.border) root.style.setProperty('--color-border', colors.border);
+    if (colors.text) root.style.setProperty('--color-text', colors.text);
+    if (colors.textSecondary) root.style.setProperty('--color-text-secondary', colors.textSecondary);
+    if (font) root.style.setProperty('--font-custom', font);
+  }, []);
 
-  const applyFontLocally = (fontName: string, sz: string = fontSize, spacing: string = fontLetterSpacing) => {
-    applyGlobalFont(fontName, sz, spacing);
-  };
-
-  const loadSettingsFromServer = useCallback(async () => {
-    if (isSavingRef.current) return;
-    setIsLoading(true);
-    purgeLegacyBrowserAdminStorage();
+  const loadSettings = useCallback(async () => {
     try {
-      let serverData = await fetchServerAdminSettings();
-      if (!serverData) {
-        const res = await fetch('/api/admin/settings?t=' + Date.now(), { cache: 'no-store' });
-        if (res.ok) {
-          serverData = await res.json();
-        }
+      const data = await fetchSiteConfig();
+      if (data) {
+        if (data.siteName) setSiteName(data.siteName);
+        if (data.siteTagline || data.tagline) setSiteTagline(data.siteTagline || data.tagline || '');
+        if (data.titlebarEmoji) setTitlebarEmoji(data.titlebarEmoji);
+        if (data.titlebarImage) setTitlebarImage(data.titlebarImage);
+        if (data.faviconEmoji) setFaviconEmoji(data.faviconEmoji);
+        if (data.faviconImage) setFaviconImage(data.faviconImage);
+        if (data.fontFamily) setFontFamily(data.fontFamily);
+        if (data.metaDescription) setMetaDescription(data.metaDescription);
+        if (data.metaKeywords) setMetaKeywords(data.metaKeywords);
+        if (data.metaAuthor) setMetaAuthor(data.metaAuthor);
       }
 
-      if (serverData) {
-        const payload: any = serverData.settings || serverData;
-
-        if (payload.siteName || payload.site_name) {
-          setSiteName(payload.siteName || payload.site_name);
+      const res = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        const s = json.settings || json;
+        const colors = s.themeColors || s.theme_colors;
+        if (colors) {
+          const merged = { ...PRESET_THEMES[0], ...colors };
+          setThemeColors(merged);
+          applyThemeVariables(merged, s.fontFamily || s.font_family);
         }
-        if (payload.siteTagline !== undefined || payload.site_tagline !== undefined || payload.tagline !== undefined) {
-          setSiteTagline(payload.siteTagline ?? payload.site_tagline ?? payload.tagline ?? '');
-        }
-        if (payload.titlebarEmoji || payload.titlebar_emoji) {
-          setTitlebarEmoji(payload.titlebarEmoji || payload.titlebar_emoji);
-        }
-        if (payload.titlebarImage !== undefined || payload.titlebar_image !== undefined) {
-          setTitlebarImage(payload.titlebarImage ?? payload.titlebar_image ?? '');
-        }
-        if (payload.faviconEmoji || payload.favicon_emoji) {
-          setFaviconEmoji(payload.faviconEmoji || payload.favicon_emoji);
-        }
-        if (payload.faviconImage !== undefined || payload.favicon_image !== undefined) {
-          setFaviconImage(payload.faviconImage ?? payload.favicon_image ?? '');
-        }
-
-        const tc = payload.themeColors || payload.theme_colors || serverData.themeColors || serverData.theme_colors || (typeof getMemoryThemeColors === 'function' ? getMemoryThemeColors() : null) || {};
-        const p = tc.primary || tc.primaryColor || '#E05638';
-        const ph = tc.primaryHover || '#c94529';
-        const ac = tc.accentEmerald || tc.accentColor || tc.accent || '#10b981';
-        const sbi = tc.sidebarIconColor || tc.sidebarIcon || ac || '#10b981';
-        const bg = tc.backgroundColor || tc.backgroundDark || '#070b13';
-        const card = tc.cardBackground || '#0b0f17';
-        const border = tc.cardBorder || '#1e293b';
-        const textSec = tc.textSecondary || '#94a3b8';
-
-        setPrimaryColor(p);
-        setPrimaryHoverColor(ph);
-        setAccentColor(ac);
-        setSidebarIconColor(sbi);
-        setBackgroundColor(bg);
-        setCardBackgroundColor(card);
-        setCardBorderColor(border);
-        setSecondaryTextColor(textSec);
-
-        const ff = payload.fontFamily || payload.font_family || serverData.fontFamily || serverData.font_family || 'Inter';
-        const fs = payload.fontSize || payload.font_size || serverData.fontSize || serverData.font_size || '16px';
-        const fls = payload.fontLetterSpacing || payload.letter_spacing || payload.font_letter_spacing || serverData.fontLetterSpacing || '0em';
-
-        setFontFamily(ff);
-        setFontSize(fs);
-        setFontLetterSpacing(fls);
-
-        applyColorsLocally(p, ph, ac, sbi, bg, card, border, textSec);
-        applyFontLocally(ff, fs, fls);
       }
     } catch (err) {
-      console.error('[AdminSettingsPage] Error loading settings from server:', err);
-    } finally {
-      setIsLoading(false);
+      console.warn('Failed to load admin settings:', err);
     }
-  }, []);
+  }, [applyThemeVariables]);
 
   useEffect(() => {
-    initAuthStorage();
-    const active = getCurrentUser();
-    setUser(active);
+    loadSettings();
 
-    loadSettingsFromServer();
+    const handleSync = () => loadSettings();
+    window.addEventListener('zecratary_site_config_updated', handleSync);
+    window.addEventListener('zecratary_site_settings_changed', handleSync);
+    window.addEventListener('storage', handleSync);
 
-    const handleServerUpdate = () => {
-      if (!isSavingRef.current) {
-        loadSettingsFromServer();
-      }
-    };
-
-    window.addEventListener('zecratary_admin_settings_updated', handleServerUpdate);
     return () => {
-      window.removeEventListener('zecratary_admin_settings_updated', handleServerUpdate);
+      window.removeEventListener('zecratary_site_config_updated', handleSync);
+      window.removeEventListener('zecratary_site_settings_changed', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
-  }, [loadSettingsFromServer]);
+  }, [loadSettings]);
 
-  useEffect(() => {
-    const handleModeChange = () => {
-      try {
-        const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-        const root = typeof document !== 'undefined' ? document.documentElement : null;
-        const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
-        setIsDayMode(Boolean(day));
-        const cur = colorsRef.current;
-        applyColorsLocally(
-          cur.primary,
-          cur.primaryHover,
-          cur.accent,
-          cur.sidebarIcon,
-          cur.background,
-          cur.card,
-          cur.border,
-          cur.textSecondary
-        );
-      } catch (_) {}
-    };
-
-    handleModeChange();
-    window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
-    window.addEventListener('zecratary_theme_changed', handleModeChange);
-    window.addEventListener('storage', handleModeChange);
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
-      window.removeEventListener('zecratary_theme_changed', handleModeChange);
-      window.removeEventListener('storage', handleModeChange);
-    };
-  }, []);
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, target: 'titlebar' | 'favicon') => {
+  // Handle Logo & Favicon File Uploads
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'titlebar' | 'favicon') => {
     const file = e.target.files?.[0];
-      e.target.value = "";
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      alert(t('admin.fileSizeError', 'File size exceeds the 2MB limit.'));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      const result = uploadEvent.target?.result as string;
-      if (result) {
-        if (target === 'titlebar') {
-          setTitlebarImage(result);
-        } else {
-          setFaviconImage(result);
-        }
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleSelectPreset = (preset: typeof PRESET_PALETTES[0]) => {
-    setPrimaryColor(preset.primary);
-    setPrimaryHoverColor(preset.primaryHover);
-    setAccentColor(preset.accent);
-    setSidebarIconColor(preset.sidebarIcon || preset.accent);
-    setBackgroundColor(preset.background);
-    setCardBackgroundColor(preset.card);
-    setCardBorderColor(preset.border);
-    setSecondaryTextColor(preset.textSecondary);
-
-    applyColorsLocally(
-      preset.primary, 
-      preset.primaryHover, 
-      preset.accent, 
-      preset.sidebarIcon || preset.accent,
-      preset.background,
-      preset.card,
-      preset.border,
-      preset.textSecondary
-    );
-  };
-
-  const handleFontSelect = (selectedId: string) => {
-    setFontFamily(selectedId);
-    applyFontLocally(selectedId, fontSize, fontLetterSpacing);
-  };
-
-  const handleFontSizeSelect = (selectedSize: string) => {
-    setFontSize(selectedSize);
-    applyFontLocally(fontFamily, selectedSize, fontLetterSpacing);
-  };
-
-  const handleLetterSpacingSelect = (selectedSpacing: string) => {
-    setFontLetterSpacing(selectedSpacing);
-    applyFontLocally(fontFamily, fontSize, selectedSpacing);
-  };
-
-  const handleSave = async (e?: React.SyntheticEvent) => {
-    if (e && typeof e.preventDefault === 'function') {
-      e.preventDefault();
-    }
-    if (isSaving) return;
-    setIsSaving(true);
-    isSavingRef.current = true;
-    setSaveError('');
+    if (type === 'titlebar') setUploadingTitlebar(true);
+    else setUploadingFavicon(true);
+    setStatus(null);
 
     try {
-      const updatedBranding: SiteIdentityConfig = {
-        siteName: siteName.trim() || DEFAULT_SITE_NAME,
-        siteTagline: siteTagline.trim(),
-        tagline: siteTagline.trim(),
-        titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
-        titlebarImage: titlebarImage || '',
-        faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
-        faviconImage: faviconImage || ''
-      };
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', type);
 
-      setMemorySiteConfig(updatedBranding);
-      if (typeof saveSiteConfig === 'function') {
-        await saveSiteConfig(updatedBranding).catch(() => null);
-      }
-
-      if (faviconImage) {
-        updateFavicon(faviconImage);
-      } else if (faviconEmoji) {
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${faviconEmoji}</text></svg>`;
-        updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
-      }
-
-      const themeColors = {
-        primary: primaryColor,
-        primaryColor: primaryColor,
-        primaryHover: primaryHoverColor,
-        accentEmerald: accentColor,
-        accentColor: accentColor,
-        accent: accentColor,
-        sidebarIconColor: sidebarIconColor,
-        sidebarIcon: sidebarIconColor,
-        backgroundColor: backgroundColor,
-        backgroundDark: backgroundColor,
-        cardBackground: cardBackgroundColor,
-        cardBorder: cardBorderColor,
-        textSecondary: secondaryTextColor,
-      };
-
-      setMemoryThemeColors(themeColors);
-      applyColorsLocally(
-        primaryColor,
-        primaryHoverColor,
-        accentColor,
-        sidebarIconColor,
-        backgroundColor,
-        cardBackgroundColor,
-        cardBorderColor,
-        secondaryTextColor
-      );
-      applyFontLocally(fontFamily, fontSize, fontLetterSpacing);
-
-      if (typeof saveThemeColors === 'function') {
-        await saveThemeColors(themeColors).catch(() => null);
-      }
-
-      const payloadToSave = {
-        siteName: updatedBranding.siteName,
-        site_name: updatedBranding.siteName,
-        siteTagline: updatedBranding.siteTagline,
-        site_tagline: updatedBranding.siteTagline,
-        tagline: updatedBranding.tagline,
-        titlebarEmoji: updatedBranding.titlebarEmoji,
-        titlebar_emoji: updatedBranding.titlebarEmoji,
-        titlebarImage: updatedBranding.titlebarImage || '',
-        titlebar_image: updatedBranding.titlebarImage || '',
-        faviconEmoji: updatedBranding.faviconEmoji,
-        favicon_emoji: updatedBranding.faviconEmoji,
-        faviconImage: updatedBranding.faviconImage || '',
-        favicon_image: updatedBranding.faviconImage || '',
-        themeColors,
-        theme_colors: themeColors,
-        fontFamily,
-        font_family: fontFamily,
-        fontSize,
-        font_size: fontSize,
-        fontLetterSpacing,
-        font_letter_spacing: fontLetterSpacing,
-        letter_spacing: fontLetterSpacing
-      };
-
-      // 1. Commit directly to PostgreSQL /api/admin/settings
-      const settingsRes = await fetch('/api/admin/settings', {
+      const res = await fetch('/api/admin/upload-branding', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadToSave)
+        body: formData
       });
 
-      if (!settingsRes.ok) {
-        const errJson = await settingsRes.json().catch(() => ({}));
-        throw new Error(errJson?.error || t('admin.saveFailed', 'Failed to commit settings to database endpoint.'));
+      if (res.ok) {
+        const data = await res.json();
+        const publicUrl = data.url;
+
+        if (type === 'titlebar') {
+          setTitlebarImage(publicUrl);
+        } else {
+          setFaviconImage(publicUrl);
+          updateFavicon(publicUrl);
+        }
+        setStatus({
+          type: 'success',
+          msg: `${type === 'titlebar' ? 'Brand logo' : 'Favicon'} uploaded successfully!`
+        });
+      } else {
+        // Fallback to local Base64 data URL
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = reader.result as string;
+          if (type === 'titlebar') {
+            setTitlebarImage(base64);
+          } else {
+            setFaviconImage(base64);
+            updateFavicon(base64);
+          }
+        };
+        reader.readAsDataURL(file);
       }
-
-      // 2. Commit directly to PostgreSQL /api/user/theme
-      await fetch('/api/user/theme', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ themeColors, theme_colors: themeColors })
-      }).catch(() => null);
-
-      // 3. Fallback sync helper
-      if (typeof persistServerAdminSettings === 'function') {
-        await persistServerAdminSettings(payloadToSave).catch(() => null);
-      }
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: updatedBranding }));
-        window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: themeColors }));
-        window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily, fontSize, fontLetterSpacing } }));
-        window.dispatchEvent(new Event('zecratary_theme_changed'));
-        window.dispatchEvent(new Event('zecratary_settings_updated'));
-      }
-
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3500);
-    } catch (err: any) {
-      console.error('[AdminSettingsPage] Save failure:', err);
-      setSaveError(err?.message || 'Failed to save settings to server store');
-      setTimeout(() => setSaveError(''), 5000);
+    } catch (uploadErr) {
+      // Offline / fallback Base64
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result as string;
+        if (type === 'titlebar') setTitlebarImage(base64);
+        else {
+          setFaviconImage(base64);
+          updateFavicon(base64);
+        }
+      };
+      reader.readAsDataURL(file);
     } finally {
-      setIsSaving(false);
-      setTimeout(() => {
-        isSavingRef.current = false;
-      }, 800);
+      if (type === 'titlebar') setUploadingTitlebar(false);
+      else setUploadingFavicon(false);
+      e.target.value = '';
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
-      const target = e.target as HTMLInputElement;
-      if (target.type !== 'file') {
-        e.preventDefault();
-        handleSave();
-      }
+  const handleRevertToEmoji = (type: 'titlebar' | 'favicon') => {
+    if (type === 'titlebar') {
+      setTitlebarImage('');
+    } else {
+      setFaviconImage('');
+      updateFavicon(faviconEmoji || DEFAULT_FAVICON_EMOJI);
     }
+    if (titlebarFileInputRef.current) titlebarFileInputRef.current.value = '';
+    if (faviconFileInputRef.current) faviconFileInputRef.current.value = '';
   };
 
-  const handleResetDefaults = async () => {
-    if (!confirm(t('admin.confirmReset', 'Reset branding, theme, and font settings to defaults?'))) return;
-    if (isSaving) return;
-    setIsSaving(true);
-    isSavingRef.current = true;
-    setSaveError('');
+  const handleColorChange = (key: keyof typeof themeColors, val: string) => {
+    const updated = { ...themeColors, [key]: val };
+    setThemeColors(updated);
+    applyThemeVariables(updated, fontFamily);
+  };
+
+  const handleSelectPresetTheme = (theme: typeof PRESET_THEMES[0]) => {
+    setThemeColors(theme);
+    applyThemeVariables(theme, fontFamily);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setStatus(null);
+
+    const payload = {
+      siteName: siteName.trim() || DEFAULT_SITE_NAME,
+      site_name: siteName.trim() || DEFAULT_SITE_NAME,
+      siteTagline: siteTagline.trim() || DEFAULT_SITE_TAGLINE,
+      site_tagline: siteTagline.trim() || DEFAULT_SITE_TAGLINE,
+      tagline: siteTagline.trim() || DEFAULT_SITE_TAGLINE,
+      titlebarEmoji,
+      titlebar_emoji: titlebarEmoji,
+      titlebarImage,
+      titlebar_image: titlebarImage,
+      faviconEmoji,
+      favicon_emoji: faviconEmoji,
+      faviconImage,
+      favicon_image: faviconImage,
+      fontFamily,
+      font_family: fontFamily,
+      themeColors,
+      theme_colors: themeColors,
+      metaDescription: metaDescription.trim(),
+      meta_description: metaDescription.trim(),
+      metaKeywords: metaKeywords.trim(),
+      meta_keywords: metaKeywords.trim(),
+      metaAuthor: metaAuthor.trim(),
+      meta_author: metaAuthor.trim()
+    };
 
     try {
-      const defaultName = DEFAULT_SITE_NAME;
-      const defaultIcon = DEFAULT_SITE_ICON;
-      const defaultPrimary = '#E05638';
-      const defaultPrimaryHover = '#c94529';
-      const defaultAccent = '#10b981';
-      const defaultSidebarIcon = '#10b981';
-      const defaultBg = '#070b13';
-      const defaultCard = '#0b0f17';
-      const defaultBorder = '#1e293b';
-      const defaultTextSec = '#94a3b8';
-      const defaultFont = 'Inter';
-      const defaultSize = '16px';
-      const defaultSpacing = '0em';
-
-      setSiteName(defaultName);
-      const defaultTagline = 'Autonomous culinary intelligence & AI meal planning';
-      setSiteTagline(defaultTagline);
-      setTitlebarEmoji(defaultIcon);
-      setTitlebarImage('');
-      setFaviconEmoji(defaultIcon);
-      setFaviconImage('');
-
-      setPrimaryColor(defaultPrimary);
-      setPrimaryHoverColor(defaultPrimaryHover);
-      setAccentColor(defaultAccent);
-      setSidebarIconColor(defaultSidebarIcon);
-      setBackgroundColor(defaultBg);
-      setCardBackgroundColor(defaultCard);
-      setCardBorderColor(defaultBorder);
-      setSecondaryTextColor(defaultTextSec);
-
-      setFontFamily(defaultFont);
-      setFontSize(defaultSize);
-      setFontLetterSpacing(defaultSpacing);
-
-      const defaultBranding = {
-        siteName: defaultName,
-        site_name: defaultName,
-        siteTagline: defaultTagline,
-        site_tagline: defaultTagline,
-        tagline: defaultTagline,
-        titlebarEmoji: defaultIcon,
-        titlebar_emoji: defaultIcon,
-        titlebarImage: '',
-        titlebar_image: '',
-        faviconEmoji: defaultIcon,
-        favicon_emoji: defaultIcon,
-        faviconImage: '',
-        favicon_image: ''
-      };
-
-      const defaultColors = {
-        primary: defaultPrimary,
-        primaryColor: defaultPrimary,
-        primaryHover: defaultPrimaryHover,
-        accentEmerald: defaultAccent,
-        accentColor: defaultAccent,
-        accent: defaultAccent,
-        sidebarIconColor: defaultSidebarIcon,
-        sidebarIcon: defaultSidebarIcon,
-        backgroundColor: defaultBg,
-        backgroundDark: defaultBg,
-        cardBackground: defaultCard,
-        cardBorder: defaultBorder,
-        textSecondary: defaultTextSec
-      };
-
-      setMemorySiteConfig(defaultBranding);
-      setMemoryThemeColors(defaultColors);
-
-      applyColorsLocally(
-        defaultPrimary,
-        defaultPrimaryHover,
-        defaultAccent,
-        defaultSidebarIcon,
-        defaultBg,
-        defaultCard,
-        defaultBorder,
-        defaultTextSec
-      );
-      applyFontLocally(defaultFont, defaultSize, defaultSpacing);
-
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${defaultIcon}</text></svg>`;
-      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
-
-      if (typeof saveThemeColors === 'function') {
-        await saveThemeColors(defaultColors).catch(() => null);
-      }
-      if (typeof saveSiteConfig === 'function') {
-        await saveSiteConfig(defaultBranding).catch(() => null);
-      }
-
-      const resetPayload = {
-        ...defaultBranding,
-        themeColors: defaultColors,
-        theme_colors: defaultColors,
-        fontFamily: defaultFont,
-        font_family: defaultFont,
-        fontSize: defaultSize,
-        font_size: defaultSize,
-        fontLetterSpacing: defaultSpacing,
-        font_letter_spacing: defaultSpacing,
-        letter_spacing: defaultSpacing
-      };
-
-      await fetch('/api/admin/settings', {
+      const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resetPayload)
-      }).catch(() => null);
+        body: JSON.stringify(payload)
+      });
 
-      await fetch('/api/user/theme', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ themeColors: defaultColors, theme_colors: defaultColors })
-      }).catch(() => null);
+      if (!res.ok) throw new Error('Failed to save settings to server.');
 
-      if (typeof persistServerAdminSettings === 'function') {
-        await persistServerAdminSettings(resetPayload).catch(() => null);
-      }
+      await saveSiteConfig(payload);
+      applyThemeVariables(themeColors, fontFamily);
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: defaultBranding }));
-        window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: defaultColors }));
-        window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily: defaultFont, fontSize: defaultSize, fontLetterSpacing: defaultSpacing } }));
-        window.dispatchEvent(new Event('zecratary_theme_changed'));
-        window.dispatchEvent(new Event('zecratary_settings_updated'));
-      }
-
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3500);
+      setStatus({
+        type: 'success',
+        msg: t('adminSettingsSaved', 'Settings Saved & Broadcasted!')
+      });
     } catch (err: any) {
-      setSaveError(err?.message || 'Failed to reset settings');
+      setStatus({
+        type: 'error',
+        msg: err.message || 'Error occurred while saving settings.'
+      });
     } finally {
-      setIsSaving(false);
-      setTimeout(() => {
-        isSavingRef.current = false;
-      }, 800);
+      setSaving(false);
     }
   };
 
-  const isTitlebarImageActive = !!titlebarImage;
-  const isFaviconImageActive = !!faviconImage;
+  const handleResetDefaults = () => {
+    setSiteName(DEFAULT_SITE_NAME);
+    setSiteTagline(DEFAULT_SITE_TAGLINE);
+    setTitlebarEmoji(DEFAULT_TITLEBAR_EMOJI);
+    setTitlebarImage('');
+    setFaviconEmoji(DEFAULT_FAVICON_EMOJI);
+    setFaviconImage('');
+    setFontFamily(DEFAULT_FONT_FAMILY);
+    setMetaDescription('Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.');
+    setMetaKeywords('culinary ai, recipe generator, meal planner, pantry management');
+    setMetaAuthor('Zecratary Culinary Intelligence Inc.');
+    handleSelectPresetTheme(PRESET_THEMES[0]);
+    updateFavicon(DEFAULT_FAVICON_EMOJI);
+  };
 
   return (
     <div 
-      className="max-w-5xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-admin-canvas"
+      role="region"
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        boxSizing: 'border-box',
+        color: 'var(--color-text)'
+      }}
     >
-      <style dangerouslySetInnerHTML={{ __html: `
-        .admin-input:-webkit-autofill,
-        .admin-input:-webkit-autofill:hover,
-        .admin-input:-webkit-autofill:focus,
-        .admin-input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
-          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
-          -webkit-text-fill-color: var(--color-text) !important;
-          caret-color: var(--color-text) !important;
-          transition: background-color 50000s ease-in-out 0s !important;
-        }
-      `}} />
+      {/* Hidden File Inputs for Brand Logo and Favicon */}
+      <input
+        ref={titlebarFileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/svg+xml,image/webp"
+        className="hidden"
+        onChange={(e) => handleFileUpload(e, 'titlebar')}
+      />
+      <input
+        ref={faviconFileInputRef}
+        type="file"
+        accept="image/png,image/svg+xml,image/x-icon,image/vnd.microsoft.icon"
+        className="hidden"
+        onChange={(e) => handleFileUpload(e, 'favicon')}
+      />
 
-      {/* HEADER */}
+      {/* Dynamic Header: <Display Name> - <Tagline> (Task 2) */}
       <div 
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" 
+        className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b pb-5 pt-2 mb-6"
         style={{ borderColor: 'var(--color-border)' }}
       >
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-6 w-6 text-[var(--color-primary)]" />
-            <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-              {t('admin.siteIdentity', 'Site Identity & Branding')}
+          <div className="flex items-center gap-3">
+            {titlebarImage ? (
+              <img 
+                src={titlebarImage} 
+                alt="Logo" 
+                className="w-9 h-9 object-contain rounded-xl border p-1 shadow-sm shrink-0"
+                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}
+              />
+            ) : (
+              <span className="text-3xl shrink-0">{titlebarEmoji || '👨‍🍳'}</span>
+            )}
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+              {dynamicHeaderTitle}
             </h1>
           </div>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('admin.siteIdentityDesc', 'Configure application name, comprehensive color themes, typography fonts, titlebar logo, and browser tab favicon.')}
+          <p className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('adminSiteSettingsTitle', 'Site Settings & Identity')} • {t('adminHeaderTitleFormatDesc', 'Every page header title dynamically synchronizes to <Display Name> - <Tagline>')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={loadSettingsFromServer}
-            disabled={isLoading || isSaving}
-            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-            title={t('admin.reloadTitle', 'Reload settings from server store')}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-            <span>{t('admin.reloadBtn', 'Reload')}</span>
-          </button>
-
-          {saved && (
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold animate-in fade-in"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-emerald)',
-                color: 'var(--color-emerald)'
-              }}
-            >
-              <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('admin.settingsSaved', 'Settings Saved & Broadcasted')}
-            </div>
-          )}
-
-          {saveError && (
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold animate-in fade-in"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'rgba(239, 68, 68, 0.4)',
-                color: '#ef4444'
-              }}
-            >
-              <AlertCircle className="h-4 w-4 text-red-500" /> {saveError}
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving}
-            className="text-white font-extrabold text-xs px-4 py-2 rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:opacity-90"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-          >
-            {isSaving ? (
-              <>
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                <span>{t('admin.saving', 'Saving...')}</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                <span>{t('admin.saveBtn', 'Save')}</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* TABS NAVIGATION */}
-      <div 
-        className="flex items-center gap-2 border-b pb-3 flex-wrap" 
-        style={{ borderColor: 'var(--color-border)' }}
-      >
-        <button
-          type="button"
-          onClick={() => setActiveTab('branding')}
-          className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer border shadow-xs"
-          style={{
-            backgroundColor: activeTab === 'branding' 
-              ? 'var(--color-card)' 
-              : 'transparent',
-            borderColor: activeTab === 'branding' 
-              ? 'var(--color-border)' 
-              : 'transparent',
-            color: activeTab === 'branding' 
-              ? 'var(--color-primary)' 
-              : 'var(--color-text-secondary)'
-          }}
-        >
-          <ShieldCheck className="h-4 w-4" />
-          <span>{t('admin.tabBranding', 'Site Identity & Branding')}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('theme')}
-          className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer border shadow-xs"
-          style={{
-            backgroundColor: activeTab === 'theme' 
-              ? 'var(--color-card)' 
-              : 'transparent',
-            borderColor: activeTab === 'theme' 
-              ? 'var(--color-border)' 
-              : 'transparent',
-            color: activeTab === 'theme' 
-              ? 'var(--color-primary)' 
-              : 'var(--color-text-secondary)'
-          }}
-        >
-          <Palette className="h-4 w-4" />
-          <span>{t('admin.tabTheme', 'Theme')}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('font')}
-          className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer border shadow-xs"
-          style={{
-            backgroundColor: activeTab === 'font' 
-              ? 'var(--color-card)' 
-              : 'transparent',
-            borderColor: activeTab === 'font' 
-              ? 'var(--color-border)' 
-              : 'transparent',
-            color: activeTab === 'font' 
-              ? 'var(--color-primary)' 
-              : 'var(--color-text-secondary)'
-          }}
-        >
-          <Type className="h-4 w-4" />
-          <span>{t('admin.tabFont', 'Font Setting')}</span>
-        </button>
-      </div>
-
-      {/* SETTINGS CONTAINER (Decoupled from Form Autofill Heuristics) */}
-      <div onKeyDown={handleKeyDown} className="space-y-6">
-        {/* TAB 1: BRANDING */}
-        <div className={activeTab === 'branding' ? 'space-y-6' : 'hidden'}>
-          <div 
-            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
-            style={{ 
-              backgroundColor: 'var(--color-card)', 
-              borderColor: 'var(--color-border)' 
-            }}
-          >
-            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-              {t('admin.appName', 'Application Name')}
-            </h2>
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.displayName', 'Display Name')}
-              </label>
-              <input 
-                type="text" 
-                id="cfg_app_branding_title"
-                name="cfg_app_branding_title"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck="false"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                role="presentation"
-                readOnly
-                onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                value={siteName} 
-                onChange={(e) => setSiteName(e.target.value)} 
-                placeholder="e.g. Zecratary" 
-                className="admin-input w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)', 
-                  color: 'var(--color-text)' 
-                }} 
-              />
-            </div>
-          </div>
-
-          {/* APPLICATION TAGLINE */}
-          <div 
-            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
-            style={{ 
-              backgroundColor: 'var(--color-card)', 
-              borderColor: 'var(--color-border)' 
-            }}
-          >
-            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-              {t('admin.appTagline', 'Application Tagline & Subtitle')}
-            </h2>
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.siteTagline', 'Tagline / Description')}
-              </label>
-              <input 
-                type="text" 
-                id="cfg_app_branding_tagline"
-                name="cfg_app_branding_tagline"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck="false"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                role="presentation"
-                readOnly
-                onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                value={siteTagline} 
-                onChange={(e) => setSiteTagline(e.target.value)} 
-                placeholder="e.g. Autonomous culinary intelligence & AI meal planning" 
-                className="admin-input w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)', 
-                  color: 'var(--color-text)' 
-                }} 
-              />
-            </div>
-          </div>
-
-          <div 
-            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
-            style={{ 
-              backgroundColor: 'var(--color-card)', 
-              borderColor: 'var(--color-border)' 
-            }}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  {t('admin.titlebarIcon', 'Titlebar & Sidebar Brand Icon')}
-                </h2>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.titlebarIconDesc', 'Upload an image logo. If no image is uploaded or if removed, the system defaults to the emoji below.')}
-                </p>
-              </div>
-              <span 
-                className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: isTitlebarImageActive ? 'var(--color-emerald)' : 'var(--color-border)',
-                  color: isTitlebarImageActive ? 'var(--color-emerald)' : 'var(--color-primary)'
-                }}
-              >
-                {isTitlebarImageActive ? t('admin.activeUploadedImage', 'Active: Uploaded Image') : t('admin.activeDefaultEmoji', 'Active: Default Emoji')}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
-              <div className="space-y-2">
-                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.customLogoImage', 'Custom Logo Image (PNG, JPG, SVG, WebP)')}
-                </label>
-                <input 
-                  type="file" 
-                  ref={titlebarFileRef} 
-                  onChange={(e) => handleFileUpload(e, 'titlebar')} 
-                  accept="image/*" 
-                  className="hidden" 
-                />
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => titlebarFileRef.current?.click()}
-                    className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
-                    style={{ 
-                      backgroundColor: 'var(--color-inner-dark)', 
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <Upload className="h-4 w-4" /> {t('common.uploadImage', 'Upload Image')}
-                  </button>
-                  {titlebarImage && (
-                    <button
-                      type="button"
-                      onClick={() => setTitlebarImage('')}
-                      className="px-3 py-2 border rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition text-red-500 border-red-500/30 hover:bg-red-500/10"
-                    >
-                      <Trash2 className="h-4 w-4" /> {t('admin.revertToEmoji', 'Revert to Emoji')}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.defaultEmojiFallback', 'Default Emoji (Fallback)')}
-                </label>
-                <div className="flex items-center gap-3">
-                  <input 
-                    type="text" 
-                    id="cfg_titlebar_symbol"
-                    name="cfg_titlebar_symbol"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    spellCheck="false"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                    value={titlebarEmoji} 
-                    onChange={(e) => setTitlebarEmoji(e.target.value.slice(0, 8))} 
-                    className="admin-input w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
-                    style={{ 
-                      backgroundColor: 'var(--color-inner-dark)', 
-                      borderColor: 'var(--color-border)', 
-                      color: 'var(--color-text)' 
-                    }} 
-                  />
-                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.defaultEmojiDesc', 'Used whenever no custom image is supplied.')}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <span className="font-bold text-[11px] block mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.sidebarHeaderPreview', 'Sidebar & Header Preview:')}
-              </span>
-              <div 
-                className="flex items-center gap-2.5 p-3 rounded-2xl border w-fit" 
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)' 
-                }} 
-              >
-                {isTitlebarImageActive ? (
-                  <img src={titlebarImage} alt="Titlebar Logo" className="w-7 h-7 object-contain rounded" />
-                ) : (
-                  <span className="text-2xl">{titlebarEmoji || DEFAULT_SITE_ICON}</span>
-                )}
-                <span className="text-base font-black tracking-tight text-[var(--color-primary)]">
-                  {siteName || DEFAULT_SITE_NAME}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div 
-            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
-            style={{ 
-              backgroundColor: 'var(--color-card)', 
-              borderColor: 'var(--color-border)' 
-            }}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  {t('admin.browserFavicon', 'Browser Favicon')}
-                </h2>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.browserFaviconDesc', 'Upload an icon for browser tabs (PNG, ICO, SVG). If no image is uploaded, defaults to emoji.')}
-                </p>
-              </div>
-              <span 
-                className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border w-fit"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: isFaviconImageActive ? 'var(--color-emerald)' : 'var(--color-border)',
-                  color: isFaviconImageActive ? 'var(--color-emerald)' : 'var(--color-primary)'
-                }}
-              >
-                {isFaviconImageActive ? t('admin.activeUploadedFavicon', 'Active: Uploaded Favicon') : t('admin.activeDefaultEmoji', 'Active: Default Emoji')}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
-              <div className="space-y-2">
-                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.customFaviconImage', 'Custom Favicon Image (PNG, ICO, SVG, WebP)')}
-                </label>
-                <input 
-                  type="file" 
-                  ref={faviconFileRef} 
-                  onChange={(e) => handleFileUpload(e, 'favicon')} 
-                  accept="image/*" 
-                  className="hidden" 
-                />
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => faviconFileRef.current?.click()}
-                    className="px-4 py-2 border rounded-xl font-extrabold flex items-center gap-2 cursor-pointer transition hover:opacity-80"
-                    style={{ 
-                      backgroundColor: 'var(--color-inner-dark)', 
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <Upload className="h-4 w-4" /> {t('common.uploadFavicon', 'Upload Favicon')}
-                  </button>
-                  {faviconImage && (
-                    <button
-                      type="button"
-                      onClick={() => setFaviconImage('')}
-                      className="px-3 py-2 border rounded-xl font-bold flex items-center gap-1.5 cursor-pointer transition text-red-500 border-red-500/30 hover:bg-red-500/10"
-                    >
-                      <Trash2 className="h-4 w-4" /> {t('admin.revertToEmoji', 'Revert to Emoji')}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.defaultFaviconEmoji', 'Default Favicon Emoji (Fallback)')}
-                </label>
-                <div className="flex items-center gap-3">
-                  <input 
-                    type="text" 
-                    id="cfg_favicon_symbol"
-                    name="cfg_favicon_symbol"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    spellCheck="false"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                    value={faviconEmoji} 
-                    onChange={(e) => setFaviconEmoji(e.target.value.slice(0, 8))} 
-                    className="admin-input w-20 text-center text-xl border rounded-xl py-1.5 font-bold outline-none" 
-                    style={{ 
-                      backgroundColor: 'var(--color-inner-dark)', 
-                      borderColor: 'var(--color-border)', 
-                      color: 'var(--color-text)' 
-                    }} 
-                  />
-                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.defaultFaviconDesc', 'Converts dynamically into an SVG favicon if no image is uploaded.')}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <span className="font-bold text-[11px] block mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.browserTabPreview', 'Browser Tab Appearance Preview:')}
-              </span>
-              <div 
-                className="max-w-xs border rounded-t-xl px-3 py-2 flex items-center justify-between gap-2 shadow-sm"
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }} 
-              >
-                <div className="flex items-center gap-2 truncate">
-                  {isFaviconImageActive ? (
-                    <img src={faviconImage} alt="Favicon Preview" className="w-4 h-4 object-contain rounded shrink-0" />
-                  ) : (
-                    <span className="text-sm shrink-0">{faviconEmoji || titlebarEmoji || DEFAULT_SITE_ICON}</span>
-                  )}
-                  <span className="text-xs font-bold truncate">
-                    {siteName || DEFAULT_SITE_NAME}
-                  </span>
-                </div>
-                <span className="text-xs opacity-50">✕</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* TAB 2: THEME */}
-        <div className={activeTab === 'theme' ? 'space-y-6' : 'hidden'}>
-          <div 
-            className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
-            style={{ 
-              backgroundColor: 'var(--color-card)', 
-              borderColor: 'var(--color-border)' 
-            }}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Palette className="h-4 w-4 text-[var(--color-primary)]" />
-                  <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                    {t('admin.themeSettings', 'Complete Theme Color & Palette Settings')}
-                  </h2>
-                </div>
-                <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.themeSettingsDesc', 'Customize primary accents, interactive hovers, navigation icons, surfaces, borders, and typography.')}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('admin.primary', 'Primary')}:</span>
-                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: primaryColor, borderColor: 'var(--color-border)' }} />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('admin.accent', 'Accent')}:</span>
-                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: accentColor, borderColor: 'var(--color-border)' }} />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('admin.sidebarIcon', 'Sidebar Icon')}:</span>
-                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: sidebarIconColor, borderColor: 'var(--color-border)' }} />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('admin.bg', 'Bg')}:</span>
-                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: backgroundColor, borderColor: 'var(--color-border)' }} />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('admin.card', 'Card')}:</span>
-                  <div className="w-3.5 h-3.5 rounded-full border" style={{ backgroundColor: cardBackgroundColor, borderColor: 'var(--color-border)' }} />
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Presets */}
-            <div className="space-y-2">
-              <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.coordinatedPalettes', 'Coordinated Palettes & Tones')}
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-                {PRESET_PALETTES.map((preset) => {
-                  const isSelected = primaryColor.toLowerCase() === preset.primary.toLowerCase() && backgroundColor.toLowerCase() === preset.background.toLowerCase();
-                  return (
-                    <button
-                      key={preset.name}
-                      type="button"
-                      onClick={() => handleSelectPreset(preset)}
-                      className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1.5 transition text-left cursor-pointer ${
-                        isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
-                      }`}
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
-                      }}
-                    >
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.primary }} />
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.accent }} />
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: preset.sidebarIcon || preset.accent }} />
-                        <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: preset.background, borderColor: 'var(--color-border)' }} />
-                      </div>
-                      <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: 'var(--color-text)' }}>
-                        {preset.name}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Brand Colors */}
-            <div className="space-y-3 pt-2">
-              <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.brandColors', 'Brand & Interaction Colors')}
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.primaryBrandColor', 'Primary Brand Color')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={primaryColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setPrimaryColor(val);
-                        applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    />
-                    <input 
-                      type="text" 
-                      id="cfg_theme_primary_color"
-                      name="cfg_theme_primary_color"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      value={primaryColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setPrimaryColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(val, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                        }
-                      }}
-                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.primaryHoverColor', 'Primary Hover Color')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={primaryHoverColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setPrimaryHoverColor(val);
-                        applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    />
-                    <input 
-                      type="text" 
-                      id="cfg_theme_primary_hover_color"
-                      name="cfg_theme_primary_hover_color"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      value={primaryHoverColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setPrimaryHoverColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, val, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                        }
-                      }}
-                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.accentColor', 'Accent / Success Color')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={accentColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setAccentColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    />
-                    <input 
-                      type="text" 
-                      id="cfg_theme_accent_color"
-                      name="cfg_theme_accent_color"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      value={accentColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setAccentColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, val, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                        }
-                      }}
-                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.sidebarIconColor', 'Sidebar Icon Color')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={sidebarIconColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSidebarIconColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    />
-                    <input 
-                      type="text" 
-                      id="cfg_theme_sidebar_icon_color"
-                      name="cfg_theme_sidebar_icon_color"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      value={sidebarIconColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSidebarIconColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, val, backgroundColor, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                        }
-                      }}
-                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Surfaces & Container Colors */}
-            <div className="space-y-3 pt-2">
-              <h3 className="font-extrabold text-[12px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.surfacesBordersTypography', 'Surfaces, Borders & Typography')}
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.pageBackground', 'Page Background')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={backgroundColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setBackgroundColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    />
-                    <input 
-                      type="text" 
-                      id="cfg_theme_bg_color"
-                      name="cfg_theme_bg_color"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      value={backgroundColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setBackgroundColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, val, cardBackgroundColor, cardBorderColor, secondaryTextColor);
-                        }
-                      }}
-                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.cardBackground', 'Card Background')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={cardBackgroundColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setCardBackgroundColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    />
-                    <input 
-                      type="text" 
-                      id="cfg_theme_card_bg_color"
-                      name="cfg_theme_card_bg_color"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      value={cardBackgroundColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setCardBackgroundColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, val, cardBorderColor, secondaryTextColor);
-                        }
-                      }}
-                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.containerBorderColor', 'Container Border')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={cardBorderColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setCardBorderColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    />
-                    <input 
-                      type="text" 
-                      id="cfg_theme_card_border_color"
-                      name="cfg_theme_card_border_color"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      value={cardBorderColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setCardBorderColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, val, secondaryTextColor);
-                        }
-                      }}
-                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('admin.mutedSubtitleText', 'Muted / Subtitle Text')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="color" 
-                      value={secondaryTextColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSecondaryTextColor(val);
-                        applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
-                      }}
-                      className="w-9 h-9 rounded-xl border cursor-pointer p-0.5 bg-transparent shrink-0"
-                      style={{ borderColor: 'var(--color-border)' }}
-                    />
-                    <input 
-                      type="text" 
-                      id="cfg_theme_text_secondary_color"
-                      name="cfg_theme_text_secondary_color"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      value={secondaryTextColor} 
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSecondaryTextColor(val);
-                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                          applyColorsLocally(primaryColor, primaryHoverColor, accentColor, sidebarIconColor, backgroundColor, cardBackgroundColor, cardBorderColor, val);
-                        }
-                      }}
-                      className="admin-input w-full border rounded-xl px-3 py-2 font-mono font-bold uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* TAB 3: FONT SETTING */}
-        <div className={activeTab === 'font' ? 'space-y-6' : 'hidden'}>
-          <div 
-            className="border rounded-3xl p-6 shadow-xl space-y-6 text-xs" 
-            style={{ 
-              backgroundColor: 'var(--color-card)', 
-              borderColor: 'var(--color-border)' 
-            }}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Type className="h-4 w-4 text-[var(--color-primary)]" />
-                  <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                    {t('admin.globalTypographySettings', 'Global Typography & Font Settings')}
-                  </h2>
-                </div>
-                <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.globalTypographyDesc', 'Select your site-wide typography font family, base scaling, and heading tracking. Changes apply across the entire project.')}
-                </p>
-              </div>
-              <div 
-                className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5"
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-primary)'
-                }}
-              >
-                <span>{t('admin.activeFont', 'Active Font')}:</span>
-                <span className="font-extrabold">{fontFamily}</span>
-              </div>
-            </div>
-
-            {/* Font Family Selection Cards */}
-            <div className="space-y-2.5">
-              <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.fontFamilyOptions', 'Font Family Selection')}
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {FONT_OPTIONS.map((font) => {
-                  const isSelected = fontFamily.toLowerCase() === font.id.toLowerCase();
-                  return (
-                    <button
-                      key={font.id}
-                      type="button"
-                      onClick={() => handleFontSelect(font.id)}
-                      className={`p-4 rounded-2xl border text-left transition cursor-pointer relative flex flex-col justify-between ${
-                        isSelected ? 'ring-2 ring-[var(--color-primary)] shadow-md' : 'hover:opacity-90'
-                      }`}
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)',
-                        fontFamily: font.family
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
-                          {font.name}
-                        </span>
-                        {isSelected && (
-                          <span 
-                            className="px-2 py-0.5 rounded-full text-[9px] font-extrabold flex items-center gap-1"
-                            style={{ 
-                              backgroundColor: 'rgba(16, 185, 129, 0.15)', 
-                              color: 'var(--color-emerald)',
-                              border: '1px solid var(--color-emerald)'
-                            }}
-                          >
-                            <CheckCircle2 className="h-3 w-3" /> {t('common.selected', 'Selected')}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] mb-3 opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
-                        {font.description}
-                      </p>
-                      <div 
-                        className="text-xs font-medium truncate pt-2 border-t"
-                        style={{ 
-                          borderColor: 'var(--color-border)', 
-                          color: 'var(--color-text)' 
-                        }}
-                      >
-                        ABCDEFGHIJKLM 1234567890
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Sizing & Letter Spacing Controls */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              {/* Base Font Size */}
-              <div className="space-y-2">
-                <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.baseFontSize', 'Base Font Size Scaling')}
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {FONT_SIZES.map((size) => {
-                    const isSelected = fontSize === size.id;
-                    return (
-                      <button
-                        key={size.id}
-                        type="button"
-                        onClick={() => handleFontSizeSelect(size.id)}
-                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition cursor-pointer ${
-                          isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
-                        }`}
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
-                        }}
-                      >
-                        <span className="font-extrabold text-xs" style={{ color: isSelected ? 'var(--color-primary)' : 'var(--color-text)' }}>
-                          {size.label}
-                        </span>
-                        <span className="text-[10px] opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
-                          {size.id}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Letter Spacing */}
-              <div className="space-y-2">
-                <label className="block font-bold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('admin.letterSpacing', 'Heading Letter Spacing (Tracking)')}
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {LETTER_SPACINGS.map((spacing) => {
-                    const isSelected = fontLetterSpacing === spacing.id;
-                    return (
-                      <button
-                        key={spacing.id}
-                        type="button"
-                        onClick={() => handleLetterSpacingSelect(spacing.id)}
-                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition cursor-pointer ${
-                          isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
-                        }`}
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
-                        }}
-                      >
-                        <span className="font-extrabold text-xs" style={{ color: isSelected ? 'var(--color-primary)' : 'var(--color-text)' }}>
-                          {spacing.label}
-                        </span>
-                        <span className="text-[10px] opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
-                          {spacing.id}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Live Interactive Typography Preview */}
-            <div className="pt-3 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
-              <span className="font-bold text-[11px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('admin.liveFontPreview', 'Live Typography Sandbox Preview:')}
-              </span>
-              <div 
-                className="p-5 rounded-3xl border transition-colors space-y-4 shadow-inner"
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)' 
-                }}
-              >
-                <div className="space-y-1">
-                  <div 
-                    className="text-2xl font-black tracking-tight"
-                    style={{ 
-                      color: 'var(--color-primary)',
-                      letterSpacing: fontLetterSpacing
-                    }}
-                  >
-                    Heading 1: Culinary Innovation Powered by AI
-                  </div>
-                  <div 
-                    className="text-lg font-bold"
-                    style={{ 
-                      color: 'var(--color-text)',
-                      letterSpacing: fontLetterSpacing
-                    }}
-                  >
-                    Heading 2: Tailored Weekly Meal Plans & Automated Nutrition
-                  </div>
-                </div>
-
-                <p 
-                  className="leading-relaxed"
-                  style={{ 
-                    color: 'var(--color-text-secondary)',
-                    fontSize: fontSize 
-                  }}
-                >
-                  This live preview box demonstrates paragraph text rendered using your chosen font ({fontFamily}), base size ({fontSize}), and heading tracking ({fontLetterSpacing}). All buttons, badges, tables, and navigation drawers across the application immediately inherit these font rules.
-                </p>
-
-                <div className="flex flex-wrap items-center gap-3 pt-2">
-                  <button 
-                    type="button" 
-                    className="px-4 py-2 rounded-xl text-white font-extrabold text-xs shadow-md transition"
-                    style={{ backgroundColor: primaryColor }}
-                  >
-                    {t('admin.samplePrimaryBtn', 'Primary Action')}
-                  </button>
-                  <div 
-                    className="px-3 py-1.5 rounded-xl border text-xs font-bold"
-                    style={{ 
-                      backgroundColor: 'var(--color-card)', 
-                      borderColor: 'var(--color-border)', 
-                      color: accentColor 
-                    }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 inline mr-1" /> {t('admin.sampleBadge', 'Active Preset Badge')}
-                  </div>
-                  <span className="text-xs font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    $1,249.00 / mo
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* CONTROLS */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+        {/* Global Save and Reset Actions */}
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={handleResetDefaults}
-            disabled={isSaving}
-            className="px-4 py-2.5 border rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition hover:opacity-80 shadow-xs disabled:opacity-50"
+            className="px-4 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-2 cursor-pointer hover:opacity-80"
             style={{ 
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text-secondary)' 
             }}
           >
-            <RefreshCw className="h-4 w-4" /> {t('admin.resetDefaults', 'Reset to Defaults')}
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>Reset Defaults</span>
           </button>
 
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving}
-            className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 hover:opacity-90"
+            disabled={saving}
+            className="px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 shadow-lg cursor-pointer hover:opacity-90 disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
-            {isSaving ? (
-              <>
-                <RefreshCw className="h-4 w-4 animate-spin" />
-                <span>{t('admin.saving', 'Saving...')}</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="h-4 w-4" />
-                <span>
-                  {activeTab === 'theme' 
-                    ? t('admin.saveThemeSettings', 'Save Theme Settings') 
-                    : activeTab === 'font'
-                    ? t('admin.saveFontSettings', 'Save Font Settings')
-                    : t('admin.saveBrandingSettings', 'Save Branding Settings')}
-                </span>
-              </>
-            )}
+            <Save className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
+            <span>{saving ? t('adminSaving', 'Saving...') : t('adminSaveSettings', 'Save Settings')}</span>
           </button>
         </div>
       </div>
+
+      {/* Status Toast */}
+      {status && (
+        <div
+          className="mb-6 p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2 animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: status.type === 'success' ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
+            color: status.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
+          }}
+        >
+          {status.type === 'success' ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+          ) : (
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+          )}
+          <span>{status.msg}</span>
+        </div>
+      )}
+
+      {/* Navigation Sub-Tabs */}
+      <div 
+        className="flex p-1.5 rounded-2xl border mb-6 transition-colors duration-200 overflow-x-auto"
+        style={{
+          backgroundColor: 'var(--color-inner-dark)',
+          borderColor: 'var(--color-border)'
+        }}
+      >
+        {[
+          { id: 'branding', label: 'Identity & Brand Upload', icon: Sparkles },
+          { id: 'theme', label: 'Theme & Element Colors', icon: Palette },
+          { id: 'seo', label: 'Basic SEO & Meta', icon: Search },
+          { id: 'typography', label: 'Global Typography', icon: Type }
+        ].map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as any)}
+              className="flex-1 min-w-[140px] py-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+              style={isActive ? {
+                backgroundColor: 'var(--color-card)',
+                color: 'var(--color-primary)',
+                borderColor: 'var(--color-primary)',
+                borderWidth: '1px',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+              } : {
+                color: 'var(--color-text-secondary)'
+              }}
+            >
+              <tab.icon className="h-4 w-4" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* TAB 1: IDENTITY & BRAND LOGO UPLOAD (RESTORED & ENHANCED) */}
+      {activeTab === 'branding' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="rounded-3xl p-6 border shadow-xl space-y-6 transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <h2 className="text-sm font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <Sparkles className="h-4 w-4" /> Application Identity & Naming
+            </h2>
+
+            {/* Display Name Input */}
+            <div>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                Application Display Name *
+              </label>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck="false"
+                value={siteName}
+                onChange={(e) => setSiteName(e.target.value)}
+                placeholder="e.g. Zecratary"
+                className="w-full border rounded-xl px-4 py-3 text-sm outline-none font-semibold transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              />
+            </div>
+
+            {/* Application Tagline & Subtitle */}
+            <div>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                {t('adminAppTagline', 'Application Tagline & Subtitle')} *
+              </label>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck="false"
+                value={siteTagline}
+                onChange={(e) => setSiteTagline(e.target.value)}
+                placeholder={t('adminAppTaglinePlaceholder', 'Autonomous Culinary Intelligence & Precision Meal Planning')}
+                className="w-full border rounded-xl px-4 py-3 text-sm outline-none font-medium transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              />
+              <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Appears dynamically in every header, footer, meta title, and document tab.
+              </p>
+            </div>
+
+            {/* Titlebar / Sidebar Brand Icon Section (Emoji + File Upload) */}
+            <div 
+              className="p-4 rounded-2xl border space-y-3"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <ImageIcon className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                  {t('titlebarIconHeading', 'Titlebar & Sidebar Brand Icon')}
+                </label>
+                {titlebarImage && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
+                    Image Active
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                {titlebarImage ? (
+                  <div className="relative group shrink-0">
+                    <img 
+                      src={titlebarImage} 
+                      alt="Brand Logo" 
+                      className="w-16 h-16 object-contain rounded-2xl border p-1 shadow-inner"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-primary)' }}
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={titlebarEmoji}
+                    onChange={(e) => setTitlebarEmoji(e.target.value)}
+                    className="w-16 h-16 border rounded-2xl text-center text-2xl outline-none shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                )}
+
+                <div className="flex-1 space-y-2 w-full">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={uploadingTitlebar}
+                      onClick={() => titlebarFileInputRef.current?.click()}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer hover:opacity-80"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <Upload className={`h-3.5 w-3.5 ${uploadingTitlebar ? 'animate-bounce' : ''}`} />
+                      <span>{uploadingTitlebar ? 'Uploading...' : t('uploadImageBtn', 'Upload Image')}</span>
+                    </button>
+
+                    {titlebarImage && (
+                      <button
+                        type="button"
+                        onClick={() => handleRevertToEmoji('titlebar')}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer text-red-400 hover:bg-red-950/20"
+                        style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>{t('revertEmojiBtn', 'Revert to Emoji')}</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    PNG, SVG, JPG, or WebP. Replaces emoji across headers and navigation.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Browser Favicon Section (Emoji + File Upload) */}
+            <div 
+              className="p-4 rounded-2xl border space-y-3"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                  {t('faviconHeading', 'Browser Favicon')}
+                </label>
+                {faviconImage && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
+                    Favicon Active
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                {faviconImage ? (
+                  <div className="relative group shrink-0">
+                    <img 
+                      src={faviconImage} 
+                      alt="Favicon" 
+                      className="w-16 h-16 object-contain rounded-2xl border p-2 shadow-inner"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-primary)' }}
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={faviconEmoji}
+                    onChange={(e) => {
+                      setFaviconEmoji(e.target.value);
+                      updateFavicon(e.target.value);
+                    }}
+                    className="w-16 h-16 border rounded-2xl text-center text-2xl outline-none shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                )}
+
+                <div className="flex-1 space-y-2 w-full">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={uploadingFavicon}
+                      onClick={() => faviconFileInputRef.current?.click()}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer hover:opacity-80"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <UploadCloud className={`h-3.5 w-3.5 ${uploadingFavicon ? 'animate-bounce' : ''}`} />
+                      <span>{uploadingFavicon ? 'Uploading...' : t('uploadFaviconBtn', 'Upload Favicon')}</span>
+                    </button>
+
+                    {faviconImage && (
+                      <button
+                        type="button"
+                        onClick={() => handleRevertToEmoji('favicon')}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer text-red-400 hover:bg-red-950/20"
+                        style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>{t('revertEmojiBtn', 'Revert to Emoji')}</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    Replaces the browser tab icon. Supports .png, .ico, and .svg formats.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Preview Card */}
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="rounded-3xl p-6 border shadow-xl space-y-5 transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <h2 className="text-sm font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <ExternalLink className="h-4 w-4" /> Live Header & Brand Simulator
+            </h2>
+
+            {/* Document Title Tab Simulation */}
+            <div 
+              className="p-4 rounded-2xl border space-y-1.5"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                Browser Window Tab Title
+              </div>
+              <div className="flex items-center gap-2.5 font-mono text-xs">
+                {faviconImage ? (
+                  <img src={faviconImage} alt="Favicon" className="w-4 h-4 object-contain rounded" />
+                ) : (
+                  <span>{faviconEmoji || '👨‍🍳'}</span>
+                )}
+                <span className="font-bold truncate" style={{ color: 'var(--color-text)' }}>
+                  {dynamicHeaderTitle}
+                </span>
+              </div>
+            </div>
+
+            {/* Navigation Brand Header Component */}
+            <div 
+              className="p-4 rounded-2xl border space-y-2"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                Navigation Brand Header Component
+              </div>
+              <div className="flex items-center gap-3 pt-1">
+                <div 
+                  className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-inner border overflow-hidden p-1"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  {titlebarImage ? (
+                    <img src={titlebarImage} alt="Brand" className="w-full h-full object-contain" />
+                  ) : (
+                    <span>{titlebarEmoji || '👨‍🍳'}</span>
+                  )}
+                </div>
+                <div>
+                  <div className="font-black text-sm tracking-tight" style={{ color: 'var(--color-text)' }}>
+                    {siteName || DEFAULT_SITE_NAME}
+                  </div>
+                  <div className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-primary)' }}>
+                    {siteTagline || DEFAULT_SITE_TAGLINE}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Topbar Token Capsule Preview */}
+            <div 
+              className="p-4 rounded-2xl border space-y-2"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                Desktop Topbar Token Capsule Context
+              </div>
+              <div className="flex items-center gap-3 pt-1">
+                <div 
+                  className="px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-mono font-bold"
+                  style={{ 
+                    backgroundColor: 'var(--color-card)', 
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  <span>💎</span>
+                  <span>1,000,000 Tokens</span>
+                </div>
+                <div 
+                  className="px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-mono font-bold"
+                  style={{ 
+                    backgroundColor: 'var(--color-card)', 
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-emerald)'
+                  }}
+                >
+                  <span>$125.00 Wallet</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: THEME & MULTI-ELEMENT COLOR VARIATION (RESTORED & ENHANCED) */}
+      {activeTab === 'theme' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Preset Palettes (8 Variations) */}
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="lg:col-span-5 rounded-3xl p-6 border shadow-xl space-y-5 transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                <Palette className="h-4 w-4" /> {t('themePaletteHeading', 'Preset Color Palettes')}
+              </h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Select an expertly balanced aesthetic or fine-tune individual swatches.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {PRESET_THEMES.map((theme, idx) => {
+                const isSelected = themeColors.primary === theme.primary && themeColors.background === theme.background;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSelectPresetTheme(theme)}
+                    className="p-3 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer hover:scale-[1.01]"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)',
+                      borderWidth: isSelected ? '2px' : '1px'
+                    }}
+                  >
+                    <div className="text-xs font-bold mb-2 truncate" style={{ color: 'var(--color-text)' }}>
+                      {theme.name}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-4 h-4 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: theme.primary }} title="Primary" />
+                      <span className="w-4 h-4 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: theme.background }} title="Background" />
+                      <span className="w-4 h-4 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: theme.card }} title="Card Surface" />
+                      <span className="w-4 h-4 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: theme.accentEmerald }} title="Accent" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Granular Element Colors (9 Discrete Elements) */}
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="lg:col-span-7 rounded-3xl p-6 border shadow-xl space-y-5 transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                <Sliders className="h-4 w-4" /> {t('elementColorsHeading', 'Granular Element Colors')}
+              </h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Customize colors for every individual UI element across Day and Dark modes.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[
+                { key: 'primary', label: t('primaryColorLabel', 'Primary Accent Color') },
+                { key: 'primaryHover', label: t('primaryHoverColorLabel', 'Primary Hover Accent') },
+                { key: 'accentEmerald', label: t('accentEmeraldColorLabel', 'Secondary / Emerald Accent') },
+                { key: 'background', label: t('bgColorLabel', 'Canvas Background Surface') },
+                { key: 'card', label: t('cardColorLabel', 'Card / Container Surface') },
+                { key: 'innerDark', label: t('innerDarkColorLabel', 'Deep Inner / Input Surface') },
+                { key: 'border', label: t('borderColorLabel', 'Border & Divider Line') },
+                { key: 'text', label: t('textColorLabel', 'Headings & Primary Text') },
+                { key: 'textSecondary', label: t('textSecondaryColorLabel', 'Muted / Secondary Text') }
+              ].map(({ key, label }) => (
+                <div key={key} className="space-y-1.5">
+                  <label className="block text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>
+                    {label}
+                  </label>
+                  <div 
+                    className="flex items-center gap-2 border rounded-xl p-1.5 transition"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    <input
+                      type="color"
+                      value={(themeColors as any)[key] || '#ffffff'}
+                      onChange={(e) => handleColorChange(key as any, e.target.value)}
+                      className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent shrink-0"
+                    />
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-form-type="other"
+                      spellCheck="false"
+                      value={(themeColors as any)[key] || ''}
+                      onChange={(e) => handleColorChange(key as any, e.target.value)}
+                      className="flex-1 bg-transparent text-xs font-mono outline-none uppercase font-bold"
+                      style={{ color: 'var(--color-text)' }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Live Interactive UI Element Preview */}
+            <div 
+              className="p-4 rounded-2xl border space-y-3 mt-4"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                Live Component Theme Preview
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow"
+                  style={{ backgroundColor: themeColors.primary }}
+                >
+                  Primary Action
+                </button>
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow"
+                  style={{ backgroundColor: themeColors.accentEmerald }}
+                >
+                  Emerald Badge
+                </button>
+                <div 
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold shadow-xs"
+                  style={{ 
+                    backgroundColor: themeColors.card, 
+                    borderColor: themeColors.border,
+                    color: themeColors.text
+                  }}
+                >
+                  Card Text Element
+                </div>
+                <span className="text-xs font-medium" style={{ color: themeColors.textSecondary }}>
+                  Muted Description
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: BASIC SEO FIELDS (Task 3) */}
+      {activeTab === 'seo' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="rounded-3xl p-6 border shadow-xl space-y-5 transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                <Search className="h-4 w-4" /> {t('adminSeoSettingsTitle', 'Basic Search Engine Optimization (SEO)')}
+              </h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('adminSeoSettingsSubtitle', 'Configure site meta tags, search keywords, and description for Google and social previews.')}
+              </p>
+            </div>
+
+            {/* Meta Description */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                  {t('adminMetaDescriptionLabel', 'Site Meta Description')} *
+                </label>
+                <span className="text-[11px] font-mono" style={{ color: metaDescription.length > 160 ? '#ef4444' : 'var(--color-text-secondary)' }}>
+                  {metaDescription.length}/160 {t('adminCharCount', 'characters')} ({t('adminRecommended', 'Recommended')}: 140-160)
+                </span>
+              </div>
+              <textarea
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck="false"
+                rows={4}
+                value={metaDescription}
+                onChange={(e) => setMetaDescription(e.target.value)}
+                placeholder={t('adminMetaDescriptionPlaceholder', 'A brief summary of your culinary intelligence platform for search engines...')}
+                className="w-full border rounded-xl p-3.5 text-xs outline-none resize-none font-medium transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              />
+            </div>
+
+            {/* Meta Keywords */}
+            <div>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                {t('adminMetaKeywordsLabel', 'Meta Keywords (Comma separated)')}
+              </label>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck="false"
+                value={metaKeywords}
+                onChange={(e) => setMetaKeywords(e.target.value)}
+                placeholder={t('adminMetaKeywordsPlaceholder', 'culinary ai, recipe generator, meal planner, pantry management')}
+                className="w-full border rounded-xl px-4 py-3 text-xs outline-none font-medium transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              />
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {metaKeywords.split(',').map((k, idx) => {
+                  const clean = k.trim();
+                  if (!clean) return null;
+                  return (
+                    <span 
+                      key={idx}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-mono border"
+                      style={{ 
+                        backgroundColor: 'var(--color-inner-dark)', 
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      #{clean}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Meta Author */}
+            <div>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                {t('adminMetaAuthorLabel', 'Site Author / Organization')}
+              </label>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck="false"
+                value={metaAuthor}
+                onChange={(e) => setMetaAuthor(e.target.value)}
+                placeholder={t('adminMetaAuthorPlaceholder', 'Zecratary Culinary Intelligence Inc.')}
+                className="w-full border rounded-xl px-4 py-3 text-xs outline-none font-medium transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              />
+            </div>
+          </div>
+
+          {/* Google Search Snippet Preview */}
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="rounded-3xl p-6 border shadow-xl space-y-5 transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <h2 className="text-sm font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <Globe className="h-4 w-4" /> {t('adminSeoPreviewTitle', 'Live Google Search Snippet Preview')}
+            </h2>
+
+            <div 
+              className="p-5 rounded-2xl border space-y-2 bg-[#ffffff] text-[#1a0dab] font-sans shadow-md"
+              style={{ borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center gap-2 text-xs text-[#202124]">
+                <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center text-xs overflow-hidden">
+                  {faviconImage ? (
+                    <img src={faviconImage} alt="Favicon" className="w-full h-full object-contain" />
+                  ) : (
+                    faviconEmoji || '👨‍🍳'
+                  )}
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[12px] font-semibold text-[#202124]">{siteName || DEFAULT_SITE_NAME}</span>
+                  <span className="text-[11px] text-[#4d5156]">https://zecratary.com</span>
+                </div>
+              </div>
+
+              <div className="text-base font-semibold hover:underline cursor-pointer text-[#1a0dab] leading-snug">
+                {dynamicHeaderTitle}
+              </div>
+
+              <div className="text-xs text-[#4d5156] leading-relaxed">
+                {metaDescription || 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.'}
+              </div>
+            </div>
+
+            <div 
+              className="p-4 rounded-2xl border text-xs space-y-2"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="font-bold flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                <ShieldCheck className="h-4 w-4" /> SEO Indexing Guardrail
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                These values are persisted to PostgreSQL `admin_settings`, synchronized to server configuration caches, and consumed by Next.js `generateMetadata()` for search crawlers and social OpenGraph tags.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: GLOBAL TYPOGRAPHY */}
+      {activeTab === 'typography' && (
+        <div 
+          role="region"
+          data-lpignore="true"
+          className="rounded-3xl p-6 border shadow-xl space-y-5 transition-colors duration-200 max-w-2xl"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <h2 className="text-sm font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+            <Type className="h-4 w-4" /> Global Typography
+          </h2>
+
+          <div className="space-y-3">
+            {FONT_OPTIONS.map((f) => (
+              <div
+                key={f.id}
+                onClick={() => {
+                  setFontFamily(f.id);
+                  applyThemeVariables(themeColors, f.id);
+                }}
+                className="p-3.5 rounded-2xl border flex items-center justify-between cursor-pointer transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: fontFamily === f.id ? 'var(--color-primary)' : 'var(--color-border)'
+                }}
+              >
+                <div style={{ fontFamily: f.id }}>
+                  <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{f.label}</div>
+                  <div className="text-[11px] opacity-70">Sphinx of black quartz, judge my vow.</div>
+                </div>
+                {fontFamily === f.id && (
+                  <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
