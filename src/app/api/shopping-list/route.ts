@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
       `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
     }
 
-    return NextResponse.json({ success: true, message: 'Shopping items saved in PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Shopping items saved successfully.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -132,7 +132,8 @@ export async function DELETE(req: NextRequest) {
 
     if (action === 'remove_completed') {
       if (bodyIds.length > 0) {
-        await query('DELETE FROM shopping_items WHERE id = ANY($1::varchar[])', [bodyIds]);
+        const placeholders = bodyIds.map((_, i) => `$${i + 1}`).join(',');
+        await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds);
       } else {
         const sql = userId
           ? 'DELETE FROM shopping_items WHERE checked = TRUE AND (user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL)'
@@ -140,12 +141,13 @@ export async function DELETE(req: NextRequest) {
         const params = userId ? [userId] : [];
         await query(sql, params);
       }
-      return NextResponse.json({ success: true, message: 'Completed items removed from PostgreSQL.' });
+      return NextResponse.json({ success: true, message: 'Completed items removed.' });
     }
 
     if (bodyIds.length > 0) {
-      await query('DELETE FROM shopping_items WHERE id = ANY($1::varchar[])', [bodyIds]);
-      return NextResponse.json({ success: true, message: 'Items removed from PostgreSQL.' });
+      const placeholders = bodyIds.map((_, i) => `$${i + 1}`).join(',');
+      await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds);
+      return NextResponse.json({ success: true, message: 'Items removed.' });
     }
 
     if (!id) {
@@ -153,7 +155,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     await query('DELETE FROM shopping_items WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Item removed from PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Item removed.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

@@ -48,6 +48,15 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "clipboardError": "Clipboard access unavailable.",
+    "catProduce": "Produce",
+    "catMeatSeafood": "Meat & Seafood",
+    "catDairyEggs": "Dairy & Eggs",
+    "catPantryStaples": "Pantry Staples",
+    "catBakery": "Bakery",
+    "catFrozen": "Frozen",
+    "catCondimentsSpices": "Condiments & Spices",
+    "catOther": "Other",
     "activeEngine": "Active Engine",
     "blueprintCreatedToast": "Blueprint created successfully!",
     "templateAppliedErrorToast": "Error applying template to planner.",
