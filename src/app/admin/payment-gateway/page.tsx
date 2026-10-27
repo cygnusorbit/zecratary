@@ -175,13 +175,15 @@ export default function AdminPaymentGatewayPage() {
     }
   });
 
-  const webhookEndpointUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}/api/webhooks/stripe`
-    : 'https://zecratary.com/api/webhooks/stripe';
+    const [webhookEndpointUrl, setWebhookEndpointUrl] = useState('https://zecratary.com/api/webhooks/stripe');
+  const [paypalWebhookUrl, setPaypalWebhookUrl] = useState('https://zecratary.com/api/webhooks/paypal');
 
-  const paypalWebhookUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}/api/webhooks/paypal`
-    : 'https://zecratary.com/api/webhooks/paypal';
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      setWebhookEndpointUrl(`${window.location.origin}/api/webhooks/stripe`);
+      setPaypalWebhookUrl(`${window.location.origin}/api/webhooks/paypal`);
+    }
+  }, []);
 
   const toggleVisibility = (field: string) => {
     setVisibleFields(prev => ({ ...prev, [field]: !prev[field] }));
@@ -1086,7 +1088,7 @@ export default function AdminPaymentGatewayPage() {
             >
               <div className="flex items-center gap-2 overflow-hidden font-mono text-[11px]">
                 <Terminal className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                <code className="truncate select-all">
+                <code className="truncate select-all" suppressHydrationWarning>
                   stripe listen --forward-to {webhookEndpointUrl.replace(/^https?:\/\//, '')}
                 </code>
               </div>
@@ -1938,7 +1940,7 @@ export default function AdminPaymentGatewayPage() {
                   className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
                   style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                 >
-                  <span className="select-all truncate">
+                  <span className="select-all truncate" suppressHydrationWarning>
                     stripe listen --forward-to {webhookEndpointUrl.replace(/^https?:\/\//, '')}
                   </span>
                   <button

@@ -70,12 +70,11 @@ export default function GlobalThemeSync() {
   });
 
   useEffect(() => {
-    // 1. Immediately remove the preloading class to enable smooth runtime transitions
+    // Remove the preloading class to enable smooth runtime transitions
     if (typeof document !== 'undefined') {
       document.documentElement.classList.remove('theme-preloading');
     }
 
-    // 2. Fetch authoritative theme from PostgreSQL / server storage
     fetchAndApplyServerTheme();
 
     const handleThemeUpdate = (e: Event) => {
