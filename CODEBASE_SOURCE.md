@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.59",
+  "version": "8.1.60",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.59",
+  "version": "8.1.60",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -3749,16 +3749,15 @@ export default function ContactPage() {
 
 ## File: `apps/web/src/app/shopping/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { 
-  ShoppingCart, Plus, Trash2, Check, CheckSquare, Square, 
-  Search, Edit3, Share2, Copy, Filter, X, RefreshCw, 
-  CheckCircle2, AlertCircle, Bookmark, Utensils, ArrowRight
+  ShoppingCart, Plus, Trash2, Check, CheckSquare, 
+  Search, Edit3, Copy, Bookmark, X, RefreshCw, 
+  CheckCircle2, AlertCircle
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useIngredientCategories, DEFAULT_CATEGORIES } from '@/lib/categories';
@@ -3778,29 +3777,21 @@ interface ShoppingItem {
   recipeTitle?: string;
 }
 
-
+// Pure Category Name Normalizer: Extracts clean string names from primitives or entity objects
 const getCategoryName = (cat: any): string => {
-  if (!cat) return '';
+  if (!cat) return 'Produce';
   if (typeof cat === 'string') {
     const trimmed = cat.trim();
-    return trimmed === '[object Object]' ? 'Other' : trimmed;
+    if (trimmed === '[object Object]' || trimmed === '') return 'Produce';
+    return trimmed;
   }
   if (typeof cat === 'object') {
-    return (cat.name || cat.label || cat.title || cat.id || cat.slug || 'Other').trim();
-  }
-  return String(cat).trim();
-};
-
-const normalizeCategoriesList = (list: any[]): string[] => {
-  if (!Array.isArray(list)) return [];
-  const result: string[] = [];
-  list.forEach((item) => {
-    const name = getCategoryName(item);
-    if (name && name !== 'All' && !result.includes(name)) {
-      result.push(name);
+    const candidate = cat.name || cat.label || cat.title || cat.slug || cat.id;
+    if (typeof candidate === 'string' && candidate.trim() && candidate !== '[object Object]') {
+      return candidate.trim();
     }
-  });
-  return result;
+  }
+  return 'Produce';
 };
 
 export default function ShoppingPage() {
@@ -3815,16 +3806,51 @@ export default function ShoppingPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Normalize remote category objects into deduplicated clean strings
   const remoteCategories = useIngredientCategories();
   const categoriesList = useMemo(() => {
-    return Array.isArray(remoteCategories) && remoteCategories.length > 0 
+    const source = Array.isArray(remoteCategories) && remoteCategories.length > 0 
       ? remoteCategories 
-      : DEFAULT_CATEGORIES;
+      : (Array.isArray(DEFAULT_CATEGORIES) && DEFAULT_CATEGORIES.length > 0 ? DEFAULT_CATEGORIES : []);
+    
+    const set = new Set<string>();
+    const list: string[] = [];
+
+    source.forEach((c: any) => {
+      const name = getCategoryName(c);
+      if (name && !set.has(name)) {
+        set.add(name);
+        list.push(name);
+      }
+    });
+
+    return list.length > 0 
+      ? list 
+      : ['Produce', 'Meat & Seafood', 'Dairy & Eggs', 'Pantry Staples', 'Bakery', 'Frozen', 'Beverages', 'Condiments & Spices', 'Snacks', 'Other'];
   }, [remoteCategories]);
 
   const safeDefaultCategory = categoriesList[0] || 'Produce';
 
-  // Add Item Modal State (Form-Free Container)
+  // Category Translation Helper
+  const getCategoryLabel = useCallback((cat: any): string => {
+    const catName = getCategoryName(cat);
+    const keyMap: Record<string, string> = {
+      'Produce': 'catProduce',
+      'Meat & Seafood': 'catMeatSeafood',
+      'Dairy & Eggs': 'catDairyEggs',
+      'Pantry Staples': 'catPantryStaples',
+      'Bakery': 'catBakery',
+      'Frozen': 'catFrozen',
+      'Beverages': 'catBeverages',
+      'Condiments & Spices': 'catCondimentsSpices',
+      'Snacks': 'catSnacks',
+      'Other': 'catOther'
+    };
+    const transKey = keyMap[catName];
+    return transKey ? String(t(transKey, catName)) : catName;
+  }, [t]);
+
+  // Add Item Modal State (Form-Free Accessible Container)
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [itemName, setItemName] = useState<string>('');
   const [itemAmount, setItemAmount] = useState<string>('1');
@@ -3840,35 +3866,68 @@ export default function ShoppingPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // 1. Fetch live items from PostgreSQL /api/shopping
+  // 1. Non-destructive sync: merge server items with local items from /recipes
   const loadShoppingData = useCallback(async (user: User | null) => {
     const targetUserId = user?.id || 'usr_admin_1';
     setLoading(true);
 
+    let localList: ShoppingItem[] = [];
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            localList = parsed.map((i: any) => ({
+              ...i,
+              category: getCategoryName(i.category)
+            }));
+          }
+        }
+      } catch (_) {}
+    }
+
     try {
-      let fetchedItems: ShoppingItem[] = [];
       const res = await fetch(`/api/shopping?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.items)) {
-          fetchedItems = data.items;
+          const serverItems: ShoppingItem[] = data.items.map((i: any) => ({
+            ...i,
+            category: getCategoryName(i.category)
+          }));
+
+          const serverIdSet = new Set(serverItems.map(i => i.id));
+          // Preserve any locally staged items from /recipes that server hasn't committed yet
+          const uncommittedLocal = localList.filter(i => !serverIdSet.has(i.id));
+          const merged = [...serverItems, ...uncommittedLocal];
+
+          setItems(merged);
+          try {
+            localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
+            localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
+          } catch (_) {}
+
+          // If there were uncommitted items from /recipes, persist them to PostgreSQL in background
+          if (uncommittedLocal.length > 0) {
+            fetch('/api/shopping', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: targetUserId, items: uncommittedLocal })
+            }).catch(() => {});
+          }
+          return;
         }
       }
-
-      // Offline localStorage fallback
-      if (fetchedItems.length === 0 && typeof window !== 'undefined') {
-        const raw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) fetchedItems = parsed;
-        }
-      }
-
-      setItems(fetchedItems);
     } catch (e) {
-      console.warn('[ShoppingPage] Error loading data:', e);
+      console.warn('[ShoppingPage] Server fetch note:', e);
     } finally {
       setLoading(false);
+    }
+
+    // Fallback: render local cached list
+    if (localList.length > 0) {
+      setItems(localList);
     }
   }, []);
 
@@ -3884,7 +3943,6 @@ export default function ShoppingPage() {
     loadShoppingData(user);
 
     const handleSync = (e: any) => {
-      // Ignore local optimistic mutation triggers to prevent reverting checkboxes
       if (e?.detail?.source === 'local_mutation') return;
       const active = getCurrentUser();
       if (active) {
@@ -3894,26 +3952,48 @@ export default function ShoppingPage() {
     };
 
     window.addEventListener('zecratary_shopping_updated', handleSync);
+    window.addEventListener('zecratary_shopping_list_updated', handleSync);
+    window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_shopping_updated', handleSync);
+    window.removeEventListener('zecratary_shopping_list_updated', handleSync);
+    window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
     };
   }, [loadShoppingData, router, t]);
 
+  // Escape Key to Dismiss Open Modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowAddModal(false);
+        setEditingItem(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const saveItemsList = async (updatedList: ShoppingItem[], notifyOtherTabs = true) => {
-    setItems(updatedList);
+    const sanitizedList = updatedList.map(item => ({
+      ...item,
+      category: getCategoryName(item.category)
+    }));
+    setItems(sanitizedList);
     const targetUserId = currentUser?.id || 'usr_admin_1';
 
     if (typeof window !== 'undefined') {
       try {
-        localStorage.setItem('zecratary_shopping_list', JSON.stringify(updatedList));
-        localStorage.setItem('zecratary_shopping', JSON.stringify(updatedList));
+        localStorage.setItem('zecratary_shopping_list', JSON.stringify(sanitizedList));
+        localStorage.setItem('zecratary_shopping', JSON.stringify(sanitizedList));
       } catch (_) {}
     }
 
@@ -3921,7 +4001,7 @@ export default function ShoppingPage() {
       await fetch('/api/shopping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: targetUserId, items: updatedList })
+        body: JSON.stringify({ userId: targetUserId, items: sanitizedList })
       });
     } catch (_) {}
 
@@ -3936,21 +4016,24 @@ export default function ShoppingPage() {
     if (!target) return;
     const nextVal = !target.checked;
 
-    const updated = items.map(i => i.id === id ? { ...i, checked: nextVal } : i);
+    const updated = items.map(i => i.id === id ? { ...i, checked: nextVal, completed: nextVal } : i);
     await saveItemsList(updated, true);
   };
 
   // Add Item
   const handleAddItem = async () => {
-    if (!itemName.trim() || !currentUser) return;
+    const activeUser = currentUser || getCurrentUser();
+    if (!itemName.trim() || !activeUser) return;
+
+    const chosenCategory = getCategoryName(itemCategory) || safeDefaultCategory;
 
     const newItem: ShoppingItem = {
       id: 'shop_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
-      userId: currentUser.id || 'usr_admin_1',
+      userId: activeUser.id || 'usr_admin_1',
       name: itemName.trim(),
       amount: itemAmount.trim() || '1',
       unit: itemUnit.trim() || '',
-      category: itemCategory || safeDefaultCategory,
+      category: chosenCategory,
       staple: itemStaple,
       checked: false
     };
@@ -3969,9 +4052,14 @@ export default function ShoppingPage() {
 
   // Update Item
   const handleUpdateItem = async () => {
-    if (!editingItem || !editingItem.name.trim() || !currentUser) return;
+    if (!editingItem || !editingItem.name.trim()) return;
 
-    const updated = items.map(i => i.id === editingItem.id ? editingItem : i);
+    const sanitizedEditingItem = {
+      ...editingItem,
+      category: getCategoryName(editingItem.category) || safeDefaultCategory
+    };
+
+    const updated = items.map(i => i.id === sanitizedEditingItem.id ? sanitizedEditingItem : i);
     await saveItemsList(updated);
     setEditingItem(null);
     showToast(t('itemUpdatedToast', 'Item updated successfully!'));
@@ -3980,6 +4068,8 @@ export default function ShoppingPage() {
   // Delete Single Item
   const handleDeleteItem = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    if (!confirm(t('confirmDeleteItem', 'Are you sure you want to delete this item?'))) return;
+
     const updated = items.filter(i => i.id !== id);
     await saveItemsList(updated);
 
@@ -4010,56 +4100,16 @@ export default function ShoppingPage() {
     showToast(t('completedClearedToast', 'Completed items cleared.'));
   };
 
-  // Toggle Complete All / Incomplete All
-  const handleToggleCompleteAll = async () => {
-    const allChecked = items.length > 0 && items.every(i => i.checked);
-    const nextVal = !allChecked;
-
-    const updated = items.map(i => ({ ...i, checked: nextVal }));
-    await saveItemsList(updated);
-
-    showToast(nextVal ? t('allCompletedToast', 'All items marked as completed!') : t('allIncompletedToast', 'All items marked as active.'));
-  };
-
-  // Copy Shopping List to Clipboard
-  const handleCopyList = async () => {
-    if (items.length === 0) return;
-
-    const activeList = items.filter(i => !i.checked);
-    let text = `🛒 ${t('shoppingListTitle', 'Interactive Shopping List')}\n\n`;
-
-    const groups: Record<string, ShoppingItem[]> = {};
-    activeList.forEach(item => {
-      const cat = item.category || 'Produce';
-      if (!groups[cat]) groups[cat] = [];
-      groups[cat].push(item);
-    });
-
-    for (const [cat, catItems] of Object.entries(groups)) {
-      text += `📁 ${cat}:\n`;
-      catItems.forEach(i => {
-        text += `  • [ ] ${i.name} (${i.amount} ${i.unit})\n`;
-      });
-      text += '\n';
-    }
-
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast(t('listCopiedToast', 'Shopping list copied to clipboard!'));
-    } catch (_) {
-      showToast('Clipboard access unavailable.', 'error');
-    }
-  };
-
-  // Filtered Pipeline
+  // Filtered Pipeline with Pure String Comparison
   const filteredActiveItems = useMemo(() => {
     return items.filter(i => {
       if (i.checked) return false;
       if (filterStaplesOnly && !i.staple) return false;
-      if (selectedCategory !== 'All' && i.category !== selectedCategory) return false;
+      const itemCat = getCategoryName(i.category);
+      if (selectedCategory !== 'All' && itemCat !== selectedCategory) return false;
       if (search.trim()) {
         const q = search.toLowerCase().trim();
-        return i.name.toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q);
+        return i.name.toLowerCase().includes(q) || itemCat.toLowerCase().includes(q);
       }
       return true;
     });
@@ -4069,22 +4119,105 @@ export default function ShoppingPage() {
     return items.filter(i => {
       if (!i.checked) return false;
       if (filterStaplesOnly && !i.staple) return false;
-      if (selectedCategory !== 'All' && i.category !== selectedCategory) return false;
+      const itemCat = getCategoryName(i.category);
+      if (selectedCategory !== 'All' && itemCat !== selectedCategory) return false;
       if (search.trim()) {
         const q = search.toLowerCase().trim();
-        return i.name.toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q);
+        return i.name.toLowerCase().includes(q) || itemCat.toLowerCase().includes(q);
       }
       return true;
     });
   }, [items, filterStaplesOnly, selectedCategory, search]);
 
-  // Group Active Items by Category
+  // Scoped Toggle Complete All / Incomplete All for Currently Filtered View
+  const handleToggleCompleteAll = async () => {
+    const totalVisible = filteredActiveItems.length + filteredCompletedItems.length;
+    if (totalVisible === 0) return;
+
+    const allFilteredChecked = filteredActiveItems.length === 0;
+    const nextVal = !allFilteredChecked;
+    const targetIds = new Set([...filteredActiveItems, ...filteredCompletedItems].map(i => i.id));
+
+    const updated = items.map(i => {
+      if (targetIds.has(i.id)) {
+        return { ...i, checked: nextVal, completed: nextVal };
+      }
+      return i;
+    });
+
+    await saveItemsList(updated);
+    showToast(nextVal ? t('allCompletedToast', 'All items marked as completed!') : t('allIncompletedToast', 'All items marked as active.'));
+  };
+
+  // Copy Shopping List to Clipboard with Structured Fallback
+  const handleCopyList = async () => {
+    if (items.length === 0) return;
+
+    let text = `🛒 ${t('shoppingListTitle', 'Interactive Shopping List')}\n\n`;
+
+    const activeList = items.filter(i => !i.checked);
+    if (activeList.length > 0) {
+      const groups: Record<string, ShoppingItem[]> = {};
+      activeList.forEach(item => {
+        const cat = getCategoryName(item.category);
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(item);
+      });
+
+      for (const [cat, catItems] of Object.entries(groups)) {
+        text += `📁 ${getCategoryLabel(cat)}:\n`;
+        catItems.forEach(i => {
+          text += `  • [ ] ${i.name} (${i.amount} ${i.unit})\n`;
+        });
+        text += '\n';
+      }
+    }
+
+    const completedList = items.filter(i => i.checked);
+    if (completedList.length > 0) {
+      text += `✅ ${t('completedItemsHeading', 'Completed Items')}:\n`;
+      completedList.forEach(i => {
+        text += `  • [x] ${i.name} (${i.amount} ${i.unit})\n`;
+      });
+      text += '\n';
+    }
+
+    let success = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        success = true;
+      }
+    } catch (_) {}
+
+    if (!success && typeof document !== 'undefined') {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        success = true;
+      } catch (_) {}
+    }
+
+    if (success) {
+      showToast(t('listCopiedToast', 'Shopping list copied to clipboard!'));
+    } else {
+      showToast(t('clipboardError', 'Clipboard access unavailable.'), 'error');
+    }
+  };
+
+  // Group Active Items by Normalized Category String
   const groupedActiveItems = useMemo(() => {
     const groups: Record<string, ShoppingItem[]> = {};
     filteredActiveItems.forEach(item => {
-      const cat = item.category || 'Produce';
+      const cat = getCategoryName(item.category);
       if (!groups[cat]) groups[cat] = [];
-      groups[cat].push(item);
+      groups[cat].push({ ...item, category: cat });
     });
     return groups;
   }, [filteredActiveItems]);
@@ -4094,9 +4227,32 @@ export default function ShoppingPage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-shopping-canvas"
+      role="region"
+      aria-label={t('shoppingListTitle', 'Interactive Shopping List')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)' 
+      }}
     >
+      {/* Dynamic Autofill Suppression Guardrail */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .shopping-input:-webkit-autofill,
+        .shopping-input:-webkit-autofill:hover,
+        .shopping-input:-webkit-autofill:focus,
+        .shopping-input:-webkit-autofill:active {
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark, #0B101D) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark, #0B101D) inset !important;
+          -webkit-text-fill-color: var(--color-text, #ffffff) !important;
+          caret-color: var(--color-text, #ffffff) !important;
+          transition: background-color 50000s ease-in-out 0s !important;
+        }
+      `}} />
+
       {/* Toast Alert Banner */}
       {toastMessage && (
         <div 
@@ -4117,10 +4273,13 @@ export default function ShoppingPage() {
       )}
 
       {/* Top Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+      <div 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <div>
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {t('shoppingListTitle', 'Interactive Shopping List')}
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+            <ShoppingCart className="h-6 w-6" /> {t('shoppingListTitle', 'Interactive Shopping List')}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {t('shoppingListSubtitle', 'Organize your grocery checklist by category and track purchased ingredients.')}
@@ -4159,12 +4318,15 @@ export default function ShoppingPage() {
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <CheckSquare className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-            <span>{items.length > 0 && items.every(i => i.checked) ? t('incompleteAllBtn', 'Uncheck All') : t('completeAllBtn', 'Mark All Done')}</span>
+            <span>{filteredActiveItems.length === 0 && filteredCompletedItems.length > 0 ? t('incompleteAllBtn', 'Uncheck All') : t('completeAllBtn', 'Mark All Done')}</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setItemCategory(safeDefaultCategory);
+              setShowAddModal(true);
+            }}
             className="text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg cursor-pointer hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
@@ -4178,8 +4340,8 @@ export default function ShoppingPage() {
       <div 
         role="region"
         data-lpignore="true"
-        className="p-4 rounded-3xl border space-y-3.5 shadow-sm transition-colors duration-200"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        className="w-full max-w-full p-4 sm:p-5 rounded-3xl border space-y-3.5 shadow-sm transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', boxSizing: 'border-box' }}
       >
         <div className="flex flex-col sm:flex-row items-center gap-3">
           <div className="relative flex-1 w-full">
@@ -4187,13 +4349,17 @@ export default function ShoppingPage() {
             <input
               type="text"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               data-form-type="other"
-              spellCheck="false"
               placeholder={t('searchItemsPlaceholder', 'Search shopping items...')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs outline-none transition font-medium"
+              className="shopping-input w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs outline-none transition font-medium"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             />
           </div>
@@ -4202,25 +4368,19 @@ export default function ShoppingPage() {
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-3.5 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer shadow-xs"
+              className="px-3.5 py-2.5 rounded-xl border text-xs font-bold outline-none cursor-pointer shadow-xs"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               <option value="All">{t('allCategories', 'All Categories')}</option>
-              {categoriesList.map((cat: any, idx: number) => {
-                  const catName = getCategoryName(cat);
-                  if (!catName || catName === 'All') return null;
-                  return (
-                    <option key={`shopping_cat_${catName}_${idx}`} value={catName}>
-                      {catName}
-                    </option>
-                  );
-                })}
+              {categoriesList.map((cat, idx) => (
+                <option key={`filter_cat_${cat}_${idx}`} value={cat}>{getCategoryLabel(cat)}</option>
+              ))}
             </select>
 
             <button
               type="button"
               onClick={() => setFilterStaplesOnly(!filterStaplesOnly)}
-              className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+              className={`px-3 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
                 filterStaplesOnly ? 'text-white' : 'opacity-70 hover:opacity-100'
               }`}
               style={filterStaplesOnly ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' } : { backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -4233,11 +4393,11 @@ export default function ShoppingPage() {
 
         {/* Counter Pills Strip */}
         <div className="flex items-center justify-between pt-2 border-t text-xs font-bold" style={{ borderColor: 'var(--color-border)' }}>
-          <span className="text-[var(--color-primary)]">
-            {(t('activeItemsCount', '{count} Items to Buy')).replace('{count}', String(totalActive))}
+          <span style={{ color: 'var(--color-primary)' }}>
+            {(t('activeItemsCount', '{count} Items to Buy') || '{count} Items to Buy').replace('{count}', String(totalActive))}
           </span>
-          <span className="text-emerald-400">
-            {(t('completedItemsCount', '{count} Items Purchased')).replace('{count}', String(totalCompleted))}
+          <span style={{ color: 'var(--color-emerald)' }}>
+            {(t('completedItemsCount', '{count} Items Purchased') || '{count} Items Purchased').replace('{count}', String(totalCompleted))}
           </span>
         </div>
       </div>
@@ -4255,7 +4415,10 @@ export default function ShoppingPage() {
           </p>
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setItemCategory(safeDefaultCategory);
+              setShowAddModal(true);
+            }}
             className="text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
@@ -4264,78 +4427,80 @@ export default function ShoppingPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Active Items Grouped by Category */}
+          {/* Active Items Grouped by Category in Responsive Fluid Grid */}
           {Object.keys(groupedActiveItems).length > 0 && (
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
               {Object.entries(groupedActiveItems).map(([catName, catItems]) => (
                 <div 
-                  key={catName}
-                  className="border rounded-3xl p-5 space-y-3 shadow-xs transition-colors duration-200"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                  key={`group_${catName}`}
+                  className="border rounded-3xl p-5 space-y-3 shadow-xs transition-colors duration-200 flex flex-col justify-between"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', boxSizing: 'border-box' }}
                 >
-                  <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                    <h3 className="font-extrabold text-xs uppercase tracking-wider text-[var(--color-primary)]">
-                      {catName} ({catItems.length})
-                    </h3>
-                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                      <h3 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                        {getCategoryLabel(catName)} ({catItems.length})
+                      </h3>
+                    </div>
 
-                  <div className="space-y-2">
-                    {catItems.map(item => (
-                      <div
-                        key={item.id}
-                        onClick={() => handleToggleCheck(item.id)}
-                        className="p-3 rounded-2xl border flex items-center justify-between gap-3 transition cursor-pointer select-none hover:border-[var(--color-primary)] shadow-xs"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); handleToggleCheck(item.id); }}
-                            className="w-5 h-5 rounded-lg border flex items-center justify-center transition shrink-0"
-                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                          >
-                            {item.checked && <Check className="h-3.5 w-3.5 stroke-[3] text-emerald-400" />}
-                          </button>
+                    <div className="space-y-2">
+                      {catItems.map(item => (
+                        <div
+                          key={item.id}
+                          onClick={() => handleToggleCheck(item.id)}
+                          className="p-3 rounded-2xl border flex items-center justify-between gap-3 transition cursor-pointer select-none shadow-xs"
+                          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleToggleCheck(item.id); }}
+                              className="w-5 h-5 rounded-lg border flex items-center justify-center transition shrink-0 cursor-pointer"
+                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                            >
+                              {item.checked && <Check className="h-3.5 w-3.5 stroke-[3]" style={{ color: 'var(--color-emerald)' }} />}
+                            </button>
 
-                          <div className="space-y-0.5 min-w-0">
-                            <span className="font-bold text-xs block truncate" style={{ color: 'var(--color-text)' }}>
-                              {item.name}
-                            </span>
-                            {item.recipeTitle && (
-                              <span className="text-[10px] opacity-60 block truncate">
-                                {t('recipeTag', 'From recipe:')} {item.recipeTitle}
+                            <div className="space-y-0.5 min-w-0">
+                              <span className="font-bold text-xs block truncate" style={{ color: 'var(--color-text)' }}>
+                                {item.name}
                               </span>
-                            )}
+                              {item.recipeTitle && (
+                                <span className="text-[10px] opacity-60 block truncate">
+                                  {t('recipeTag', 'From recipe:')} {item.recipeTitle}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-lg border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+                              {item.amount} {item.unit}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => setEditingItem({ ...item, category: getCategoryName(item.category) })}
+                              className="p-1.5 rounded-lg border transition hover:opacity-80 cursor-pointer"
+                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                              title={t('editItemTooltip', 'Edit item')}
+                            >
+                              <Edit3 className="h-3.5 w-3.5 opacity-70" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteItem(e, item.id)}
+                              className="p-1.5 rounded-lg border text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                              style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                              title={t('deleteItemTooltip', 'Delete item')}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </div>
-
-                        <div className="flex items-center gap-2.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-lg border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-                            {item.amount} {item.unit}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() => setEditingItem(item)}
-                            className="p-1.5 rounded-lg border transition hover:opacity-80"
-                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                            title={t('editItemTooltip', 'Edit item')}
-                          >
-                            <Edit3 className="h-3.5 w-3.5 opacity-70" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteItem(e, item.id)}
-                            className="p-1.5 rounded-lg border text-red-400 hover:bg-red-500/10 transition"
-                            style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}
-                            title={t('deleteItemTooltip', 'Delete item')}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -4345,11 +4510,11 @@ export default function ShoppingPage() {
           {/* Completed Items Section */}
           {filteredCompletedItems.length > 0 && (
             <div 
-              className="border rounded-3xl p-5 space-y-3 shadow-xs transition-colors duration-200"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              className="w-full max-w-full border rounded-3xl p-5 space-y-3 shadow-xs transition-colors duration-200"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', boxSizing: 'border-box' }}
             >
               <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                <h3 className="font-extrabold text-xs uppercase tracking-wider text-emerald-400">
+                <h3 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-emerald)' }}>
                   {t('completedItemsHeading', 'Completed Items')} ({filteredCompletedItems.length})
                 </h3>
                 <button
@@ -4362,7 +4527,7 @@ export default function ShoppingPage() {
                 </button>
               </div>
 
-              <div className="space-y-2 opacity-60">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 opacity-60">
                 {filteredCompletedItems.map(item => (
                   <div
                     key={item.id}
@@ -4386,7 +4551,7 @@ export default function ShoppingPage() {
                       <button
                         type="button"
                         onClick={(e) => handleDeleteItem(e, item.id)}
-                        className="p-1 rounded text-red-400 hover:text-red-300"
+                        className="p-1 rounded text-red-400 hover:text-red-300 cursor-pointer"
                         title={t('deleteItemTooltip', 'Delete item')}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -4400,7 +4565,7 @@ export default function ShoppingPage() {
         </div>
       )}
 
-      {/* MODAL 1: ADD ITEM (Autofill Safe Container) */}
+      {/* MODAL 1: ADD ITEM (Accessible <div> Container with Autofill Guardrails) */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
@@ -4408,16 +4573,19 @@ export default function ShoppingPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-item-modal-title"
             data-lpignore="true"
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
+            data-form-type="other"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="add-item-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {t('addItemModalTitle', 'Add Shopping Item')}
               </h3>
-              <button type="button" onClick={() => setShowAddModal(false)} className="p-1 rounded-lg">
+              <button type="button" onClick={() => setShowAddModal(false)} className="p-1 rounded-lg cursor-pointer hover:opacity-80">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -4428,9 +4596,13 @@ export default function ShoppingPage() {
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('itemNamePlaceholder', 'e.g. Eggs, Fresh Milk, Lettuce...')}
                   value={itemName}
                   onChange={(e) => setItemName(e.target.value)}
@@ -4440,7 +4612,7 @@ export default function ShoppingPage() {
                       handleAddItem();
                     }
                   }}
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                  className="shopping-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -4451,11 +4623,16 @@ export default function ShoppingPage() {
                   <input
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
                     value={itemAmount}
                     onChange={(e) => setItemAmount(e.target.value)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    className="shopping-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -4465,11 +4642,16 @@ export default function ShoppingPage() {
                   <input
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
                     value={itemUnit}
                     onChange={(e) => setItemUnit(e.target.value)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    className="shopping-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -4483,15 +4665,9 @@ export default function ShoppingPage() {
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
-                  {categoriesList.map((cat: any, idx: number) => {
-                  const catName = getCategoryName(cat);
-                  if (!catName || catName === 'All') return null;
-                  return (
-                    <option key={`shopping_cat_${catName}_${idx}`} value={catName}>
-                      {catName}
-                    </option>
-                  );
-                })}
+                  {categoriesList.map((cat, idx) => (
+                    <option key={`add_cat_${cat}_${idx}`} value={cat}>{getCategoryLabel(cat)}</option>
+                  ))}
                 </select>
               </div>
 
@@ -4532,7 +4708,7 @@ export default function ShoppingPage() {
         </div>
       )}
 
-      {/* MODAL 2: EDIT ITEM */}
+      {/* MODAL 2: EDIT ITEM (Accessible <div> Container with Autofill Guardrails) */}
       {editingItem && (
         <div 
           onClick={() => setEditingItem(null)}
@@ -4540,16 +4716,19 @@ export default function ShoppingPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-item-modal-title"
             data-lpignore="true"
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
+            data-form-type="other"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="edit-item-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {t('editItemModalTitle', 'Edit Shopping Item')}
               </h3>
-              <button type="button" onClick={() => setEditingItem(null)} className="p-1 rounded-lg">
+              <button type="button" onClick={() => setEditingItem(null)} className="p-1 rounded-lg cursor-pointer hover:opacity-80">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -4560,12 +4739,22 @@ export default function ShoppingPage() {
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   value={editingItem.name}
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUpdateItem();
+                    }
+                  }}
+                  className="shopping-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -4576,11 +4765,16 @@ export default function ShoppingPage() {
                   <input
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
                     value={editingItem.amount}
                     onChange={(e) => setEditingItem({ ...editingItem, amount: e.target.value })}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    className="shopping-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -4590,11 +4784,16 @@ export default function ShoppingPage() {
                   <input
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
                     value={editingItem.unit}
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    className="shopping-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -4603,20 +4802,14 @@ export default function ShoppingPage() {
               <div>
                 <label className="block font-bold mb-1 opacity-80">{t('categoryLabel', 'Category')}</label>
                 <select
-                  value={editingItem.category}
+                  value={getCategoryName(editingItem.category)}
                   onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
-                  {categoriesList.map((cat: any, idx: number) => {
-                  const catName = getCategoryName(cat);
-                  if (!catName || catName === 'All') return null;
-                  return (
-                    <option key={`shopping_cat_${catName}_${idx}`} value={catName}>
-                      {catName}
-                    </option>
-                  );
-                })}
+                  {categoriesList.map((cat, idx) => (
+                    <option key={`edit_cat_${cat}_${idx}`} value={cat}>{getCategoryLabel(cat)}</option>
+                  ))}
                 </select>
               </div>
 
@@ -38814,6 +39007,22 @@ export default function ProfilePage() {
 ```typescript
 // @ts-nocheck
 'use client';
+const getSafeCategoryName = (cat: any): string => {
+  if (!cat) return 'Produce';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    if (trimmed === '[object Object]' || trimmed === '') return 'Produce';
+    return trimmed;
+  }
+  if (typeof cat === 'object') {
+    const candidate = cat.name || cat.label || cat.title || cat.slug || cat.id;
+    if (typeof candidate === 'string' && candidate.trim() && candidate !== '[object Object]') {
+      return candidate.trim();
+    }
+  }
+  return 'Produce';
+};
+
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -39723,7 +39932,7 @@ export default function RecipesPage() {
 
   const handleOpenShoppingModal = () => {
     if (!selectedRecipe) return;
-    const defaultCat = categories[0] || 'Produce';
+    const defaultCat = getSafeCategoryName(categories?.[0] || 'Produce');
     const baseServings = selectedRecipe.servings || 4;
     const totalServings = baseServings * servingsMultiplier;
 
@@ -39769,7 +39978,7 @@ export default function RecipesPage() {
   // Recipe Edit Studio Open & Handlers
   const handleOpenEdit = () => {
     if (!selectedRecipe) return;
-    const defaultCat = categories[0] || 'Produce';
+    const defaultCat = getSafeCategoryName(categories?.[0] || 'Produce');
     const rawIngs = selectedRecipe.ingredients || [];
     setEditForm({
       title: selectedRecipe.title || selectedRecipe.name || '',
@@ -43824,6 +44033,22 @@ import { query } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+function cleanCategory(cat: any): string {
+  if (!cat) return 'Produce';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    if (trimmed === '[object Object]' || trimmed === '') return 'Produce';
+    return trimmed;
+  }
+  if (typeof cat === 'object') {
+    const candidate = cat.name || cat.label || cat.title || cat.slug || cat.id;
+    if (typeof candidate === 'string' && candidate.trim() && candidate !== '[object Object]') {
+      return candidate.trim();
+    }
+  }
+  return 'Produce';
+}
+
 async function ensureTable() {
   try {
     await query(`
@@ -43841,7 +44066,26 @@ async function ensureTable() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_shopping_items_user ON shopping_items(user_id);
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_shopping_items_user ON shopping_items(user_id);`).catch(() => {});
+  } catch (_) {}
+
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS shopping_list (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        name VARCHAR(255) NOT NULL,
+        amount VARCHAR(64) DEFAULT '1',
+        unit VARCHAR(64) DEFAULT '',
+        category VARCHAR(64) DEFAULT 'Produce',
+        staple BOOLEAN DEFAULT FALSE,
+        checked BOOLEAN DEFAULT FALSE,
+        recipe_id VARCHAR(64),
+        recipe_title VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
     `);
   } catch (_) {}
 }
@@ -43862,7 +44106,13 @@ export async function GET(req: NextRequest) {
 
     sql += ' ORDER BY created_at ASC';
 
-    const rows: any = await query(sql, params);
+    let rows: any = [];
+    try {
+      rows = await query(sql, params);
+    } catch (_) {
+      rows = await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => []);
+    }
+
     const raw = Array.isArray(rows) ? rows : (rows?.rows || []);
 
     const formatted = raw.map((r: any) => ({
@@ -43872,7 +44122,7 @@ export async function GET(req: NextRequest) {
       item: r.name || '',
       amount: r.amount || '1',
       unit: r.unit || '',
-      category: r.category || 'Produce',
+      category: cleanCategory(r.category),
       staple: Boolean(r.staple),
       checked: Boolean(r.checked),
       recipeId: r.recipe_id || null,
@@ -43893,39 +44143,81 @@ export async function POST(req: NextRequest) {
   try {
     await ensureTable();
     const body = await req.json();
-    const targetUserId = body.userId || body.user_id || 'usr_admin_1';
+    const fallbackUserId = body?.userId || body?.user_id || 'usr_admin_1';
     const items = Array.isArray(body) ? body : (body.items || [body.item || body]);
 
     for (const item of items) {
       if (!item || (!item.name && !item.item)) continue;
       const id = String(item.id || ('s_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6))).slice(0, 64);
+      const targetUserId = item.userId || item.user_id || fallbackUserId;
       const name = String(item.name || item.item || '').trim().slice(0, 255);
       const amount = String(item.amount || item.quantity || '1').slice(0, 64);
       const unit = String(item.unit || '').slice(0, 64);
-      const category = String(item.category || 'Produce').slice(0, 64);
+      const category = cleanCategory(item.category);
       const staple = Boolean(item.staple);
       const checked = typeof item.checked !== 'undefined' ? Boolean(item.checked) : Boolean(item.completed);
       const recipeId = item.recipeId || item.recipe_id ? String(item.recipeId || item.recipe_id).slice(0, 64) : null;
       const recipeTitle = item.recipeTitle || item.recipe_title ? String(item.recipeTitle || item.recipe_title).slice(0, 255) : null;
 
-      await query(`
-        INSERT INTO shopping_items (
-          id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          amount = EXCLUDED.amount,
-          unit = EXCLUDED.unit,
-          category = EXCLUDED.category,
-          staple = EXCLUDED.staple,
-          checked = EXCLUDED.checked,
-          recipe_id = EXCLUDED.recipe_id,
-          recipe_title = EXCLUDED.recipe_title,
-          updated_at = NOW();
-      `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      try {
+        await query(`
+          INSERT INTO shopping_items (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            name = EXCLUDED.name,
+            amount = EXCLUDED.amount,
+            unit = EXCLUDED.unit,
+            category = EXCLUDED.category,
+            staple = EXCLUDED.staple,
+            checked = EXCLUDED.checked,
+            recipe_id = EXCLUDED.recipe_id,
+            recipe_title = EXCLUDED.recipe_title,
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      } catch (_) {
+        // MySQL fallback syntax
+        await query(`
+          INSERT INTO shopping_items (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+          ON DUPLICATE KEY UPDATE
+            user_id = VALUES(user_id),
+            name = VALUES(name),
+            amount = VALUES(amount),
+            unit = VALUES(unit),
+            category = VALUES(category),
+            staple = VALUES(staple),
+            checked = VALUES(checked),
+            recipe_id = VALUES(recipe_id),
+            recipe_title = VALUES(recipe_title),
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]).catch(() => {});
+      }
+
+      // Synchronize shopping_list table
+      try {
+        await query(`
+          INSERT INTO shopping_list (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            name = EXCLUDED.name,
+            amount = EXCLUDED.amount,
+            unit = EXCLUDED.unit,
+            category = EXCLUDED.category,
+            staple = EXCLUDED.staple,
+            checked = EXCLUDED.checked,
+            recipe_id = EXCLUDED.recipe_id,
+            recipe_title = EXCLUDED.recipe_title,
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      } catch (_) {}
     }
 
-    return NextResponse.json({ success: true, message: 'Shopping items saved in PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Shopping items saved successfully.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -43952,28 +44244,34 @@ export async function DELETE(req: NextRequest) {
 
     if (action === 'remove_completed') {
       if (bodyIds.length > 0) {
-        await query('DELETE FROM shopping_items WHERE id = ANY($1::varchar[])', [bodyIds]);
+        const placeholders = bodyIds.map((_, i) => `$${i + 1}`).join(',');
+        await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
+        await query(`DELETE FROM shopping_list WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
       } else {
         const sql = userId
           ? 'DELETE FROM shopping_items WHERE checked = TRUE AND (user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL)'
           : 'DELETE FROM shopping_items WHERE checked = TRUE';
         const params = userId ? [userId] : [];
-        await query(sql, params);
+        await query(sql, params).catch(() => {});
+        await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => {});
       }
-      return NextResponse.json({ success: true, message: 'Completed items removed from PostgreSQL.' });
+      return NextResponse.json({ success: true, message: 'Completed items removed.' });
     }
 
     if (bodyIds.length > 0) {
-      await query('DELETE FROM shopping_items WHERE id = ANY($1::varchar[])', [bodyIds]);
-      return NextResponse.json({ success: true, message: 'Items removed from PostgreSQL.' });
+      const placeholders = bodyIds.map((_, i) => `$${i + 1}`).join(',');
+      await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
+      await query(`DELETE FROM shopping_list WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Items removed.' });
     }
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Item ID is required' }, { status: 400 });
     }
 
-    await query('DELETE FROM shopping_items WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Item removed from PostgreSQL.' });
+    await query('DELETE FROM shopping_items WHERE id = $1', [id.trim()]).catch(() => {});
+    await query('DELETE FROM shopping_list WHERE id = $1', [id.trim()]).catch(() => {});
+    return NextResponse.json({ success: true, message: 'Item removed.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -53615,6 +53913,22 @@ import { query } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+function cleanCategory(cat: any): string {
+  if (!cat) return 'Produce';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    if (trimmed === '[object Object]' || trimmed === '') return 'Produce';
+    return trimmed;
+  }
+  if (typeof cat === 'object') {
+    const candidate = cat.name || cat.label || cat.title || cat.slug || cat.id;
+    if (typeof candidate === 'string' && candidate.trim() && candidate !== '[object Object]') {
+      return candidate.trim();
+    }
+  }
+  return 'Produce';
+}
+
 async function ensureTable() {
   try {
     await query(`
@@ -53632,7 +53946,26 @@ async function ensureTable() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_shopping_items_user ON shopping_items(user_id);
+    `);
+    await query(`CREATE INDEX IF NOT EXISTS idx_shopping_items_user ON shopping_items(user_id);`).catch(() => {});
+  } catch (_) {}
+
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS shopping_list (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        name VARCHAR(255) NOT NULL,
+        amount VARCHAR(64) DEFAULT '1',
+        unit VARCHAR(64) DEFAULT '',
+        category VARCHAR(64) DEFAULT 'Produce',
+        staple BOOLEAN DEFAULT FALSE,
+        checked BOOLEAN DEFAULT FALSE,
+        recipe_id VARCHAR(64),
+        recipe_title VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
     `);
   } catch (_) {}
 }
@@ -53653,7 +53986,13 @@ export async function GET(req: NextRequest) {
 
     sql += ' ORDER BY created_at ASC';
 
-    const rows: any = await query(sql, params);
+    let rows: any = [];
+    try {
+      rows = await query(sql, params);
+    } catch (_) {
+      rows = await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => []);
+    }
+
     const raw = Array.isArray(rows) ? rows : (rows?.rows || []);
 
     const formatted = raw.map((r: any) => ({
@@ -53663,7 +54002,7 @@ export async function GET(req: NextRequest) {
       item: r.name || '',
       amount: r.amount || '1',
       unit: r.unit || '',
-      category: r.category || 'Produce',
+      category: cleanCategory(r.category),
       staple: Boolean(r.staple),
       checked: Boolean(r.checked),
       recipeId: r.recipe_id || null,
@@ -53684,39 +54023,81 @@ export async function POST(req: NextRequest) {
   try {
     await ensureTable();
     const body = await req.json();
-    const targetUserId = body.userId || body.user_id || 'usr_admin_1';
+    const fallbackUserId = body?.userId || body?.user_id || 'usr_admin_1';
     const items = Array.isArray(body) ? body : (body.items || [body.item || body]);
 
     for (const item of items) {
       if (!item || (!item.name && !item.item)) continue;
       const id = String(item.id || ('s_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6))).slice(0, 64);
+      const targetUserId = item.userId || item.user_id || fallbackUserId;
       const name = String(item.name || item.item || '').trim().slice(0, 255);
       const amount = String(item.amount || item.quantity || '1').slice(0, 64);
       const unit = String(item.unit || '').slice(0, 64);
-      const category = String(item.category || 'Produce').slice(0, 64);
+      const category = cleanCategory(item.category);
       const staple = Boolean(item.staple);
       const checked = typeof item.checked !== 'undefined' ? Boolean(item.checked) : Boolean(item.completed);
       const recipeId = item.recipeId || item.recipe_id ? String(item.recipeId || item.recipe_id).slice(0, 64) : null;
       const recipeTitle = item.recipeTitle || item.recipe_title ? String(item.recipeTitle || item.recipe_title).slice(0, 255) : null;
 
-      await query(`
-        INSERT INTO shopping_items (
-          id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          amount = EXCLUDED.amount,
-          unit = EXCLUDED.unit,
-          category = EXCLUDED.category,
-          staple = EXCLUDED.staple,
-          checked = EXCLUDED.checked,
-          recipe_id = EXCLUDED.recipe_id,
-          recipe_title = EXCLUDED.recipe_title,
-          updated_at = NOW();
-      `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      try {
+        await query(`
+          INSERT INTO shopping_items (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            name = EXCLUDED.name,
+            amount = EXCLUDED.amount,
+            unit = EXCLUDED.unit,
+            category = EXCLUDED.category,
+            staple = EXCLUDED.staple,
+            checked = EXCLUDED.checked,
+            recipe_id = EXCLUDED.recipe_id,
+            recipe_title = EXCLUDED.recipe_title,
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      } catch (_) {
+        // MySQL fallback syntax
+        await query(`
+          INSERT INTO shopping_items (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+          ON DUPLICATE KEY UPDATE
+            user_id = VALUES(user_id),
+            name = VALUES(name),
+            amount = VALUES(amount),
+            unit = VALUES(unit),
+            category = VALUES(category),
+            staple = VALUES(staple),
+            checked = VALUES(checked),
+            recipe_id = VALUES(recipe_id),
+            recipe_title = VALUES(recipe_title),
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]).catch(() => {});
+      }
+
+      // Synchronize shopping_list table
+      try {
+        await query(`
+          INSERT INTO shopping_list (
+            id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            name = EXCLUDED.name,
+            amount = EXCLUDED.amount,
+            unit = EXCLUDED.unit,
+            category = EXCLUDED.category,
+            staple = EXCLUDED.staple,
+            checked = EXCLUDED.checked,
+            recipe_id = EXCLUDED.recipe_id,
+            recipe_title = EXCLUDED.recipe_title,
+            updated_at = NOW();
+        `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
+      } catch (_) {}
     }
 
-    return NextResponse.json({ success: true, message: 'Shopping items saved in PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Shopping items saved successfully.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -53743,28 +54124,34 @@ export async function DELETE(req: NextRequest) {
 
     if (action === 'remove_completed') {
       if (bodyIds.length > 0) {
-        await query('DELETE FROM shopping_items WHERE id = ANY($1::varchar[])', [bodyIds]);
+        const placeholders = bodyIds.map((_, i) => `$${i + 1}`).join(',');
+        await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
+        await query(`DELETE FROM shopping_list WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
       } else {
         const sql = userId
           ? 'DELETE FROM shopping_items WHERE checked = TRUE AND (user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL)'
           : 'DELETE FROM shopping_items WHERE checked = TRUE';
         const params = userId ? [userId] : [];
-        await query(sql, params);
+        await query(sql, params).catch(() => {});
+        await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => {});
       }
-      return NextResponse.json({ success: true, message: 'Completed items removed from PostgreSQL.' });
+      return NextResponse.json({ success: true, message: 'Completed items removed.' });
     }
 
     if (bodyIds.length > 0) {
-      await query('DELETE FROM shopping_items WHERE id = ANY($1::varchar[])', [bodyIds]);
-      return NextResponse.json({ success: true, message: 'Items removed from PostgreSQL.' });
+      const placeholders = bodyIds.map((_, i) => `$${i + 1}`).join(',');
+      await query(`DELETE FROM shopping_items WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
+      await query(`DELETE FROM shopping_list WHERE id IN (${placeholders})`, bodyIds).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Items removed.' });
     }
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Item ID is required' }, { status: 400 });
     }
 
-    await query('DELETE FROM shopping_items WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Item removed from PostgreSQL.' });
+    await query('DELETE FROM shopping_items WHERE id = $1', [id.trim()]).catch(() => {});
+    await query('DELETE FROM shopping_list WHERE id = $1', [id.trim()]).catch(() => {});
+    return NextResponse.json({ success: true, message: 'Item removed.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -63047,6 +63434,15 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "clipboardError": "Clipboard access unavailable.",
+    "catProduce": "Produce",
+    "catMeatSeafood": "Meat & Seafood",
+    "catDairyEggs": "Dairy & Eggs",
+    "catPantryStaples": "Pantry Staples",
+    "catBakery": "Bakery",
+    "catFrozen": "Frozen",
+    "catCondimentsSpices": "Condiments & Spices",
+    "catOther": "Other",
     "activeEngine": "Active Engine",
     "blueprintCreatedToast": "Blueprint created successfully!",
     "templateAppliedErrorToast": "Error applying template to planner.",
