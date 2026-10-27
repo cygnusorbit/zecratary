@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.56",
+  "version": "8.1.57",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.56",
+  "version": "8.1.57",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -42412,75 +42412,50 @@ export async function GET(
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { getRecipeImageDir } from '@/lib/recipeFiles';
+import { getCanonicalImagesDir } from '@/lib/storageService';
 
 export const dynamic = 'force-dynamic';
 
-function getMimeType(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  switch (ext) {
-    case '.webp': return 'image/webp';
-    case '.png': return 'image/png';
-    case '.jpg':
-    case '.jpeg': return 'image/jpeg';
-    case '.gif': return 'image/gif';
-    case '.svg': return 'image/svg+xml';
-    case '.avif': return 'image/avif';
-    default: return 'image/jpeg';
-  }
-}
-
 export async function GET(
-  req: NextRequest, 
-  { params }: { params: Promise<{ filename: string }> }
+  req: NextRequest,
+  context: { params: Promise<{ filename: string }> }
 ) {
   try {
-    const { filename } = await params;
-    const safeName = path.basename(filename);
-    const primaryPath = path.join(getRecipeImageDir(), safeName);
-
-    let foundPath = fs.existsSync(primaryPath) ? primaryPath : null;
-
-    if (!foundPath) {
-      const candidates = [
-        path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images', safeName),
-        path.join(process.cwd(), 'public', 'recipes', 'images', safeName),
-        path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes', safeName),
-        path.join(process.cwd(), 'public', 'uploads', 'recipes', safeName)
-      ];
-      for (const c of candidates) {
-        if (fs.existsSync(c)) {
-          foundPath = c;
-          break;
-        }
-      }
+    const { filename } = await context.params;
+    if (!filename) {
+      return new NextResponse('Filename missing', { status: 400 });
     }
 
-    if (foundPath) {
-      const buffer = fs.readFileSync(foundPath);
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': getMimeType(foundPath),
-          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'
-        }
-      });
+    const safeFilename = path.basename(filename);
+    const imagesDir = getCanonicalImagesDir();
+    let filePath = path.join(imagesDir, safeFilename);
+
+    if (!fs.existsSync(filePath)) {
+      // Fallback check in default.jpg
+      filePath = path.join(imagesDir, 'default.jpg');
     }
 
-    // Default fallback
-    const defaultFallback = path.join(getRecipeImageDir(), 'default.jpg');
-    if (fs.existsSync(defaultFallback)) {
-      const buffer = fs.readFileSync(defaultFallback);
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': 'image/jpeg',
-          'Cache-Control': 'public, max-age=3600'
-        }
-      });
+    if (!fs.existsSync(filePath)) {
+      return new NextResponse('Image not found', { status: 404 });
     }
 
-    return NextResponse.json({ error: 'Image not found' }, { status: 404 });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    const ext = path.extname(filePath).toLowerCase();
+    let mimeType = 'image/jpeg';
+    if (ext === '.png') mimeType = 'image/png';
+    else if (ext === '.webp') mimeType = 'image/webp';
+    else if (ext === '.gif') mimeType = 'image/gif';
+    else if (ext === '.avif') mimeType = 'image/avif';
+
+    const buffer = fs.readFileSync(filePath);
+    return new NextResponse(buffer, {
+      status: 200,
+      headers: {
+        'Content-Type': mimeType,
+        'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+      },
+    });
+  } catch (err: any) {
+    return new NextResponse('Internal Server Error', { status: 500 });
   }
 }
 
@@ -50281,6 +50256,64 @@ export async function POST(req: Request) {
 
 ```
 
+## File: `apps/web/src/app/api/admin/storage/clean/route.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+import { getCanonicalImagesDir, getCanonicalRecipesDir } from '@/lib/storageService';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST() {
+  try {
+    const imagesDir = getCanonicalImagesDir();
+    const recipesDir = getCanonicalRecipesDir();
+
+    if (!fs.existsSync(imagesDir) || !fs.existsSync(recipesDir)) {
+      return NextResponse.json({ success: true, removedCount: 0, message: 'Directories verified.' });
+    }
+
+    const recipeFiles = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json'));
+    const referencedImages = new Set<string>();
+    referencedImages.add('default.jpg');
+
+    for (const rf of recipeFiles) {
+      try {
+        const raw = fs.readFileSync(path.join(recipesDir, rf), 'utf-8');
+        const data = JSON.parse(raw);
+        const img = data.imageUrl || data.image || '';
+        if (img.startsWith('/recipes/images/')) {
+          referencedImages.add(path.basename(img));
+        }
+      } catch (_) {}
+    }
+
+    const allImages = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(f));
+    let removedCount = 0;
+
+    for (const img of allImages) {
+      if (!referencedImages.has(img)) {
+        try {
+          fs.unlinkSync(path.join(imagesDir, img));
+          removedCount++;
+        } catch (_) {}
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      removedCount,
+      remainingCount: allImages.length - removedCount,
+      message: `Cleaned ${removedCount} orphan image(s). ${allImages.length - removedCount} active images retained.`
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
 // @ts-nocheck
@@ -54910,24 +54943,19 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { imageUrl, recipeId } = body;
+    const { url, recipeId } = body;
 
-    if (!imageUrl) {
-      return NextResponse.json({ success: false, error: 'Image URL is required' }, { status: 400 });
+    if (!url) {
+      return NextResponse.json({ success: false, error: 'Image URL required' }, { status: 400 });
     }
 
-    const targetId = recipeId || `img_${Date.now()}`;
-    // Downloads and uploads to Supabase S3 or saves to /recipes/images based on /admin/storage
-    const resolvedUrl = await saveRecipeImageLocally(targetId, imageUrl);
-
+    const resolvedUrl = await saveRecipeImageLocally(recipeId || `img_${Date.now()}`, url);
     return NextResponse.json({
       success: true,
       url: resolvedUrl,
       localUrl: resolvedUrl,
-      imageUrl: resolvedUrl
     });
   } catch (err: any) {
-    console.error('[Save Remote Image API] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -55107,22 +55135,18 @@ export async function POST(req: NextRequest) {
     const file = formData.get('file') as File | null;
 
     if (!file) {
-      return NextResponse.json({ success: false, error: 'No file provided' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'No file uploaded' }, { status: 400 });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    // Direct upload respecting /admin/storage settings (Supabase S3 or /recipes/images)
-    const fileUrl = await uploadMediaFile(buffer, file.name, file.type || 'image/jpeg');
+    const uploadedUrl = await uploadMediaFile(buffer, file.name, file.type || 'image/jpeg');
 
     return NextResponse.json({
       success: true,
-      url: fileUrl,
-      localUrl: fileUrl,
-      imageUrl: fileUrl,
-      filename: file.name
+      url: uploadedUrl,
+      path: uploadedUrl,
     });
   } catch (err: any) {
-    console.error('[Upload API] Error uploading media:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -74783,7 +74807,7 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 
 ## File: `apps/web/src/lib/storageService.ts`
 ```typescript
-// Centralized Media Storage Engine (Canonical apps/web/public/recipes/images)
+// Centralized Media Storage Engine (Option C: Localhost vs Supabase S3)
 // GitHub: cygnusorbit/zecratary
 
 import fs from 'fs';
@@ -74834,20 +74858,60 @@ export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
 let memoryStorageConfig: StorageConfig = { ...DEFAULT_STORAGE_CONFIG };
 
 export function getCanonicalWebPublicDir(): string {
-  const cwd = process.cwd();
-  if (fs.existsSync(path.join(cwd, 'public')) && (fs.existsSync(path.join(cwd, 'src', 'app')) || fs.existsSync(path.join(cwd, 'app')))) {
-    return path.join(cwd, 'public');
+  const candidates = [
+    path.join(process.cwd(), 'apps', 'web', 'public'),
+    path.join(process.cwd(), 'public'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
   }
-  if (fs.existsSync(path.join(cwd, 'apps', 'web', 'public'))) {
-    return path.join(cwd, 'apps', 'web', 'public');
+  const primary = path.join(process.cwd(), 'apps', 'web', 'public');
+  if (!fs.existsSync(primary)) {
+    fs.mkdirSync(primary, { recursive: true });
   }
-  if (fs.existsSync(path.join(cwd, 'public'))) {
-    return path.join(cwd, 'public');
-  }
-  return path.join(cwd, 'apps', 'web', 'public');
+  return primary;
 }
 
+export const getWebPublicDir = getCanonicalWebPublicDir;
+
+export function getCanonicalImagesDir(): string {
+  const candidates = [
+    path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images'),
+    path.join(process.cwd(), 'public', 'recipes', 'images'),
+    path.join(process.cwd(), 'recipes', 'images'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  const primary = path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images');
+  if (!fs.existsSync(primary)) {
+    fs.mkdirSync(primary, { recursive: true });
+  }
+  return primary;
+}
+
+export const getImagesDir = getCanonicalImagesDir;
+
+export function getCanonicalRecipesDir(): string {
+  const candidates = [
+    path.join(process.cwd(), 'apps', 'web', 'public', 'recipes'),
+    path.join(process.cwd(), 'public', 'recipes'),
+    path.join(process.cwd(), 'recipes'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  const primary = path.join(process.cwd(), 'apps', 'web', 'public', 'recipes');
+  if (!fs.existsSync(primary)) {
+    fs.mkdirSync(primary, { recursive: true });
+  }
+  return primary;
+}
+
+export const getRecipesDir = getCanonicalRecipesDir;
+
 export async function getStorageSettings(): Promise<StorageConfig> {
+  // 1. Try PostgreSQL & MySQL DB
   try {
     const res: any = await query('SELECT storage_settings FROM admin_settings WHERE id = $1;', ['primary_settings']);
     const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
@@ -74865,14 +74929,14 @@ export async function getStorageSettings(): Promise<StorageConfig> {
     }
   } catch (_) {}
 
-  // Fallback to local server JSON store
-  try {
-    const jsonPaths = [
-      path.join(process.cwd(), 'data', 'admin_settings.json'),
-      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    ];
-    for (const jp of jsonPaths) {
-      if (fs.existsSync(jp)) {
+  // 2. Fallback to Local JSON stores
+  const jsonPaths = [
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+  ];
+  for (const jp of jsonPaths) {
+    if (fs.existsSync(jp)) {
+      try {
         const fileData = JSON.parse(fs.readFileSync(jp, 'utf8'));
         if (fileData.storage_settings) {
           memoryStorageConfig = {
@@ -74883,9 +74947,9 @@ export async function getStorageSettings(): Promise<StorageConfig> {
           };
           return memoryStorageConfig;
         }
-      }
+      } catch (_) {}
     }
-  } catch (_) {}
+  }
 
   return memoryStorageConfig;
 }
@@ -74901,7 +74965,7 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
 
   memoryStorageConfig = merged;
 
-  // 1. Commit to PostgreSQL & MySQL
+  // 1. PostgreSQL & MySQL Persistence
   try {
     await query(`
       INSERT INTO admin_settings (id, storage_settings, updated_at)
@@ -74911,24 +74975,23 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
         updated_at = NOW();
     `, [JSON.stringify(merged)]);
   } catch (err: any) {
-    console.warn('[StorageService] PostgreSQL commit notice:', err.message);
+    console.warn('[StorageService] DB commit notice:', err.message);
   }
 
-  // 2. Mirror to Server JSON stores
+  // 2. Mirror to JSON files
   const jsonPaths = [
-    path.join(process.cwd(), 'data', 'admin_settings.json'),
     path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
   ];
-
   for (const jp of jsonPaths) {
     try {
       const dir = path.dirname(jp);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      let existing = {};
+      let existing: any = {};
       if (fs.existsSync(jp)) {
         try { existing = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (_) {}
       }
-      (existing as any).storage_settings = merged;
+      existing.storage_settings = merged;
       fs.writeFileSync(jp, JSON.stringify(existing, null, 2), 'utf8');
     } catch (_) {}
   }
@@ -74936,6 +74999,7 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
   return merged;
 }
 
+// AWS S3 SigV4 Upload Protocol for Supabase S3 Gateway
 export async function uploadToSupabaseS3(
   buffer: Buffer,
   filename: string,
@@ -74982,7 +75046,6 @@ export async function uploadToSupabaseS3(
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
 
   const authorizationHeader = `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
   const uploadTargetUrl = `${endpointUrl.protocol}//${host}${canonicalUri}`;
 
   const res = await fetch(uploadTargetUrl, {
@@ -75019,17 +75082,17 @@ export async function uploadMediaFile(
   const ext = path.extname(originalFilename) || '.jpg';
   const cleanName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}${ext}`;
 
+  // Mode: Supabase Cloud S3
   if (settings.provider === 'supabase' && settings.supabase.enabled && settings.supabase.secretAccessKey) {
     try {
       return await uploadToSupabaseS3(buffer, cleanName, contentType, settings.supabase);
     } catch (err: any) {
-      console.warn('[Storage] Supabase S3 failed, falling back to apps/web/public/recipes/images:', err.message);
+      console.warn('[Storage] Supabase S3 failed, falling back to localhost disk:', err.message);
     }
   }
 
-  // Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
-  const targetDir = path.join(getCanonicalWebPublicDir(), 'recipes', 'images');
-  if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+  // Mode: Localhost Disk (apps/web/public/recipes/images)
+  const targetDir = getCanonicalImagesDir();
   fs.writeFileSync(path.join(targetDir, cleanName), buffer);
 
   const prefix = settings.localhost.publicPrefix || '/recipes/images';
@@ -75037,9 +75100,8 @@ export async function uploadMediaFile(
 }
 
 export function getUniversalDiskDiagnostics() {
-  const publicDir = getCanonicalWebPublicDir();
-  const recipesDir = path.join(publicDir, 'recipes');
-  const imagesDir = path.join(recipesDir, 'images');
+  const recipesDir = getCanonicalRecipesDir();
+  const imagesDir = getCanonicalImagesDir();
 
   let recipesCount = 0;
   let imagesCount = 0;
@@ -76422,25 +76484,29 @@ export default {
 
 ## File: `apps/web/src/lib/recipeFiles.ts`
 ```typescript
+// Centralized Recipe Flat-File & Image Ingestion Bridge
+// GitHub: cygnusorbit/zecratary
+
 import fs from 'fs';
 import path from 'path';
-import { getStorageSettings, uploadToSupabaseS3 } from '@/lib/storageService';
+import { 
+  getStorageSettings, 
+  uploadToSupabaseS3, 
+  getCanonicalImagesDir, 
+  getCanonicalRecipesDir 
+} from '@/lib/storageService';
 
-export interface RecipeOwner {
-  id: string;
-  name: string;
-  email: string;
+export interface RecipeOwnership {
+  userId: string;
+  createdBy: string;
+  creatorName: string;
+  creatorEmail: string;
 }
 
-export interface StoredRecipe {
+export interface FullRecipeRecord {
   id: string;
-  ownership: {
-    userId: string;
-    createdBy: string;
-    creatorName: string;
-    creatorEmail: string;
-  };
-  owner: RecipeOwner;
+  ownership: RecipeOwnership;
+  owner: { id: string; name: string; email: string };
   ownerId: string;
   ownerName: string;
   ownerEmail: string;
@@ -76475,44 +76541,49 @@ export interface StoredRecipe {
   updatedAt: string;
 }
 
-// Resolves canonical apps/web/public directory across monorepo layouts
-export function getCanonicalWebPublicDir(): string {
-  const cwd = process.cwd();
-  // If running inside apps/web
-  if (fs.existsSync(path.join(cwd, 'public')) && (fs.existsSync(path.join(cwd, 'src', 'app')) || fs.existsSync(path.join(cwd, 'app')))) {
-    return path.join(cwd, 'public');
-  }
-  // If running from workspace root
-  if (fs.existsSync(path.join(cwd, 'apps', 'web', 'public'))) {
-    return path.join(cwd, 'apps', 'web', 'public');
-  }
-  if (fs.existsSync(path.join(cwd, 'public'))) {
-    return path.join(cwd, 'public');
-  }
-  return path.join(cwd, 'apps', 'web', 'public');
-}
-
+// Canonical export for route handlers and consumer endpoints
 export function getRecipeJsonDir(): string {
-  const dir = path.join(getCanonicalWebPublicDir(), 'recipes');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  return getCanonicalRecipesDir();
 }
 
-export function getRecipeImageDir(): string {
-  const dir = path.join(getRecipeJsonDir(), 'images');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
+export const getRecipesDir = getRecipeJsonDir;
+export const getRecipeDir = getRecipeJsonDir;
+
+export function getRecipeFilePath(idOrFilename: string): string {
+  const safe = path.basename(idOrFilename).replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const filename = safe.endsWith('.json') ? safe : `${safe}.json`;
+  return path.join(getCanonicalRecipesDir(), filename);
+}
+
+export function getRecipeById(id: string): FullRecipeRecord | null {
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const targetDir = getCanonicalRecipesDir();
+  const candidates = [
+    path.join(targetDir, `${safeId}.json`),
+    path.join(targetDir, safeId),
+  ];
+  for (const fp of candidates) {
+    if (fs.existsSync(fp)) {
+      try {
+        const raw = fs.readFileSync(fp, 'utf-8');
+        return JSON.parse(raw);
+      } catch (_) {}
+    }
+  }
+  return null;
 }
 
 export async function saveRecipeImageLocally(recipeId: string, imageInput?: string): Promise<string> {
   if (!imageInput || typeof imageInput !== 'string') return '/recipes/images/default.jpg';
+  
+  // If already hosted on Supabase or local /recipes/images
   if (imageInput.includes('.supabase.co/storage/v1/object/public/')) return imageInput;
   if (imageInput.startsWith('/recipes/images/')) return imageInput;
 
   const safeId = recipeId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const settings = await getStorageSettings();
 
-  // 1. Supabase S3 Storage Provider
+  // Mode 1: Supabase S3 Cloud Storage
   if (settings.provider === 'supabase' && settings.supabase.enabled && settings.supabase.secretAccessKey) {
     try {
       let buffer: Buffer | null = null;
@@ -76529,7 +76600,7 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
       } else if (imageInput.startsWith('http://') || imageInput.startsWith('https://')) {
         const res = await fetch(imageInput, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
           }
         });
@@ -76543,16 +76614,15 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
 
       if (buffer) {
         const cloudFilename = `${safeId}_${Date.now()}.${ext}`;
-        const cloudUrl = await uploadToSupabaseS3(buffer, cloudFilename, contentType, settings.supabase);
-        return cloudUrl;
+        return await uploadToSupabaseS3(buffer, cloudFilename, contentType, settings.supabase);
       }
     } catch (err: any) {
       console.warn('[recipeFiles] Supabase upload failed, falling back to disk:', err.message);
     }
   }
 
-  // 2. Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
-  const targetDir = getRecipeImageDir();
+  // Mode 2: Localhost Disk (apps/web/public/recipes/images/)
+  const targetDir = getCanonicalImagesDir();
 
   if (imageInput.startsWith('data:image/')) {
     try {
@@ -76560,7 +76630,8 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
       if (match) {
         const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
         const filename = `${safeId}_${Date.now()}.${ext}`;
-        fs.writeFileSync(path.join(targetDir, filename), Buffer.from(match[2], 'base64'));
+        const buffer = Buffer.from(match[2], 'base64');
+        fs.writeFileSync(path.join(targetDir, filename), buffer);
         return `/recipes/images/${filename}`;
       }
     } catch (_) {}
@@ -76570,7 +76641,7 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
     try {
       const res = await fetch(imageInput, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
         }
       });
@@ -76591,7 +76662,7 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
   return imageInput;
 }
 
-export function saveRecipeJsonFile(recipe: any, ownerInfo?: any): StoredRecipe {
+export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwnership>): FullRecipeRecord {
   const id = recipe.id || `rcp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
 
@@ -76613,7 +76684,7 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: any): StoredRecipe {
   }
   if (!Array.isArray(rawInstructions)) rawInstructions = [];
 
-  const record: StoredRecipe = {
+  const record: FullRecipeRecord = {
     id,
     ownership: { userId, createdBy, creatorName, creatorEmail },
     owner: { id: userId, name: creatorName, email: creatorEmail },
@@ -76643,7 +76714,7 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: any): StoredRecipe {
     sourceUrl: recipe.sourceUrl || recipe.source_url || '',
     isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
     isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
-    rating: Number(recipe.rating) || 5,
+    rating: Number(recipe.rating) || 0,
     note: recipe.note || '',
     bookId: recipe.bookId || recipe.book_id || null,
     tags: Array.isArray(recipe.tags) ? recipe.tags : [recipe.recipeType || 'Main Dish'],
@@ -76651,76 +76722,60 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: any): StoredRecipe {
     updatedAt: new Date().toISOString()
   };
 
-  // Save to canonical apps/web/public/recipes/<id>.json
-  const targetDir = getRecipeJsonDir();
-  const filePath = path.join(targetDir, `${safeId}.json`);
-  fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
+  const jsonStr = JSON.stringify(record, null, 2);
+  const targetDir = getCanonicalRecipesDir();
+  fs.writeFileSync(path.join(targetDir, `${safeId}.json`), jsonStr, 'utf-8');
 
   return record;
 }
 
-export function loadAllRecipeJsonFiles(): StoredRecipe[] {
-  const map = new Map<string, StoredRecipe>();
-  const primaryDir = getRecipeJsonDir();
-  const searchDirs = [primaryDir];
+export function loadAllRecipeJsonFiles(): FullRecipeRecord[] {
+  const map = new Map<string, FullRecipeRecord>();
+  const targetDir = getCanonicalRecipesDir();
 
-  // Also read from legacy directory if files still exist
-  const root = process.cwd();
-  const legacyDir = path.join(root, 'public', 'recipes');
-  if (fs.existsSync(legacyDir) && path.resolve(legacyDir) !== path.resolve(primaryDir)) {
-    searchDirs.push(legacyDir);
+  if (fs.existsSync(targetDir)) {
+    const files = fs.readdirSync(targetDir).filter(f => f.endsWith('.json') && !f.includes('index.json'));
+    files.forEach(f => {
+      try {
+        const raw = fs.readFileSync(path.join(targetDir, f), 'utf-8');
+        const data = JSON.parse(raw);
+        if (data && (data.id || data.title)) {
+          const id = data.id || f.replace('.json', '');
+          map.set(id, { ...data, id });
+        }
+      } catch (_) {}
+    });
   }
-
-  searchDirs.forEach(dir => {
-    try {
-      if (fs.existsSync(dir)) {
-        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('index.json') && !f.startsWith('package'));
-        files.forEach(f => {
-          try {
-            const raw = fs.readFileSync(path.join(dir, f), 'utf-8');
-            const data = JSON.parse(raw);
-            if (data && (data.id || data.title)) {
-              const id = data.id || f.replace('.json', '');
-              if (!map.has(id)) {
-                map.set(id, { ...data, id });
-              }
-            }
-          } catch (_) {}
-        });
-      }
-    } catch (_) {}
-  });
 
   return Array.from(map.values());
 }
 
+export const getAllRecipes = loadAllRecipeJsonFiles;
+export const getRecipes = loadAllRecipeJsonFiles;
+
 export function updateRecipePublicVisibility(id: string, isPublic: boolean): boolean {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const targetDir = getRecipeJsonDir();
-  const filePath = path.join(targetDir, `${safeId}.json`);
-  let updated = false;
+  const targetDir = getCanonicalRecipesDir();
+  const fp = path.join(targetDir, `${safeId}.json`);
 
-  try {
-    if (fs.existsSync(filePath)) {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  if (fs.existsSync(fp)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(fp, 'utf-8'));
       data.isPublic = isPublic;
       data.visibility = isPublic ? 'public' : 'private';
       data.updatedAt = new Date().toISOString();
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-      updated = true;
-    }
-  } catch (_) {}
-
-  return updated;
+      fs.writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
+      return true;
+    } catch (_) {}
+  }
+  return false;
 }
 
 export function deleteRecipeJsonFile(id: string): void {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const targetDir = getRecipeJsonDir();
-  const filePath = path.join(targetDir, `${safeId}.json`);
-  try {
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  } catch (_) {}
+  const targetDir = getCanonicalRecipesDir();
+  const fp = path.join(targetDir, `${safeId}.json`);
+  if (fs.existsSync(fp)) fs.unlinkSync(fp);
 }
 
 ```
@@ -77022,71 +77077,60 @@ export async function registerUser(payload: { email: string; name?: string; pass
 
 ## File: `apps/web/src/lib/imageDownloader.ts`
 ```typescript
+// Image Downloader & Scraped Asset Pipeline
+// GitHub: cygnusorbit/zecratary
+
 import fs from 'fs';
 import path from 'path';
-import { getCanonicalWebPublicDir } from '@/lib/storageService';
+import { getCanonicalWebPublicDir, getCanonicalImagesDir, uploadMediaFile } from '@/lib/storageService';
 
-export async function downloadAndSaveImage(
-  imageUrl: string,
-  prefix: string = 'scraped'
-): Promise<string> {
-  const fallbackPath = '/recipes/images/default.jpg';
-  if (!imageUrl || typeof imageUrl !== 'string') return fallbackPath;
-
-  const cleanUrl = imageUrl.trim();
-  if (cleanUrl.startsWith('/recipes/images/')) return cleanUrl;
-  if (cleanUrl.startsWith('/uploads/recipes/')) {
-    return cleanUrl.replace('/uploads/recipes/', '/recipes/images/');
+export async function downloadAndSaveImage(imageUrl: string, prefix = 'img'): Promise<string> {
+  if (!imageUrl || typeof imageUrl !== 'string') {
+    return '/recipes/images/default.jpg';
   }
-  if (!/^https?:\/\//i.test(cleanUrl)) return fallbackPath;
+
+  const trimmed = imageUrl.trim();
+  if (trimmed.startsWith('/recipes/images/') || trimmed.includes('.supabase.co/storage/v1/object/public/')) {
+    return trimmed;
+  }
 
   try {
-    const origin = new URL(cleanUrl).origin;
-    const response = await fetch(cleanUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Referer': origin,
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9'
-      },
-      signal: AbortSignal.timeout(9000),
-      redirect: 'follow'
-    });
-
-    if (!response.ok) return fallbackPath;
-
-    const contentType = response.headers.get('content-type') || '';
-    let ext = 'jpg';
-    if (contentType.includes('webp') || cleanUrl.includes('.webp')) ext = 'webp';
-    else if (contentType.includes('png') || cleanUrl.includes('.png')) ext = 'png';
-    else if (contentType.includes('jpeg') || cleanUrl.includes('.jpeg')) ext = 'jpg';
-
-    const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    const targetDir = path.join(getCanonicalWebPublicDir(), 'recipes', 'images');
-    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-
-    fs.writeFileSync(path.join(targetDir, filename), buffer);
-
-    // Sync to secondary path if different working directory
-    const secondaryDir = path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images');
-    if (path.resolve(secondaryDir) !== path.resolve(targetDir)) {
-      try {
-        if (!fs.existsSync(secondaryDir)) fs.mkdirSync(secondaryDir, { recursive: true });
-        fs.writeFileSync(path.join(secondaryDir, filename), buffer);
-      } catch (_) {}
+    if (trimmed.startsWith('data:image/')) {
+      const match = trimmed.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+      if (match) {
+        const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+        const buffer = Buffer.from(match[2], 'base64');
+        return await uploadMediaFile(buffer, `${prefix}_${Date.now()}.${ext}`, `image/${ext}`);
+      }
     }
 
-    return `/recipes/images/${filename}`;
-  } catch (err) {
-    console.warn('[ImageDownloader] Error downloading image:', err);
+    if (/^https?:\/\//i.test(trimmed)) {
+      const res = await fetch(trimmed, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+        },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || 'image/jpeg';
+        let ext = 'jpg';
+        if (contentType.includes('png')) ext = 'png';
+        else if (contentType.includes('webp')) ext = 'webp';
+        else if (contentType.includes('gif')) ext = 'gif';
+        else if (contentType.includes('avif')) ext = 'avif';
+
+        const buffer = Buffer.from(await res.arrayBuffer());
+        return await uploadMediaFile(buffer, `${prefix}_${Date.now()}.${ext}`, contentType);
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[imageDownloader] Failed to download image from ${trimmed}:`, err.message);
   }
 
-  return fallbackPath;
+  return trimmed;
 }
 
-// Backward-compatible named export alias & default export
 export const downloadAndSaveScrapedImage = downloadAndSaveImage;
 export default downloadAndSaveImage;
 

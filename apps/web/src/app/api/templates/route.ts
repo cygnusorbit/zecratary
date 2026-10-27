@@ -1,160 +1,92 @@
-// @ts-nocheck
-import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
-function getTemplatesFilePath() {
-  const dataDir = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  return path.join(dataDir, 'meal_templates.json');
-}
+export const dynamic = 'force-dynamic';
 
-function readLocalTemplates(): any[] {
+export async function GET(req: NextRequest) {
   try {
-    const p = getTemplatesFilePath();
-    if (fs.existsSync(p)) {
-      const raw = fs.readFileSync(p, 'utf-8');
-      return JSON.parse(raw) || [];
-    }
-  } catch (_) {}
-  return [];
-}
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId') || 'usr_admin_1';
 
-function writeLocalTemplates(items: any[]) {
-  try {
-    const p = getTemplatesFilePath();
-    fs.writeFileSync(p, JSON.stringify(items, null, 2), 'utf-8');
-  } catch (_) {}
-}
-
-export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId') || '';
-
-    // 1. Try PostgreSQL if pool configured
+    let templates: any[] = [];
     try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function') {
-        await query(`
-          CREATE TABLE IF NOT EXISTS meal_templates (
-            id VARCHAR(120) PRIMARY KEY,
-            user_id VARCHAR(120) NOT NULL,
-            created_by VARCHAR(255),
-            title VARCHAR(255) NOT NULL,
-            description TEXT,
-            category VARCHAR(120) DEFAULT 'General',
-            total_days INT DEFAULT 7,
-            meals JSONB,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE INDEX IF NOT EXISTS idx_meal_templates_user ON meal_templates(user_id);
-        `);
+      const res: any = await query(`
+        SELECT id, user_id, title, description, duration_days, is_public, days_json, created_at, updated_at
+        FROM meal_templates
+        WHERE user_id = $1 OR is_public = true
+        ORDER BY created_at DESC;
+      `, [userId]);
 
-        const sql = userId
-          ? 'SELECT * FROM meal_templates WHERE user_id = $1 ORDER BY created_at DESC'
-          : 'SELECT * FROM meal_templates ORDER BY created_at DESC';
-        const params = userId ? [userId] : [];
-        const result = await query(sql, params);
-
-        if (result && Array.isArray(result.rows)) {
-          const templates = result.rows.map(r => ({
-            id: r.id,
-            userId: r.user_id,
-            createdBy: r.created_by,
-            title: r.title,
-            description: r.description,
-            category: r.category,
-            totalDays: r.total_days || 7,
-            meals: typeof r.meals === 'string' ? JSON.parse(r.meals) : (r.meals || [])
-          }));
-          return NextResponse.json({ success: true, templates });
+      const rows = Array.isArray(res) ? res : res?.rows || [];
+      templates = rows.map((r: any) => {
+        let parsedDays: any[] = [];
+        try {
+          parsedDays = typeof r.days_json === 'string' ? JSON.parse(r.days_json) : (r.days_json || []);
+        } catch (_) {
+          parsedDays = [];
         }
-      }
+        if (!Array.isArray(parsedDays)) parsedDays = [];
+
+        return {
+          id: r.id,
+          userId: r.user_id,
+          title: r.title,
+          description: r.description,
+          durationDays: Number(r.duration_days) || (parsedDays.length > 0 ? parsedDays.length : 7),
+          isPublic: Boolean(r.is_public),
+          days: parsedDays,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at
+        };
+      });
     } catch (_) {}
 
-    // 2. Fallback to Local JSON store
-    const all = readLocalTemplates();
-    const filtered = userId ? all.filter(t => !t.userId || t.userId === userId) : all;
-    return NextResponse.json({ success: true, templates: filtered });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, templates: [], error: err.message }, { status: 200 });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    const { userId, createdBy, templates } = body;
-
-    if (!Array.isArray(templates)) {
-      return NextResponse.json({ success: false, error: 'Templates array required' }, { status: 400 });
-    }
-
-    // 1. Try PostgreSQL persistence
-    try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function' && userId) {
-        await query('DELETE FROM meal_templates WHERE user_id = $1', [userId]);
-        for (const t of templates) {
-          await query(`
-            INSERT INTO meal_templates (id, user_id, created_by, title, description, category, total_days, meals, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, CURRENT_TIMESTAMP)
-            ON CONFLICT (id) DO UPDATE SET
-              title = EXCLUDED.title,
-              description = EXCLUDED.description,
-              category = EXCLUDED.category,
-              total_days = EXCLUDED.total_days,
-              meals = EXCLUDED.meals,
-              updated_at = CURRENT_TIMESTAMP
-          `, [
-            t.id,
-            userId,
-            createdBy || userId,
-            t.title,
-            t.description || '',
-            t.category || 'General',
-            Number(t.totalDays || 7),
-            JSON.stringify(t.meals || [])
-          ]);
-        }
-      }
-    } catch (_) {}
-
-    // 2. Update local fallback JSON
-    const existing = readLocalTemplates();
-    const retained = userId ? existing.filter(i => i.userId && i.userId !== userId) : [];
-    writeLocalTemplates([...retained, ...templates]);
-
-    return NextResponse.json({ success: true, count: templates.length });
+    return NextResponse.json({ success: true, templates });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function DELETE(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
+    const body = await req.json();
+    const { id, userId, title, description, durationDays, isPublic, days } = body;
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Template ID required' }, { status: 400 });
-    }
+    const safeId = id || `tmpl_${Date.now()}`;
+    const safeUserId = userId || 'usr_admin_1';
+    const safeDaysJson = JSON.stringify(Array.isArray(days) ? days : []);
 
     try {
-      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof query === 'function') {
-        await query('DELETE FROM meal_templates WHERE id = $1', [id]);
-      }
-    } catch (_) {}
+      await query(`
+        CREATE TABLE IF NOT EXISTS meal_templates (
+          id VARCHAR(255) PRIMARY KEY,
+          user_id VARCHAR(255),
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          duration_days INT DEFAULT 7,
+          is_public BOOLEAN DEFAULT false,
+          days_json TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
 
-    const existing = readLocalTemplates();
-    writeLocalTemplates(existing.filter(t => t.id !== id));
+      await query(`
+        INSERT INTO meal_templates (id, user_id, title, description, duration_days, is_public, days_json, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          duration_days = EXCLUDED.duration_days,
+          is_public = EXCLUDED.is_public,
+          days_json = EXCLUDED.days_json,
+          updated_at = NOW();
+      `, [safeId, safeUserId, title, description || '', durationDays || 7, Boolean(isPublic), safeDaysJson]);
+    } catch (dbErr: any) {
+      console.warn('[api/templates] DB commit notice:', dbErr.message);
+    }
 
-    return NextResponse.json({ success: true, id });
+    return NextResponse.json({ success: true, id: safeId });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

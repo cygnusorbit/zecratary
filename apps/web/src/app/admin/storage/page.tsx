@@ -182,6 +182,11 @@ export default function AdminStorageSettingsPage() {
       if (res.ok && data.success) {
         setSaveSuccess(data.message || 'Cleaned up orphan images.');
         if (data.diskStats) setDiskStats(data.diskStats);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zecratary_storage_settings', JSON.stringify(settings));
+          window.dispatchEvent(new CustomEvent('zecratary_storage_updated', { detail: settings }));
+          window.dispatchEvent(new Event('storage'));
+        }
         setTimeout(() => setSaveSuccess(''), 4000);
       } else {
         setSaveError(data.error || 'Failed to clean orphan images');
@@ -210,6 +215,11 @@ export default function AdminStorageSettingsPage() {
       if (res.ok && data.success) {
         setSaveSuccess(t('storageSettingsSaved', 'Universal storage settings saved successfully to PostgreSQL.'));
         if (data.diskStats) setDiskStats(data.diskStats);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zecratary_storage_settings', JSON.stringify(settings));
+          window.dispatchEvent(new CustomEvent('zecratary_storage_updated', { detail: settings }));
+          window.dispatchEvent(new Event('storage'));
+        }
         setTimeout(() => setSaveSuccess(''), 4000);
       } else {
         setSaveError(data.error || 'Failed to save storage settings');

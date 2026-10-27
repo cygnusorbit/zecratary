@@ -1,4 +1,3 @@
-// @ts-nocheck
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -9,27 +8,62 @@ import {
   Sparkles, Check, X, BookOpen, RefreshCw, 
   CheckCircle2, AlertCircle, ChevronRight,
   Clock, Flame, Users, ExternalLink, ChefHat,
-  Eye, HardDrive, Type, Minus
+  HardDrive, Type, Minus, Calendar, Info
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage, setCurrentUser } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-interface StorageSettings {
-  provider?: string;
-  uploadDir?: string;
-  recipesJsonDir?: string;
-  publicPrefix?: string;
-  cdnUrl?: string;
+interface StorageConfig {
+  provider: 'localhost' | 'supabase';
+  localhost: {
+    uploadDir: string;
+    publicPrefix: string;
+    recipesJsonDir: string;
+    maxSizeMb: number;
+    allowedTypes?: string;
+  };
+  supabase: {
+    enabled: boolean;
+    endpoint: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    bucket: string;
+    publicUrl: string;
+  };
 }
+
+const DEFAULT_STORAGE_CONFIG: StorageConfig = {
+  provider: 'localhost',
+  localhost: {
+    uploadDir: 'apps/web/public/recipes/images',
+    publicPrefix: '/recipes/images',
+    recipesJsonDir: 'apps/web/public/recipes',
+    maxSizeMb: 10,
+    allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
+  },
+  supabase: {
+    enabled: true,
+    endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
+    region: 'us-west-1',
+    accessKeyId: 'f3e0affef5c74972a535153349eb24cc',
+    secretAccessKey: '',
+    bucket: 'recipes',
+    publicUrl: 'https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes',
+  },
+};
 
 interface TemplateMeal {
   id: string;
   dayIndex: number;
   mealType: string;
   recipeId?: string;
-  recipeName: string;
+  recipe_id?: string;
+  recipeName?: string;
+  title: string;
   image?: string;
   imageUrl?: string;
+  image_url?: string;
   time?: string;
   servings?: number;
   prepMinutes?: number;
@@ -41,14 +75,18 @@ interface TemplateMeal {
 
 interface MealTemplate {
   id: string;
-  userId: string;
-  createdBy?: string;
+  userId?: string;
+  user_id?: string;
   title: string;
-  description: string;
+  description?: string;
   category?: string;
-  totalDays: number;
+  totalDays?: number;
+  durationDays?: number;
+  isPublic?: boolean;
   meals: TemplateMeal[];
+  days?: { dayName?: string; meals?: any[] }[];
   createdAt?: string;
+  updatedAt?: string;
 }
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -67,68 +105,44 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
         id: 'm_1_0', 
         dayIndex: 0, 
         mealType: 'Dinner', 
+        title: 'Garlic Butter Chicken Breast',
         recipeName: 'Garlic Butter Chicken Breast', 
-        imageUrl: '/recipes/images/default.jpg',
+        imageUrl: 'default.jpg',
         prepMinutes: 15, 
         cookMinutes: 20, 
         servings: 2,
         ingredients: [
-          { name: 'Chicken Breast', amount: 2, unit: 'pieces' },
-          { name: 'Garlic Cloves (minced)', amount: 4, unit: 'cloves' },
-          { name: 'Butter', amount: 2, unit: 'tbsp' },
-          { name: 'Olive Oil', amount: 1, unit: 'tbsp' },
-          { name: 'Fresh Parsley', amount: 1, unit: 'handful' }
+          { name: 'Chicken Breast', amount: '2', unit: 'pieces' },
+          { name: 'Garlic Cloves (minced)', amount: '4', unit: 'cloves' },
+          { name: 'Butter', amount: '2', unit: 'tbsp' },
+          { name: 'Olive Oil', amount: '1', unit: 'tbsp' }
         ],
         instructions: [
           'Season chicken breasts generously with salt, pepper, and garlic powder.',
-          'Heat olive oil and 1 tbsp butter in a large skillet over medium-high heat.',
+          'Heat olive oil and butter in a large skillet over medium-high heat.',
           'Sear chicken for 6-8 minutes per side until golden brown and cooked through.',
-          'Add remaining butter and minced garlic; baste chicken continuously for 1-2 minutes.',
-          'Garnish with chopped parsley and serve warm.'
+          'Baste continuously with melted garlic butter and serve warm.'
         ]
       },
       { 
         id: 'm_1_1', 
         dayIndex: 1, 
         mealType: 'Dinner', 
+        title: 'Grilled Salmon with Asparagus',
         recipeName: 'Grilled Salmon with Asparagus', 
-        imageUrl: '/recipes/images/default.jpg',
+        imageUrl: 'default.jpg',
         prepMinutes: 10, 
         cookMinutes: 15, 
         servings: 2,
         ingredients: [
-          { name: 'Salmon Fillets', amount: 2, unit: 'fillets' },
-          { name: 'Fresh Asparagus', amount: 1, unit: 'bunch' },
-          { name: 'Lemon Juice', amount: 2, unit: 'tbsp' },
-          { name: 'Olive Oil', amount: 1, unit: 'tbsp' }
+          { name: 'Salmon Fillets', amount: '2', unit: 'fillets' },
+          { name: 'Fresh Asparagus', amount: '1', unit: 'bunch' },
+          { name: 'Lemon Juice', amount: '2', unit: 'tbsp' }
         ],
         instructions: [
-          'Preheat grill or grill pan to medium-high heat.',
+          'Preheat grill pan to medium-high heat.',
           'Toss asparagus with olive oil, salt, and pepper.',
-          'Season salmon with lemon juice, salt, and black pepper.',
-          'Grill salmon and asparagus for 4-5 minutes per side until salmon flakes easily.'
-        ]
-      },
-      { 
-        id: 'm_1_2', 
-        dayIndex: 2, 
-        mealType: 'Dinner', 
-        recipeName: 'Lean Beef & Broccoli Stir-Fry', 
-        imageUrl: '/recipes/images/default.jpg',
-        prepMinutes: 15, 
-        cookMinutes: 15, 
-        servings: 2,
-        ingredients: [
-          { name: 'Flank Steak (sliced thin)', amount: 300, unit: 'g' },
-          { name: 'Broccoli Florets', amount: 2, unit: 'cups' },
-          { name: 'Soy Sauce', amount: 3, unit: 'tbsp' },
-          { name: 'Sesame Oil', amount: 1, unit: 'tsp' }
-        ],
-        instructions: [
-          'Whisk soy sauce, sesame oil, and garlic in a small bowl.',
-          'Stir-fry flank steak in a hot wok for 3-4 minutes until browned.',
-          'Add broccoli florets and 2 tablespoons of water; steam for 3 minutes.',
-          'Pour sauce over mixture and toss until glossy.'
+          'Grill salmon and asparagus for 4-5 minutes per side until flaky.'
         ]
       }
     ]
@@ -145,48 +159,46 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
         id: 'm_2_0', 
         dayIndex: 0, 
         mealType: 'Dinner', 
+        title: 'Creamy Pesto Penne Pasta',
         recipeName: 'Creamy Pesto Penne Pasta', 
-        imageUrl: '/recipes/images/default.jpg',
+        imageUrl: 'default.jpg',
         prepMinutes: 5, 
         cookMinutes: 15, 
         servings: 4,
         ingredients: [
-          { name: 'Penne Pasta', amount: 400, unit: 'g' },
-          { name: 'Basil Pesto', amount: 1, unit: 'jar' },
-          { name: 'Heavy Cream', amount: 0.5, unit: 'cup' },
-          { name: 'Parmesan Cheese', amount: 0.5, unit: 'cup' }
+          { name: 'Penne Pasta', amount: '400', unit: 'g' },
+          { name: 'Basil Pesto', amount: '1', unit: 'jar' },
+          { name: 'Heavy Cream', amount: '0.5', unit: 'cup' }
         ],
         instructions: [
           'Boil penne pasta in salted water until al dente.',
-          'Drain pasta, reserving 1/4 cup of starchy pasta water.',
-          'Stir in basil pesto, heavy cream, and parmesan until velvety.',
-          'Season with freshly cracked pepper.'
-        ]
-      },
-      { 
-        id: 'm_2_1', 
-        dayIndex: 1, 
-        mealType: 'Dinner', 
-        recipeName: 'Quick Thai Basil Tofu Stir-Fry', 
-        imageUrl: '/recipes/images/default.jpg',
-        prepMinutes: 10, 
-        cookMinutes: 10, 
-        servings: 2,
-        ingredients: [
-          { name: 'Firm Tofu (cubed)', amount: 300, unit: 'g' },
-          { name: 'Thai Holy Basil', amount: 1, unit: 'cup' },
-          { name: 'Garlic & Chili Paste', amount: 1, unit: 'tbsp' },
-          { name: 'Soy Sauce', amount: 2, unit: 'tbsp' }
-        ],
-        instructions: [
-          'Pan-fry tofu cubes until golden crisp on all sides.',
-          'Add chili garlic paste and toss quickly.',
-          'Turn off heat, fold in fresh Thai basil leaves, and wilt naturally.'
+          'Drain pasta, reserving 1/4 cup pasta water.',
+          'Stir in basil pesto and cream until velvety and serve warm.'
         ]
       }
     ]
   }
 ];
+
+const getDefaultImageUrl = (config?: StorageConfig | null): string => {
+  if (config?.provider === 'supabase' && config.supabase?.publicUrl) {
+    const base = config.supabase.publicUrl.replace(/\/+$/, '');
+    return `${base}/default.jpg`;
+  }
+  const prefix = config?.localhost?.publicPrefix || '/recipes/images';
+  return `${prefix.replace(/\/+$/, '')}/default.jpg`;
+};
+
+const getTemplateMealsCount = (tmpl?: MealTemplate | null): number => {
+  if (!tmpl) return 0;
+  if (Array.isArray(tmpl.meals)) return tmpl.meals.length;
+  if (Array.isArray(tmpl.days)) {
+    return tmpl.days.reduce((acc: number, d: any) => {
+      return acc + (Array.isArray(d?.meals) ? d.meals.length : 0);
+    }, 0);
+  }
+  return 0;
+};
 
 export default function TemplatesPage() {
   const router = useRouter();
@@ -194,14 +206,7 @@ export default function TemplatesPage() {
   const [currentUser, setCurrentUserState] = useState<User | null>(null);
   const [authHydrated, setAuthHydrated] = useState<boolean>(false);
 
-  // Storage configuration loaded dynamically from /admin/storage
-  const [storageSettings, setStorageSettings] = useState<StorageSettings>({
-    provider: 'localhost',
-    uploadDir: 'apps/web/public/recipes/images',
-    recipesJsonDir: 'apps/web/public/recipes',
-    publicPrefix: '/recipes/images'
-  });
-
+  const [storageConfig, setStorageConfig] = useState<StorageConfig>(DEFAULT_STORAGE_CONFIG);
   const [templates, setTemplates] = useState<MealTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
@@ -209,7 +214,7 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Modal 1: Create / Edit Template
+  // Modal 1: Create / Edit Blueprint
   const [showTemplateModal, setShowTemplateModal] = useState<boolean>(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [templateTitle, setTemplateTitle] = useState<string>('');
@@ -217,7 +222,7 @@ export default function TemplatesPage() {
   const [templateCategory, setTemplateCategory] = useState<string>('General');
   const [templateDays, setTemplateDays] = useState<number>(7);
 
-  // Modal 2: Add Meal in Blueprint Day
+  // Modal 2: Add Meal to Day
   const [showMealModal, setShowMealModal] = useState<boolean>(false);
   const [targetDayIndex, setTargetDayIndex] = useState<number>(0);
   const [targetMealType, setTargetMealType] = useState<string>('Dinner');
@@ -228,7 +233,7 @@ export default function TemplatesPage() {
   const [targetNotes, setTargetNotes] = useState<string>('');
   const [selectedRecipeForMeal, setSelectedRecipeForMeal] = useState<any | null>(null);
 
-  // Modal 3: Saved Recipe Picker
+  // Modal 3: Saved Recipe Picker Modal
   const [showRecipePicker, setShowRecipePicker] = useState<boolean>(false);
   const [pickerSearch, setPickerSearch] = useState<string>('');
 
@@ -250,7 +255,6 @@ export default function TemplatesPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Close modals on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -265,57 +269,163 @@ export default function TemplatesPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Fetch active storage configuration from /api/admin/storage
   const loadStorageSettings = useCallback(async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('zecratary_storage_settings');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.provider) {
+            setStorageConfig(prev => ({ ...prev, ...parsed }));
+          }
+        }
+      } catch (_) {}
+    }
+
     try {
-      const res = await fetch('/api/admin/storage', { cache: 'no-store' });
+      const res = await fetch(`/api/admin/storage?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data?.storage_settings) {
-          setStorageSettings(data.storage_settings);
+        const settings = data?.settings || data?.storage_settings;
+        if (settings) {
+          setStorageConfig(prev => ({
+            ...prev,
+            ...settings,
+            localhost: { ...prev.localhost, ...(settings.localhost || {}) },
+            supabase: { ...prev.supabase, ...(settings.supabase || {}) }
+          }));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_storage_settings', JSON.stringify(settings));
+          }
         }
       }
     } catch (_) {}
   }, []);
 
-  // Resolve recipe image URL based on setting from /admin/storage
-  const resolveRecipeImageUrl = useCallback((img?: string) => {
-    const publicPrefix = storageSettings.publicPrefix || '/recipes/images';
-    if (!img || img === 'default.jpg' || img === '/uploads/recipes/default.jpg' || img === '/recipes/images/default.jpg') {
-      return `${publicPrefix}/default.jpg`;
+  const resolveRecipeImageUrl = useCallback((img?: string): string => {
+    const defaultImg = getDefaultImageUrl(storageConfig);
+    if (!img || img === 'default.jpg' || img === '/recipes/images/default.jpg' || img === '/uploads/recipes/default.jpg') {
+      return defaultImg;
     }
-    if (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('data:')) {
-      return img;
-    }
-    const cleanPath = img.replace(/^\/?(recipes\/images\/|uploads\/recipes\/)?/, '');
-    return `${publicPrefix}/${cleanPath}`;
-  }, [storageSettings]);
 
-  // Fetch live templates from /api/templates
+    const trimmed = img.trim();
+    if (!trimmed) return defaultImg;
+
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+      return trimmed;
+    }
+
+    const cleanFilename = trimmed.replace(/^\/?(recipes\/images\/|uploads\/recipes\/)?/, '');
+
+    if (storageConfig.provider === 'supabase' && storageConfig.supabase?.publicUrl) {
+      const base = storageConfig.supabase.publicUrl.replace(/\/+$/, '');
+      return `${base}/${cleanFilename}`;
+    }
+
+    const prefix = (storageConfig.localhost?.publicPrefix || '/recipes/images').replace(/\/+$/, '');
+    return `${prefix}/${cleanFilename}`;
+  }, [storageConfig]);
+
+  const normalizeTemplates = useCallback((rawList: any[]): MealTemplate[] => {
+    if (!Array.isArray(rawList)) return [];
+    return rawList.map((t: any) => {
+      let flatMeals: TemplateMeal[] = [];
+
+      if (Array.isArray(t.meals)) {
+        flatMeals = t.meals.map((m: any, mIdx: number) => ({
+          id: m.id || `m_${Date.now()}_${mIdx}`,
+          dayIndex: Number(m.dayIndex ?? m.day_index ?? 0),
+          mealType: m.mealType || m.meal_type || 'Dinner',
+          recipeId: m.recipeId || m.recipe_id,
+          recipe_id: m.recipe_id || m.recipeId,
+          recipeName: m.recipeName || m.title || 'Scheduled Meal',
+          title: m.title || m.recipeName || 'Scheduled Meal',
+          image: m.image || m.imageUrl || m.image_url || 'default.jpg',
+          imageUrl: m.imageUrl || m.image || m.image_url || 'default.jpg',
+          image_url: m.image_url || m.imageUrl || m.image || 'default.jpg',
+          time: m.time || '19:00',
+          servings: Number(m.servings || 4),
+          prepMinutes: Number(m.prepMinutes || m.prepTimeMinutes || 15),
+          cookMinutes: Number(m.cookMinutes || m.cookTimeMinutes || 25),
+          notes: m.notes || '',
+          ingredients: Array.isArray(m.ingredients) ? m.ingredients : [],
+          instructions: Array.isArray(m.instructions) ? m.instructions : []
+        }));
+      } else if (Array.isArray(t.days)) {
+        t.days.forEach((d: any, dIdx: number) => {
+          if (Array.isArray(d?.meals)) {
+            d.meals.forEach((m: any, mIdx: number) => {
+              flatMeals.push({
+                id: m.id || `m_${dIdx}_${mIdx}_${Date.now()}`,
+                dayIndex: dIdx,
+                mealType: m.mealType || 'Dinner',
+                recipeId: m.recipeId || m.recipe_id,
+                recipe_id: m.recipe_id || m.recipeId,
+                recipeName: m.recipeName || m.title || 'Scheduled Meal',
+                title: m.title || m.recipeName || 'Scheduled Meal',
+                image: m.image || m.imageUrl || m.image_url || 'default.jpg',
+                imageUrl: m.imageUrl || m.image || m.image_url || 'default.jpg',
+                image_url: m.image_url || m.imageUrl || m.image || 'default.jpg',
+                time: m.time || '19:00',
+                servings: Number(m.servings || 4),
+                prepMinutes: Number(m.prepMinutes || 15),
+                cookMinutes: Number(m.cookMinutes || 25),
+                notes: m.notes || '',
+                ingredients: Array.isArray(m.ingredients) ? m.ingredients : [],
+                instructions: Array.isArray(m.instructions) ? m.instructions : []
+              });
+            });
+          }
+        });
+      }
+
+      const totalDays = Number(t.totalDays || t.durationDays || t.duration_days) || 7;
+
+      return {
+        id: t.id || `tpl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        userId: t.userId || t.user_id || 'usr_admin_1',
+        title: t.title || 'Untitled Blueprint',
+        description: t.description || '',
+        category: t.category || 'General',
+        totalDays,
+        durationDays: totalDays,
+        meals: flatMeals,
+        createdAt: t.createdAt || t.created_at || new Date().toISOString()
+      };
+    });
+  }, []);
+
   const loadTemplatesData = useCallback(async (user: User | null) => {
     const targetUserId = user?.id || 'usr_admin_1';
     setLoading(true);
 
     try {
       let fetchedTemplates: MealTemplate[] = [];
-      const res = await fetch(`/api/templates?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.templates) && data.templates.length > 0) {
-          fetchedTemplates = data.templates;
+
+      try {
+        const res = await fetch(`/api/templates?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.templates) && data.templates.length > 0) {
+            fetchedTemplates = normalizeTemplates(data.templates);
+          }
         }
-      }
+      } catch (_) {}
 
       if (fetchedTemplates.length === 0 && typeof window !== 'undefined') {
         const raw = localStorage.getItem('zecratary_meal_templates');
         if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) fetchedTemplates = parsed;
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              fetchedTemplates = normalizeTemplates(parsed);
+            }
+          } catch (_) {}
         }
       }
 
       if (fetchedTemplates.length === 0) {
-        fetchedTemplates = DEFAULT_TEMPLATES;
+        fetchedTemplates = normalizeTemplates(DEFAULT_TEMPLATES);
       }
 
       setTemplates(fetchedTemplates);
@@ -337,16 +447,13 @@ export default function TemplatesPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedTemplateId]);
+  }, [normalizeTemplates, selectedTemplateId]);
 
-  // Robust session resolution & storage hydration
   useEffect(() => {
-    document.title = `${t('mealBlueprintsTitle', 'Meal Blueprints')} - Zecratary`;
     initAuthStorage();
     loadStorageSettings();
 
     let resolvedUser = getCurrentUser();
-
     if (!resolvedUser && typeof document !== 'undefined') {
       const match = document.cookie.match(/(?:^|;\s*)(?:zecratary_session|zecratary_current_user|currentUser)=([^;]+)/);
       if (match && match[1]) {
@@ -370,6 +477,14 @@ export default function TemplatesPage() {
     setAuthHydrated(true);
     loadTemplatesData(resolvedUser);
 
+    const handleStorageChange = (e?: any) => {
+      if (e?.detail) {
+        setStorageConfig(prev => ({ ...prev, ...e.detail }));
+      } else {
+        loadStorageSettings();
+      }
+    };
+
     const handleSync = () => {
       const active = getCurrentUser();
       if (active) {
@@ -380,21 +495,23 @@ export default function TemplatesPage() {
     };
 
     window.addEventListener('storage', handleSync);
+    window.addEventListener('focus', loadStorageSettings);
+    window.addEventListener('zecratary_storage_updated', handleStorageChange);
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
-    window.addEventListener('zecratary_storage_updated', loadStorageSettings);
 
     return () => {
       window.removeEventListener('storage', handleSync);
+      window.removeEventListener('focus', loadStorageSettings);
+      window.removeEventListener('zecratary_storage_updated', handleStorageChange);
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
-      window.removeEventListener('zecratary_storage_updated', loadStorageSettings);
     };
-  }, [loadStorageSettings, loadTemplatesData, router, t]);
+  }, [loadStorageSettings, loadTemplatesData, router]);
 
   const activeTemplate = useMemo(() => {
     return templates.find(tpl => tpl.id === selectedTemplateId) || templates[0] || null;
@@ -421,22 +538,20 @@ export default function TemplatesPage() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Open Full Recipe Modal without editing controls (Task 2)
   const handleOpenRecipeModal = (meal: TemplateMeal) => {
-    // 1. Search for matching recipe in savedRecipes
     const matched = savedRecipes.find(r => 
       (meal.recipeId && r.id === meal.recipeId) ||
-      (r.title && r.title.toLowerCase() === meal.recipeName.toLowerCase()) ||
-      (r.name && r.name.toLowerCase() === meal.recipeName.toLowerCase())
+      (r.title && r.title.toLowerCase() === (meal.recipeName || meal.title).toLowerCase()) ||
+      (r.name && r.name.toLowerCase() === (meal.recipeName || meal.title).toLowerCase())
     );
 
     const baseServings = Number(matched?.servings || meal.servings || 4);
 
     const fullRecipePayload = {
       id: matched?.id || meal.recipeId || meal.id,
-      title: matched?.title || matched?.name || meal.recipeName,
-      image: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image,
-      imageUrl: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image,
+      title: matched?.title || matched?.name || meal.recipeName || meal.title,
+      image: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image || 'default.jpg',
+      imageUrl: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image || 'default.jpg',
       category: matched?.category || matched?.recipeType || meal.mealType || 'Main Dish',
       prepTimeMinutes: matched?.prepTimeMinutes || meal.prepMinutes || 15,
       cookTimeMinutes: matched?.cookTimeMinutes || meal.cookMinutes || 25,
@@ -448,18 +563,18 @@ export default function TemplatesPage() {
         : (meal.ingredients && meal.ingredients.length > 0)
           ? meal.ingredients
           : [
-              { name: meal.recipeName, amount: baseServings, unit: 'servings' },
-              { name: 'Olive Oil or Cooking Spray', amount: 1, unit: 'tbsp' },
-              { name: 'Salt & Black Pepper', amount: 1, unit: 'pinch' }
+              { name: meal.recipeName || meal.title, amount: String(baseServings), unit: 'servings' },
+              { name: 'Olive Oil or Cooking Spray', amount: '1', unit: 'tbsp' },
+              { name: 'Salt & Black Pepper', amount: '1', unit: 'pinch' }
             ],
       instructions: (matched?.instructions && matched.instructions.length > 0)
         ? matched.instructions
         : (meal.instructions && meal.instructions.length > 0)
           ? meal.instructions
           : [
-              `Prepare all fresh ingredients for ${meal.recipeName}.`,
-              `Cook according to preference for approximately ${(meal.prepMinutes || 15) + (meal.cookMinutes || 25)} minutes.`,
-              `Season to taste and serve warm.`
+              `Prepare all fresh ingredients for ${meal.recipeName || meal.title}.`,
+              `Cook according to instructions for ${(meal.prepMinutes || 15) + (meal.cookMinutes || 25)} minutes.`,
+              `Season to taste and serve fresh.`
             ],
       notes: meal.notes || matched?.notes || ''
     };
@@ -484,7 +599,8 @@ export default function TemplatesPage() {
             title: templateTitle.trim(),
             description: templateDesc.trim(),
             category: templateCategory,
-            totalDays: Number(templateDays || 7)
+            totalDays: Number(templateDays || 7),
+            durationDays: Number(templateDays || 7)
           };
         }
         return tpl;
@@ -495,17 +611,17 @@ export default function TemplatesPage() {
       const newTpl: MealTemplate = {
         id: 'tpl_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
         userId: currentUser.id || 'usr_admin_1',
-        createdBy: currentUser.email || 'admin@zecratary.com',
         title: templateTitle.trim(),
         description: templateDesc.trim(),
         category: templateCategory,
         totalDays: Number(templateDays || 7),
+        durationDays: Number(templateDays || 7),
         meals: []
       };
       const updated = [newTpl, ...templates];
       await persistTemplatesList(updated);
       setSelectedTemplateId(newTpl.id);
-      showToast(t('blueprintSavedToast', 'Blueprint saved to database!'));
+      showToast(t('blueprintCreatedToast', 'Blueprint created successfully!'));
     }
 
     setShowTemplateModal(false);
@@ -554,18 +670,24 @@ export default function TemplatesPage() {
   const handleSaveMealToBlueprint = async () => {
     if (!targetDishTitle.trim() || !activeTemplate) return;
 
+    const defaultImg = getDefaultImageUrl(storageConfig);
+    const chosenImg = selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || defaultImg;
+
     const newMeal: TemplateMeal = {
       id: 'm_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
       dayIndex: targetDayIndex,
       mealType: targetMealType,
-      recipeId: selectedRecipeForMeal?.id || null,
+      recipeId: selectedRecipeForMeal?.id || undefined,
+      recipe_id: selectedRecipeForMeal?.id || undefined,
       recipeName: targetDishTitle.trim(),
-      image: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/recipes/images/default.jpg',
-      imageUrl: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/recipes/images/default.jpg',
+      title: targetDishTitle.trim(),
+      image: chosenImg,
+      imageUrl: chosenImg,
+      image_url: chosenImg,
       time: targetTime || '19:00',
       servings: Number(targetServings || 4),
-      prepMinutes: Number(selectedRecipeForMeal?.prepTimeMinutes || 15),
-      cookMinutes: Number(selectedRecipeForMeal?.cookTimeMinutes || 25),
+      prepMinutes: Number(selectedRecipeForMeal?.prepTimeMinutes || selectedRecipeForMeal?.prepMinutes || 15),
+      cookMinutes: Number(selectedRecipeForMeal?.cookTimeMinutes || selectedRecipeForMeal?.cookMinutes || 25),
       notes: targetNotes.trim(),
       ingredients: selectedRecipeForMeal?.ingredients || [],
       instructions: selectedRecipeForMeal?.instructions || []
@@ -576,7 +698,11 @@ export default function TemplatesPage() {
 
     await persistTemplatesList(updated);
     setShowMealModal(false);
-    showToast(t('blueprintSavedToast', 'Blueprint saved to database!'));
+    showToast(
+      (t('mealAddedToast', 'Added {title} to Day {day}!'))
+        .replace('{title}', newMeal.title)
+        .replace('{day}', String(targetDayIndex + 1))
+    );
   };
 
   const handleRemoveMealFromBlueprint = async (mealId: string) => {
@@ -584,6 +710,7 @@ export default function TemplatesPage() {
     const updatedMeals = (activeTemplate.meals || []).filter(m => m.id !== mealId);
     const updated = templates.map(tpl => tpl.id === activeTemplate.id ? { ...tpl, meals: updatedMeals } : tpl);
     await persistTemplatesList(updated);
+    showToast(t('mealRemovedToast', 'Meal removed from blueprint.'));
   };
 
   const handleApplyToCalendar = async () => {
@@ -601,13 +728,16 @@ export default function TemplatesPage() {
       return {
         id: 'plan_' + Date.now() + '_' + idx,
         userId: targetUserId,
+        user_id: targetUserId,
         createdBy: currentUser?.email || 'admin@zecratary.com',
         date: dateStr,
         recipeId: meal.recipeId || null,
-        recipeName: meal.recipeName,
-        title: meal.recipeName,
-        image: meal.image || meal.imageUrl || '/recipes/images/default.jpg',
-        imageUrl: meal.image || meal.imageUrl || '/recipes/images/default.jpg',
+        recipe_id: meal.recipeId || null,
+        recipeName: meal.recipeName || meal.title,
+        title: meal.recipeName || meal.title,
+        image: resolveRecipeImageUrl(meal.image || meal.imageUrl),
+        imageUrl: resolveRecipeImageUrl(meal.image || meal.imageUrl),
+        image_url: resolveRecipeImageUrl(meal.image || meal.imageUrl),
         mealType: meal.mealType || 'Dinner',
         time: meal.time || '19:00',
         servings: Number(meal.servings || 4),
@@ -626,8 +756,9 @@ export default function TemplatesPage() {
       window.dispatchEvent(new Event('zecratary_planner_updated'));
       showToast(t('templateAppliedSuccessToast', 'Meal blueprint scheduled onto your calendar!'));
       setShowApplyModal(false);
+      router.push('/planner');
     } catch (_) {
-      showToast('Error applying template to planner.', 'error');
+      showToast(t('templateAppliedErrorToast', 'Error applying template to planner.'), 'error');
     }
   };
 
@@ -650,6 +781,11 @@ export default function TemplatesPage() {
     );
   }, [savedRecipes, pickerSearch]);
 
+  const activeProviderLabel = storageConfig.provider === 'supabase' ? 'Supabase S3' : 'Localhost';
+  const activePrefixLabel = storageConfig.provider === 'supabase' 
+    ? (storageConfig.supabase?.publicUrl || 'Cloud CDN')
+    : (storageConfig.localhost?.publicPrefix || '/recipes/images');
+
   if (!authHydrated) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3">
@@ -666,7 +802,7 @@ export default function TemplatesPage() {
     <div 
       id="zecratary-templates-canvas"
       role="region"
-      aria-label={t('mealBlueprintsTitle', 'Meal Blueprints')}
+      aria-label={t('mealBlueprintsTitle', 'Meal Blueprints & Templates')}
       data-lpignore="true"
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
       style={{ 
@@ -697,38 +833,29 @@ export default function TemplatesPage() {
       {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-              {t('mealBlueprintsTitle', 'Meal Blueprints')}
+              {t('mealBlueprintsTitle', 'Meal Blueprints & Templates')}
             </h1>
             <span 
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] font-mono opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              title={`${t('storagePillLabel', 'Storage Directory')}: ${storageSettings.publicPrefix || '/recipes/images'}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[10px] font-mono font-bold shadow-xs"
+              style={{ 
+                backgroundColor: 'var(--color-inner-dark)', 
+                borderColor: storageConfig.provider === 'supabase' ? 'var(--color-primary)' : 'var(--color-border)',
+                color: storageConfig.provider === 'supabase' ? 'var(--color-primary)' : 'var(--color-text)'
+              }}
+              title={`${t('activeEngine', 'Active Engine')}: ${activeProviderLabel} (${activePrefixLabel})`}
             >
               <HardDrive className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
-              <span>{storageSettings.publicPrefix || '/recipes/images'}</span>
+              <span>{activeProviderLabel}: {activePrefixLabel}</span>
             </span>
           </div>
           <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('mealBlueprintsSubtitle', 'Create, customize, and apply multi-day meal planning blueprints to your calendar.')}
+            {t('mealBlueprintsSubtitle', 'Schedule and customize multi-day meal templates with dynamic images synchronized with storage settings.')}
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
-          <Link
-            href="/dashboard"
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-80"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <span>{t('goToDashboardBtn', 'Go to Dashboard')}</span>
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
-
           <button
             type="button"
             onClick={() => {
@@ -742,7 +869,6 @@ export default function TemplatesPage() {
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
-            title={t('reloadBtn', 'Reload')}
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
             <span>{t('reloadBtn', 'Reload')}</span>
@@ -766,7 +892,7 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* Main Fluid 2-Column Responsive Layout */}
+      {/* Main 2-Column Responsive Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN: BLUEPRINTS CATALOG */}
         <div className="lg:col-span-4 xl:col-span-3 space-y-4">
@@ -775,13 +901,7 @@ export default function TemplatesPage() {
             <input
               type="text"
               autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
               data-lpignore="true"
-              data-1p-ignore="true"
-              data-bwignore="true"
-              data-form-type="other"
               placeholder={t('searchBlueprintsPlaceholder', 'Search blueprints by title or category...')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -802,7 +922,8 @@ export default function TemplatesPage() {
             ) : (
               filteredTemplates.map(tpl => {
                 const isSelected = tpl.id === activeTemplate?.id;
-                const mealCount = (tpl.meals || []).length;
+                const mealCount = getTemplateMealsCount(tpl);
+
                 return (
                   <div
                     key={tpl.id}
@@ -820,7 +941,7 @@ export default function TemplatesPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="space-y-1 min-w-0">
                         <span className="text-[10px] font-black uppercase tracking-wider text-[var(--color-primary)]">
-                          {tpl.category || 'General'}
+                          {t(`cat${(tpl.category || 'General').replace(/[^a-zA-Z]/g, '')}`, tpl.category || 'General')}
                         </span>
                         <h3 className="font-extrabold text-sm leading-snug truncate" style={{ color: 'var(--color-text)' }}>
                           {tpl.title}
@@ -851,8 +972,12 @@ export default function TemplatesPage() {
                     </p>
 
                     <div className="pt-2 border-t flex items-center justify-between text-[10px] font-bold opacity-80" style={{ borderColor: 'var(--color-border)' }}>
-                      <span>{(t('totalMealsCount', '{count} Meals Planned')).replace('{count}', String(mealCount))}</span>
-                      <span className="text-emerald-400">{(t('durationDays', '{days} Days Duration')).replace('{days}', String(tpl.totalDays || 7))}</span>
+                      <span className="text-emerald-500 font-bold">
+                        {(t('totalMealsCount', '{count} Meals Total')).replace('{count}', String(mealCount))}
+                      </span>
+                      <span>
+                        {(t('durationDays', '{days} Days Duration')).replace('{days}', String(tpl.totalDays || 7))}
+                      </span>
                     </div>
                   </div>
                 );
@@ -878,7 +1003,7 @@ export default function TemplatesPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="px-2.5 py-0.5 rounded-full border text-[10px] font-black uppercase text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
-                      {activeTemplate.category || 'General'}
+                      {t(`cat${(activeTemplate.category || 'General').replace(/[^a-zA-Z]/g, '')}`, activeTemplate.category || 'General')}
                     </span>
                     <span className="text-xs opacity-60">
                       {(t('durationDays', '{days} Days Duration')).replace('{days}', String(activeTemplate.totalDays || 7))}
@@ -909,6 +1034,7 @@ export default function TemplatesPage() {
                 {DAY_NAMES.slice(0, activeTemplate.totalDays || 7).map((dayName, dayIdx) => {
                   const dayMeals = (activeTemplate.meals || []).filter(m => m.dayIndex === dayIdx);
                   const dayNameKey = `day${dayName}`;
+                  const localizedDayName = t(dayNameKey, dayName);
 
                   return (
                     <div 
@@ -922,55 +1048,58 @@ export default function TemplatesPage() {
                             {dayIdx + 1}
                           </span>
                           <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                            {t(dayNameKey, dayName)}
+                            {localizedDayName}
                           </h4>
                         </div>
 
+                        {/* ADD RECIPE / DISH TO THIS DAY BUTTON */}
                         <button
                           type="button"
                           onClick={() => handleOpenAddMeal(dayIdx, 'Dinner')}
                           className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer"
                         >
                           <Plus className="h-3.5 w-3.5" />
-                          <span>{(t('addMealToDay', 'Add Dish to {day}')).replace('{day}', t(dayNameKey, dayName))}</span>
+                          <span>{(t('addMealToDay', 'Add Recipe to {day}')).replace('{day}', localizedDayName)}</span>
                         </button>
                       </div>
 
                       {dayMeals.length === 0 ? (
                         <div className="py-4 text-center text-[11px] opacity-40">
-                          {t('emptyDayDesc', 'No meals planned for this day.')}
+                          {(t('emptyDaySchedulePrompt', "No recipes scheduled for {dayName}. Click '+ Add Recipe to {dayName}' to select a dish."))
+                            .replace(/{dayName}/g, localizedDayName)}
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                           {dayMeals.map(meal => {
                             const resolvedThumb = resolveRecipeImageUrl(meal.imageUrl || meal.image);
+                            const defaultThumb = getDefaultImageUrl(storageConfig);
+
                             return (
                               <div 
                                 key={meal.id}
                                 onClick={() => handleOpenRecipeModal(meal)}
                                 className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs group cursor-pointer hover:border-[var(--color-primary)] transition-all duration-200"
                                 style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                                title={t('inspectRecipeDetails', 'Click to inspect full recipe details (Without Editing)')}
                               >
                                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                                  {/* Recipe Thumbnail (Task 1 & 3) */}
+                                  {/* Recipe Thumbnail */}
                                   <div 
                                     className="w-16 h-16 sm:w-18 sm:h-18 rounded-xl overflow-hidden shrink-0 border relative bg-slate-900/40"
                                     style={{ borderColor: 'var(--color-border)' }}
                                   >
                                     <img 
                                       src={resolvedThumb} 
-                                      alt={meal.recipeName}
+                                      alt={meal.recipeName || meal.title}
                                       referrerPolicy="no-referrer"
                                       onError={(e) => {
-                                        const target = e.target as HTMLImageElement;
-                                        target.src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                                        (e.currentTarget as HTMLImageElement).src = defaultThumb;
                                       }}
                                       className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                                     />
-                                    <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors" />
                                   </div>
 
-                                  {/* Recipe Details */}
+                                  {/* Recipe Info */}
                                   <div className="space-y-1 min-w-0 flex-1">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded border text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
@@ -983,11 +1112,11 @@ export default function TemplatesPage() {
                                       )}
                                     </div>
                                     <h5 className="font-bold text-xs truncate group-hover:text-[var(--color-primary)] transition-colors" style={{ color: 'var(--color-text)' }}>
-                                      {meal.recipeName}
+                                      {meal.recipeName || meal.title}
                                     </h5>
                                     <div className="flex items-center gap-3 text-[10px] opacity-75 font-mono">
-                                      <span>{meal.servings || 4} serv</span>
-                                      <span>{(meal.prepMinutes || 15) + (meal.cookMinutes || 25)}m</span>
+                                      <span>{(t('servingsAbbr', '{count} serv')).replace('{count}', String(meal.servings || 4))}</span>
+                                      <span>{(t('minutesAbbr', '{count}m')).replace('{count}', String((meal.prepMinutes || 15) + (meal.cookMinutes || 25)))}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -998,7 +1127,7 @@ export default function TemplatesPage() {
                                     type="button"
                                     onClick={() => handleRemoveMealFromBlueprint(meal.id)}
                                     className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition cursor-pointer"
-                                    title={t('removeMealTitle', 'Remove meal')}
+                                    title={t('removeMealTitle', 'Remove recipe from day')}
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </button>
@@ -1021,7 +1150,221 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* MODAL 5: FULL RECIPE CARD MODAL (READ-ONLY, WITHOUT EDITING BUTTON) - Task 2 */}
+      {/* MODAL 2: ADD RECIPE TO BLUEPRINT DAY */}
+      {showMealModal && (
+        <div 
+          onClick={() => setShowMealModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meal-modal-title"
+            data-lpignore="true"
+            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 id="meal-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+                {(t('addMealToDay', 'Add Recipe to {day}')).replace('{day}', t(`day${DAY_NAMES[targetDayIndex]}`, DAY_NAMES[targetDayIndex]))}
+              </h3>
+              <button type="button" onClick={() => setShowMealModal(false)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5">
+              {/* Button to Launch Saved Recipe Picker Modal */}
+              <button
+                type="button"
+                onClick={() => setShowRecipePicker(true)}
+                className="w-full py-2.5 px-3 rounded-xl border font-bold text-xs flex items-center justify-between cursor-pointer hover:opacity-80 transition"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+              >
+                <span className="flex items-center gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  {selectedRecipeForMeal ? (selectedRecipeForMeal.title || selectedRecipeForMeal.name) : t('selectFromSavedRecipes', 'Select from Saved Recipes Library')}
+                </span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+
+              <div>
+                <label className="block font-bold mb-1 opacity-80">{t('customDishTitleLabel', 'Dish Title *')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  placeholder={t('dishTitlePlaceholder', 'e.g. Grilled Salmon with Asparagus')}
+                  value={targetDishTitle}
+                  onChange={(e) => setTargetDishTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveMealToBlueprint();
+                    }
+                  }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-medium"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold mb-1 opacity-80">{t('mealSlotLabel', 'Meal Slot')}</label>
+                  <select
+                    value={targetMealType}
+                    onChange={(e) => setTargetMealType(e.target.value)}
+                    className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    {MEAL_SLOTS.map(s => (
+                      <option key={s} value={s}>{t(`slot${s}`, s)}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1 opacity-80">{t('servingsLabel', 'Servings')}</label>
+                  <input
+                    type="number"
+                    min="1"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    value={targetServings}
+                    onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
+                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1 opacity-80">{t('notesLabel', 'Notes / Instructions')}</label>
+                <textarea
+                  rows={2}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  placeholder={t('notesPlaceholder', 'Notes, prep reminders, or substitutions...')}
+                  value={targetNotes}
+                  onChange={(e) => setTargetNotes(e.target.value)}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none resize-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowMealModal(false)}
+                  className="px-4 py-2 border rounded-xl font-bold cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                >
+                  {t('cancelBtn', 'Cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveMealToBlueprint}
+                  disabled={!targetDishTitle.trim()}
+                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {t('addToBlueprintBtn', 'Add to Blueprint')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: SAVED RECIPES PICKER MODAL */}
+      {showRecipePicker && (
+        <div 
+          onClick={() => setShowRecipePicker(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipe-picker-title"
+            data-lpignore="true"
+            className="border rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative p-5 space-y-3 cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <div className="flex justify-between items-center border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 id="recipe-picker-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+                {t('selectFromSavedRecipes', 'Select from Saved Recipes Library')}
+              </h3>
+              <button type="button" onClick={() => setShowRecipePicker(false)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="relative">
+              <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none opacity-60" />
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                placeholder={t('searchRecipesPlaceholder', 'Search your saved recipes...')}
+                value={pickerSearch}
+                onChange={(e) => setPickerSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-2 pr-1 custom-scrollbar max-h-80">
+              {filteredPickerRecipes.length === 0 ? (
+                <div className="py-8 text-center text-xs opacity-50">
+                  {t('noRecipesFound', 'No recipes found in your saved library.')}
+                </div>
+              ) : (
+                filteredPickerRecipes.map(recipe => {
+                  const pickerThumb = resolveRecipeImageUrl(recipe.imageUrl || recipe.image);
+                  const defaultThumb = getDefaultImageUrl(storageConfig);
+
+                  return (
+                    <div
+                      key={recipe.id}
+                      onClick={() => {
+                        setSelectedRecipeForMeal(recipe);
+                        setTargetDishTitle(recipe.title || recipe.name);
+                        setTargetServings(Number(recipe.servings || 4));
+                        setTargetCookingTime((recipe.prepTimeMinutes || 15) + (recipe.cookTimeMinutes || 25));
+                        setShowRecipePicker(false);
+                      }}
+                      className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img 
+                          src={pickerThumb} 
+                          alt={recipe.title || recipe.name} 
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = defaultThumb;
+                          }}
+                          className="w-10 h-10 rounded-lg object-cover border shrink-0" 
+                          style={{ borderColor: 'var(--color-border)' }} 
+                        />
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
+                          <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
+                        </div>
+                      </div>
+                      <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: FULL RECIPE CARD MODAL (READ-ONLY, WITHOUT EDITING BUTTON) */}
       {showRecipeDetailModal && selectedRecipeForModal && (
         <div 
           onClick={() => setShowRecipeDetailModal(false)}
@@ -1047,23 +1390,21 @@ export default function TemplatesPage() {
                 alt={selectedRecipeForModal.title}
                 referrerPolicy="no-referrer"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                  (e.currentTarget as HTMLImageElement).src = getDefaultImageUrl(storageConfig);
                 }}
                 className="w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent" />
 
-              {/* Close Button Top Right */}
               <button 
                 type="button" 
                 onClick={() => setShowRecipeDetailModal(false)}
                 className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/80 transition cursor-pointer z-10 border border-white/20"
-                title={t('closeModalBtn', 'Close')}
+                title={t('closeBtn', 'Close')}
               >
                 <X className="h-4 w-4" />
               </button>
 
-              {/* Header Metadata Over Hero */}
               <div className="absolute bottom-4 left-6 right-6 space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-white tracking-wider border border-white/30" style={{ backgroundColor: 'var(--color-primary)' }}>
@@ -1071,14 +1412,14 @@ export default function TemplatesPage() {
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono text-white/90 bg-white/10 backdrop-blur-xs flex items-center gap-1 border border-white/15">
                     <Clock className="h-3 w-3" />
-                    <span>{t('prepTimeLabel', 'Prep')}: {selectedRecipeForModal.prepTimeMinutes || 15}m</span>
+                    <span>{(t('prepTimeLabel', 'Prep: {time}m')).replace('{time}', String(selectedRecipeForModal.prepTimeMinutes || 15))}</span>
                     <span className="opacity-40">•</span>
-                    <span>{t('cookTimeLabel', 'Cook')}: {selectedRecipeForModal.cookTimeMinutes || 25}m</span>
+                    <span>{(t('cookTimeLabel', 'Cook: {time}m')).replace('{time}', String(selectedRecipeForModal.cookTimeMinutes || 25))}</span>
                   </span>
                   {selectedRecipeForModal.calories && (
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono text-white/90 bg-white/10 backdrop-blur-xs flex items-center gap-1 border border-white/15">
                       <Flame className="h-3 w-3 text-orange-400" />
-                      <span>{selectedRecipeForModal.calories} kcal</span>
+                      <span>{(t('caloriesKcal', '{count} kcal')).replace('{count}', String(selectedRecipeForModal.calories))}</span>
                     </span>
                   )}
                 </div>
@@ -1089,16 +1430,15 @@ export default function TemplatesPage() {
               </div>
             </div>
 
-            {/* Interactive Tools Row: Servings Stepper & Zoom Controls */}
+            {/* Servings Stepper & Zoom Controls */}
             <div 
               className="p-3.5 border-b flex items-center justify-between gap-4 shrink-0 flex-wrap"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
             >
-              {/* Servings Stepper */}
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-bold opacity-75 flex items-center gap-1">
                   <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                  {t('servingsCountLabel', 'Servings')}:
+                  {t('servingsLabel', 'Servings')}:
                 </span>
                 <div className="flex items-center border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
                   <button
@@ -1121,11 +1461,10 @@ export default function TemplatesPage() {
                 </div>
               </div>
 
-              {/* Text Zoom Stepper */}
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-bold opacity-75 flex items-center gap-1">
                   <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                  {t('zoomLabel', 'Text Size')}:
+                  {t('textSizeLabel', 'Text Size:')}
                 </span>
                 <div className="flex items-center border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
                   <button
@@ -1147,15 +1486,15 @@ export default function TemplatesPage() {
               </div>
             </div>
 
-            {/* Scrollable Content: Ingredients & Instructions */}
+            {/* Ingredients & Instructions (Read-Only) */}
             <div 
               className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar"
               style={{ fontSize: `${(fontSizeScale / 100) * 0.75}rem` }}
             >
-              {/* Ingredients Section */}
+              {/* Ingredients */}
               <div className="space-y-3">
                 <h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-                  <span>{t('ingredientsTitle', 'Ingredients')}</span>
+                  <span>{t('ingredientsHeading', 'Ingredients')}</span>
                   <span className="text-[10px] font-normal opacity-60">({selectedRecipeForModal.ingredients?.length || 0})</span>
                 </h3>
 
@@ -1163,7 +1502,7 @@ export default function TemplatesPage() {
                   <p className="opacity-60 italic">{t('noIngredientsRecorded', 'No specific ingredients recorded for this dish.')}</p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {selectedRecipeForModal.ingredients.map((ing, idx) => {
+                    {selectedRecipeForModal.ingredients.map((ing: any, idx: number) => {
                       const isChecked = !!checkedIngredients[`ing_${idx}`];
                       const rawAmt = typeof ing.amount === 'number' ? ing.amount : parseFloat(ing.amount);
                       const scaledAmt = !isNaN(rawAmt) 
@@ -1201,17 +1540,17 @@ export default function TemplatesPage() {
                 )}
               </div>
 
-              {/* Instructions Section */}
+              {/* Instructions */}
               <div className="space-y-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-                  <span>{t('instructionsTitle', 'Step-by-Step Instructions')}</span>
+                  <span>{t('instructionsHeading', 'Step-by-Step Instructions')}</span>
                 </h3>
 
                 {(!selectedRecipeForModal.instructions || selectedRecipeForModal.instructions.length === 0) ? (
                   <p className="opacity-60 italic">{t('noInstructionsRecorded', 'No instructions recorded for this dish.')}</p>
                 ) : (
                   <div className="space-y-2.5">
-                    {selectedRecipeForModal.instructions.map((step, idx) => {
+                    {selectedRecipeForModal.instructions.map((step: any, idx: number) => {
                       const isChecked = !!checkedSteps[idx];
                       const stepText = typeof step === 'string' ? step : step.text || step.instruction;
 
@@ -1246,10 +1585,9 @@ export default function TemplatesPage() {
                 )}
               </div>
 
-              {/* Personal Notes (if present) */}
               {selectedRecipeForModal.notes && (
                 <div className="p-3 rounded-2xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold text-[10px] uppercase text-amber-400">Blueprint Notes</span>
+                  <span className="font-bold text-[10px] uppercase text-amber-400">{t('blueprintNotesLabel', 'Blueprint Notes')}</span>
                   <p className="text-xs opacity-80">{selectedRecipeForModal.notes}</p>
                 </div>
               )}
@@ -1268,11 +1606,11 @@ export default function TemplatesPage() {
                     rel="noopener noreferrer"
                     className="text-xs font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1.5"
                   >
-                    <span>{t('sourceUrlLabel', 'Original Recipe Source')}</span>
+                    <span>{t('originalRecipeSource', 'Original Recipe Source')}</span>
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                 ) : (
-                  <span className="text-[11px] opacity-40">Zecratary Blueprint Catalog</span>
+                  <span className="text-[11px] opacity-40">{t('blueprintCatalogFooter', 'Zecratary Blueprint Catalog')}</span>
                 )}
               </div>
 
@@ -1283,7 +1621,7 @@ export default function TemplatesPage() {
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   <ChefHat className="h-4 w-4" />
-                  <span>{t('cookWithAiChef', 'Cook with AI Chef')}</span>
+                  <span>{t('cookWithChefBtn', 'Cook with AI Chef')}</span>
                 </Link>
 
                 <button
@@ -1292,7 +1630,7 @@ export default function TemplatesPage() {
                   className="px-4 py-2 border rounded-xl font-bold text-xs hover:opacity-80 transition cursor-pointer"
                   style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                 >
-                  {t('closeModalBtn', 'Close')}
+                  {t('closeBtn', 'Close')}
                 </button>
               </div>
             </div>
@@ -1330,22 +1668,10 @@ export default function TemplatesPage() {
                 <input
                   type="text"
                   autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
                   data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
                   placeholder={t('blueprintTitlePlaceholder', 'e.g. High-Protein Muscle Gain...')}
                   value={templateTitle}
                   onChange={(e) => setTemplateTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleSaveTemplateModal();
-                    }
-                  }}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
@@ -1360,8 +1686,15 @@ export default function TemplatesPage() {
                     className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
-                    {['General', 'High-Protein', 'Low-Carb / Keto', 'Mediterranean', 'Family Friendly', 'Quick & Easy'].map(c => (
-                      <option key={c} value={c}>{c}</option>
+                    {[
+                      { key: 'catGeneral', val: 'General' },
+                      { key: 'catHighProtein', val: 'High-Protein' },
+                      { key: 'catLowCarb', val: 'Low-Carb / Keto' },
+                      { key: 'catMediterranean', val: 'Mediterranean' },
+                      { key: 'catFamilyFriendly', val: 'Family Friendly' },
+                      { key: 'catQuickEasy', val: 'Quick & Easy' }
+                    ].map(c => (
+                      <option key={c.val} value={c.val}>{t(c.key, c.val)}</option>
                     ))}
                   </select>
                 </div>
@@ -1386,13 +1719,7 @@ export default function TemplatesPage() {
                 <textarea
                   rows={2}
                   autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
                   data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
                   placeholder={t('blueprintDescPlaceholder', 'Short summary of this meal plan blueprint...')}
                   value={templateDesc}
                   onChange={(e) => setTemplateDesc(e.target.value)}
@@ -1420,224 +1747,6 @@ export default function TemplatesPage() {
                   {t('saveBlueprintBtn', 'Save Blueprint')}
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: ADD MEAL TO BLUEPRINT DAY */}
-      {showMealModal && (
-        <div 
-          onClick={() => setShowMealModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="meal-modal-title"
-            data-lpignore="true"
-            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 id="meal-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-                {(t('addMealToDay', 'Add Dish to {day}')).replace('{day}', t(`day${DAY_NAMES[targetDayIndex]}`, DAY_NAMES[targetDayIndex]))}
-              </h3>
-              <button type="button" onClick={() => setShowMealModal(false)} className="p-1 rounded-lg">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3.5">
-              <button
-                type="button"
-                onClick={() => setShowRecipePicker(true)}
-                className="w-full py-2.5 px-3 rounded-xl border font-bold text-xs flex items-center justify-between cursor-pointer hover:opacity-80 transition"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
-              >
-                <span className="flex items-center gap-2">
-                  <BookOpen className="h-4 w-4" />
-                  {selectedRecipeForMeal ? selectedRecipeForMeal.title : t('selectFromSavedRecipes', 'Select from Saved Recipes')}
-                </span>
-                <ChevronRight className="h-4 w-4" />
-              </button>
-
-              <div>
-                <label className="block font-bold mb-1 opacity-80">{t('customDishTitleLabel', 'Dish Title *')}</label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
-                  placeholder={t('dishTitlePlaceholder', 'e.g. Grilled Salmon with Asparagus')}
-                  value={targetDishTitle}
-                  onChange={(e) => setTargetDishTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleSaveMealToBlueprint();
-                    }
-                  }}
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-medium"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1 opacity-80">{t('mealSlotLabel', 'Meal Slot')}</label>
-                  <select
-                    value={targetMealType}
-                    onChange={(e) => setTargetMealType(e.target.value)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  >
-                    {MEAL_SLOTS.map(s => (
-                      <option key={s} value={s}>{t(`slot${s}`, s)}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1 opacity-80">{t('servingsLabel', 'Servings')}</label>
-                  <input
-                    type="number"
-                    min="1"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    value={targetServings}
-                    onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleSaveMealToBlueprint();
-                      }
-                    }}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowMealModal(false)}
-                  className="px-4 py-2 border rounded-xl font-bold cursor-pointer hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  {t('cancelBtn', 'Cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveMealToBlueprint}
-                  disabled={!targetDishTitle.trim()}
-                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  {t('saveBlueprintBtn', 'Save Blueprint')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 3: SAVED RECIPES PICKER */}
-      {showRecipePicker && (
-        <div 
-          onClick={() => setShowRecipePicker(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="recipe-picker-title"
-            data-lpignore="true"
-            className="border rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative p-5 space-y-3 cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <div className="flex justify-between items-center border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 id="recipe-picker-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-                {t('selectFromSavedRecipes', 'Select from Saved Recipes')}
-              </h3>
-              <button type="button" onClick={() => setShowRecipePicker(false)} className="p-1 rounded-lg">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="relative">
-              <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none opacity-60" />
-              <input
-                type="text"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                data-lpignore="true"
-                data-1p-ignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                placeholder={t('searchRecipesPlaceholder', 'Search saved recipes...')}
-                value={pickerSearch}
-                onChange={(e) => setPickerSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
-
-            <div className="overflow-y-auto flex-1 space-y-2 pr-1 custom-scrollbar max-h-80">
-              {filteredPickerRecipes.length === 0 ? (
-                <div className="py-8 text-center text-xs opacity-50">
-                  {t('noRecipesFound', 'No recipes found.')}
-                </div>
-              ) : (
-                filteredPickerRecipes.map(recipe => {
-                  const pickerThumb = resolveRecipeImageUrl(recipe.imageUrl || recipe.image);
-                  return (
-                    <div
-                      key={recipe.id}
-                      onClick={() => {
-                        setSelectedRecipeForMeal(recipe);
-                        setTargetDishTitle(recipe.title || recipe.name);
-                        setTargetServings(Number(recipe.servings || 4));
-                        setTargetCookingTime((recipe.prepTimeMinutes || 15) + (recipe.cookTimeMinutes || 25));
-                        setShowRecipePicker(false);
-                      }}
-                      className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <img 
-                          src={pickerThumb} 
-                          alt={recipe.title} 
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
-                          }}
-                          className="w-10 h-10 rounded-lg object-cover border shrink-0" 
-                          style={{ borderColor: 'var(--color-border)' }} 
-                        />
-                        <div className="min-w-0">
-                          <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
-                          <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
-                        </div>
-                      </div>
-                      <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
-                    </div>
-                  );
-                })
-              )}
             </div>
           </div>
         </div>
@@ -1674,9 +1783,6 @@ export default function TemplatesPage() {
                   type="date"
                   autoComplete="off"
                   data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
                   value={applyStartDate}
                   onChange={(e) => setApplyStartDate(e.target.value)}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer"
@@ -1706,7 +1812,7 @@ export default function TemplatesPage() {
                   className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  {t('confirmApplyBtn', 'Confirm & Apply to Calendar')}
+                  {t('confirmApplyBtn', 'Confirm & Apply')}
                 </button>
               </div>
             </div>
