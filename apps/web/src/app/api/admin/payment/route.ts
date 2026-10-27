@@ -3,6 +3,18 @@ import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
 async function ensurePaymentSchema() {
   try {
     await query(`
@@ -156,18 +168,18 @@ export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes = await query(
+    let txRes: any = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(async () => {
       return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
     });
 
-    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+    const transactions = parseDbRows(txRes);
 
     let settings: any = null;
     try {
-      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+      const sRow = parseDbRow(sRes);
       if (sRow) {
         let ps = sRow.payment_settings;
         if (typeof ps === 'string') {
@@ -296,8 +308,8 @@ export async function POST(req: Request) {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
@@ -327,8 +339,8 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
@@ -360,8 +372,8 @@ export async function POST(req: Request) {
     if (body.action === 'sync_env') {
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }

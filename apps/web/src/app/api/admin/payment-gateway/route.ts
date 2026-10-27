@@ -3,6 +3,18 @@ import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -36,7 +48,7 @@ export async function GET() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
-    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    const sRow = parseDbRow(sRes);
     if (sRow?.payment_settings) {
       const ps = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
       if (ps && typeof ps === 'object') {
@@ -52,7 +64,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (txRes) {
-      manualTransactions = Array.isArray(txRes) ? txRes : (txRes.rows || []);
+      manualTransactions = parseDbRows(txRes);
     }
   } catch (err: any) {
     console.warn('[Payment Gateway API] Fallback to server JSON store:', err?.message || err);
