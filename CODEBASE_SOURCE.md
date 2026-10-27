@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.46",
+  "version": "8.1.48",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.46",
+  "version": "8.1.48",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -28400,8 +28400,8 @@ export default function LanguageRedirectPage() {
 
 ## File: `apps/web/src/app/books/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -28409,7 +28409,7 @@ import Link from 'next/link';
 import { 
   Book, Plus, Trash2, Edit3, Search, X, Check, BookOpen,
   FolderPlus, ChevronRight, Utensils, Save, Sparkles, RefreshCw,
-  CheckCircle2, AlertCircle
+  CheckCircle2, AlertCircle, SearchX
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -28462,7 +28462,7 @@ export default function BooksPage() {
     setLoading(true);
 
     try {
-      // 1. Fetch recipes from both endpoints to accurately compute collection counts
+      // 1. Fetch recipes to dynamically count collection contents
       let loadedRecipes: any[] = [];
       try {
         const sRes = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(activeUserId)}&t=${Date.now()}`, { cache: 'no-store' });
@@ -28487,7 +28487,6 @@ export default function BooksPage() {
         }
       } catch (_) {}
 
-      // Fallback to localStorage if offline
       if (loadedRecipes.length === 0 && typeof window !== 'undefined') {
         try {
           const localR = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
@@ -28526,7 +28525,6 @@ export default function BooksPage() {
         } catch (_) {}
       }
 
-      // Dynamically calculate accurate recipe counts
       const syncdBooks = loadedBooks.map((b: any) => ({
         ...b,
         recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id)).length
@@ -28539,6 +28537,19 @@ export default function BooksPage() {
       setLoading(false);
     }
   }, []);
+
+  // Global ESC key to close open modals & collection drawer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showAddModal) setShowAddModal(false);
+        if (showEditModal) setShowEditModal(false);
+        if (selectedBook) setSelectedBook(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAddModal, showEditModal, selectedBook]);
 
   useEffect(() => {
     document.title = `${t('cookbooksTitle', 'Recipe Cookbooks')} - Zecratary`;
@@ -28567,6 +28578,7 @@ export default function BooksPage() {
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -28577,6 +28589,7 @@ export default function BooksPage() {
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
     };
   }, [loadData, router, t]);
 
@@ -28600,16 +28613,19 @@ export default function BooksPage() {
 
     try {
       localStorage.setItem('zecratary_recipe_books', JSON.stringify(updated));
-      await fetch('/api/books', {
+      const res = await fetch('/api/books', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newBook)
       });
+      if (!res.ok) throw new Error('Database write error');
+
       window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
       window.dispatchEvent(new Event('storage'));
       showToast(t('bookCreatedToast', 'Cookbook created successfully!'));
     } catch (err) {
       console.error('Failed to create book in PostgreSQL:', err);
+      showToast(t('failedToCreateBook', 'Failed to create cookbook. Please try again.'), 'error');
     }
 
     setNewTitle('');
@@ -28651,16 +28667,19 @@ export default function BooksPage() {
 
     try {
       localStorage.setItem('zecratary_recipe_books', JSON.stringify(updated));
-      await fetch('/api/books', {
+      const res = await fetch('/api/books', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedBook)
       });
+      if (!res.ok) throw new Error('Database update error');
+
       window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
       window.dispatchEvent(new Event('storage'));
       showToast(t('bookUpdatedToast', 'Cookbook updated successfully!'));
     } catch (err) {
       console.error('Failed to update book in PostgreSQL:', err);
+      showToast(t('failedToUpdateBook', 'Failed to update cookbook. Please try again.'), 'error');
     }
 
     setShowEditModal(false);
@@ -28672,7 +28691,8 @@ export default function BooksPage() {
     if (!confirm(t('confirmDeleteBook', 'Are you sure you want to delete this recipe book?'))) return;
     
     try {
-      await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Database delete error');
 
       const updated = books.filter((b) => b.id !== id);
       setBooks(updated);
@@ -28699,6 +28719,7 @@ export default function BooksPage() {
       showToast(t('bookDeletedToast', 'Cookbook removed from your library.'));
     } catch (err) {
       console.error('Error deleting book:', err);
+      showToast(t('failedToDeleteBook', 'Failed to delete cookbook. Please try again.'), 'error');
     }
   };
 
@@ -28718,8 +28739,17 @@ export default function BooksPage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-books-canvas"
+      role="region"
+      aria-label={t('cookbooksTitle', 'Recipe Cookbooks')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)' 
+      }}
     >
       {/* Toast Alert Banner */}
       {toastMessage && (
@@ -28741,7 +28771,10 @@ export default function BooksPage() {
       )}
 
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+      <div 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2 border-b pb-4" 
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
             {t('cookbooksTitle', 'Recipe Cookbooks')}
@@ -28782,8 +28815,9 @@ export default function BooksPage() {
       {/* Search Bar with Full Theme Bindings (Autofill Safe) */}
       <div 
         role="region"
+        aria-label={t('searchCookbooksPlaceholder', 'Search cookbooks')}
         data-lpignore="true"
-        className="relative"
+        className="relative w-full"
       >
         <Search 
           className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none opacity-60" 
@@ -28798,7 +28832,7 @@ export default function BooksPage() {
           placeholder={t('searchCookbooksPlaceholder', 'Search cookbooks by title or description...')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-2xl pl-11 pr-4 py-2.5 text-sm outline-none transition shadow-xs font-medium"
+          className="w-full border rounded-2xl pl-11 pr-10 py-2.5 text-sm outline-none transition shadow-xs font-medium"
           style={{
             backgroundColor: 'var(--color-card)',
             borderColor: 'var(--color-border)',
@@ -28807,16 +28841,28 @@ export default function BooksPage() {
           onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
           onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            className="absolute right-3.5 top-3 p-1 rounded-full opacity-60 hover:opacity-100 transition cursor-pointer"
+            style={{ color: 'var(--color-text-secondary)' }}
+            title={t('clearSearchBtn', 'Clear Search')}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
-      {/* Cookbook Grid */}
+      {/* Cookbook Grid with Responsive Breakpoints for Fluid Canvas */}
       {loading ? (
-        <div className="text-center py-12 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        <div className="text-center py-16 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
           {t('loadingCookbooks', 'Loading cookbooks...')}
         </div>
-      ) : filteredBooks.length === 0 ? (
+      ) : books.length === 0 ? (
+        /* Empty State: Zero Cookbooks in Library */
         <div 
-          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          className="text-center py-20 px-4 border border-dashed rounded-3xl space-y-3"
           style={{
             backgroundColor: 'var(--color-inner-dark)',
             borderColor: 'var(--color-border)'
@@ -28847,8 +28893,47 @@ export default function BooksPage() {
             <Plus className="h-4 w-4" /> {t('createFirstCookbook', 'Create First Cookbook')}
           </button>
         </div>
+      ) : filteredBooks.length === 0 ? (
+        /* Empty Search Filter State */
+        <div 
+          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div 
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm border opacity-60"
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)' 
+            }}
+          >
+            <SearchX className="h-6 w-6"/>
+          </div>
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noSearchResultsTitle', 'No Matching Cookbooks')}
+          </h3>
+          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('noSearchResultsDesc', 'No cookbooks match your current search query. Try searching with different keywords.')}
+          </p>
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            className="border font-bold text-xs px-4 py-2 rounded-xl transition shadow-xs inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+            style={{ 
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-primary)'
+            }}
+          >
+            <X className="h-3.5 w-3.5" /> {t('clearSearchBtn', 'Clear Search')}
+          </button>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        /* Full-Width Fluid Multi-Column Grid */
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
           {filteredBooks.map((b) => (
             <div
               key={b.id}
@@ -28862,7 +28947,6 @@ export default function BooksPage() {
               <div>
                 <div className={`h-28 w-full bg-gradient-to-r ${b.coverColor || COVER_GRADIENTS[0].className} p-4 flex flex-col justify-between relative`}>
                   <div className="flex items-center justify-between">
-                    {/* High-Contrast Dynamic Badge for Day Mode */}
                     <span 
                       className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1.5 border shadow-sm backdrop-blur-md transition"
                       style={{
@@ -28875,7 +28959,6 @@ export default function BooksPage() {
                       {(t('recipesCountSuffix', '{count} Recipes')).replace('{count}', String(b.recipeCount || 0))}
                     </span>
 
-                    {/* High-Contrast Action Buttons for Day Mode */}
                     <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -28985,7 +29068,7 @@ export default function BooksPage() {
                   <Utensils className="h-8 w-8 mx-auto opacity-30" />
                   <p>{t('noRecipesInBookYet', 'No recipes added to this cookbook yet.')}</p>
                   <Link 
-                    href="/recipes"
+                    href="/saved"
                     className="inline-block font-bold text-xs hover:underline pt-1"
                     style={{ color: 'var(--color-primary)' }}
                   >
@@ -28996,7 +29079,7 @@ export default function BooksPage() {
                 selectedBookRecipes.map((r) => (
                   <div
                     key={r.id}
-                    onClick={() => router.push('/recipes')}
+                    onClick={() => router.push('/saved')}
                     className="p-3 rounded-xl border flex items-center justify-between gap-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -29006,7 +29089,7 @@ export default function BooksPage() {
                     <div className="flex items-center gap-3 min-w-0">
                       <img 
                         src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'} 
-                        alt={r.title || r.name}
+                        alt={r.title || r.name || t('recipeImageAlt', 'Recipe cover photo')}
                         className="w-12 h-12 rounded-lg object-cover border shrink-0"
                         style={{ borderColor: 'var(--color-border)' }}
                       />
@@ -29024,7 +29107,7 @@ export default function BooksPage() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        router.push('/recipes');
+                        router.push('/saved');
                       }}
                       className="px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer shadow-xs hover:opacity-80"
                       style={{
@@ -29058,7 +29141,7 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* CREATE COOKBOOK MODAL (NO NATIVE FORM - AUTOFILL SAFE) */}
+      {/* CREATE COOKBOOK MODAL (ACCESSIBLE DIV - AUTOFILL SAFE) */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
@@ -29205,7 +29288,7 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* EDIT COOKBOOK MODAL (NO NATIVE FORM - AUTOFILL SAFE) */}
+      {/* EDIT COOKBOOK MODAL (ACCESSIBLE DIV - AUTOFILL SAFE) */}
       {showEditModal && (
         <div 
           onClick={() => setShowEditModal(false)}
@@ -36088,9 +36171,7 @@ export default function RecipesPage() {
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // ----------------------------------------------------------------------
-  // RESTORED ADJUSTABLE KITCHEN TIMER STATES & PERSISTENCE
-  // ----------------------------------------------------------------------
+  // Kitchen Timer States
   const [isTimerModalOpen, setIsTimerModalOpen] = useState(false);
   const [timerInputMinutes, setTimerInputMinutes] = useState(15);
   const [activeTimer, setActiveTimer] = useState<{
@@ -36112,7 +36193,7 @@ export default function RecipesPage() {
       const ctx = audioCtxRef.current || new AudioCtx();
       audioCtxRef.current = ctx;
 
-      const notes = [587.33, 880, 1174.66, 1760]; // D5, A5, D6, A6 culinary chime sequence
+      const notes = [587.33, 880, 1174.66, 1760];
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -36129,7 +36210,6 @@ export default function RecipesPage() {
     } catch (_) {}
   }, []);
 
-  // Restore Active Timer from LocalStorage on mount
   useEffect(() => {
     try {
       const savedTimerRaw = localStorage.getItem('zecratary_active_timer');
@@ -36150,7 +36230,6 @@ export default function RecipesPage() {
     } catch (_) {}
   }, []);
 
-  // Active Timer Countdown Interval Effect
   useEffect(() => {
     if (!activeTimer || !activeTimer.isRunning) return;
 
@@ -36328,7 +36407,60 @@ export default function RecipesPage() {
     }
   }, []);
 
-  // Load Recipes from Multi-Source REST Endpoints & Local Hydration
+  // ----------------------------------------------------------------------
+  // Task 1: Robust Books Loader Matching /books
+  // ----------------------------------------------------------------------
+  const loadBooksData = useCallback(async (targetUserId: string) => {
+    let resolvedBooks: any[] = [];
+
+    try {
+      const [userBooksRes, globalBooksRes] = await Promise.allSettled([
+        fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/books?t=${Date.now()}`, { cache: 'no-store' })
+      ]);
+
+      if (userBooksRes.status === 'fulfilled' && userBooksRes.value.ok) {
+        const data = await userBooksRes.value.json();
+        const list = Array.isArray(data) ? data : data.books || [];
+        resolvedBooks.push(...list);
+      } else if (globalBooksRes.status === 'fulfilled' && globalBooksRes.value.ok) {
+        const data = await globalBooksRes.value.json();
+        const list = Array.isArray(data) ? data : data.books || [];
+        resolvedBooks.push(...list);
+      }
+    } catch (_) {}
+
+    // Check LocalStorage matching /books exactly
+    const bookKeys = ['zecratary_recipe_books', 'recipe_books', 'zecratary_books', 'books'];
+    bookKeys.forEach(k => {
+      try {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((b: any) => {
+              if (b && b.id && !resolvedBooks.some(x => x.id === b.id)) {
+                resolvedBooks.push(b);
+              }
+            });
+          }
+        }
+      } catch (_) {}
+    });
+
+    if (resolvedBooks.length === 0) {
+      resolvedBooks = [
+        { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.', recipeIds: [] },
+        { id: 'book_2', title: 'Authentic Asian Cuisine', description: 'Traditional recipes & stir-fries.', recipeIds: [] },
+        { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.', recipeIds: [] }
+      ];
+    }
+
+    setBooks(resolvedBooks);
+    return resolvedBooks;
+  }, []);
+
+  // Load Recipes and Categories
   const loadData = useCallback(async (user: User | null, showSpinner = false) => {
     if (!user) return;
     if (isSelfUpdatingRef.current) return;
@@ -36336,12 +36468,13 @@ export default function RecipesPage() {
 
     try {
       const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
-      const [savedRes, recipesRes, booksRes, catRes] = await Promise.allSettled([
+      const [savedRes, recipesRes, catRes] = await Promise.allSettled([
         fetch(`/api/saved-recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
         fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(`/api/books?t=${Date.now()}`, { cache: 'no-store' }),
         fetch(`/api/admin/ingredient-categories?t=${Date.now()}`, { cache: 'no-store' })
       ]);
+
+      await loadBooksData(targetUserId);
 
       let combined: any[] = [];
       if (savedRes.status === 'fulfilled' && savedRes.value.ok) {
@@ -36353,10 +36486,6 @@ export default function RecipesPage() {
         const data = await recipesRes.value.json();
         const list = Array.isArray(data) ? data : data.recipes || [];
         combined.push(...list);
-      }
-      if (booksRes.status === 'fulfilled' && booksRes.value.ok) {
-        const bData = await booksRes.value.json();
-        setBooks(Array.isArray(bData) ? bData : bData.books || []);
       }
       if (catRes.status === 'fulfilled' && catRes.value.ok) {
         const cData = await catRes.value.json();
@@ -36393,6 +36522,8 @@ export default function RecipesPage() {
             isPublic: Boolean(item.isPublic ?? item.is_public),
             servings: Number(item.servings) || 4,
             rating: Number(item.rating) || 5,
+            bookId: item.bookId || item.book_id || null,
+            book_id: item.book_id || item.bookId || null,
             note: item.note || item.notes || ''
           });
         }
@@ -36402,7 +36533,7 @@ export default function RecipesPage() {
     } catch (_) {} finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadBooksData]);
 
   useEffect(() => {
     document.title = `${t('recipesTitle', 'Recipe Library')} - Zecratary`;
@@ -36433,6 +36564,7 @@ export default function RecipesPage() {
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
     window.addEventListener('zecratary_storage_settings_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
@@ -36444,6 +36576,7 @@ export default function RecipesPage() {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
       window.removeEventListener('zecratary_storage_settings_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
@@ -36621,22 +36754,108 @@ export default function RecipesPage() {
     } catch (_) {}
   };
 
+  // ----------------------------------------------------------------------
+  // Task 1: Complete "Add to Book" Persistence & Bi-directional Sync
+  // ----------------------------------------------------------------------
   const handleAssignToBook = async (bookId: string) => {
     if (!selectedRecipe) return;
-    const isRemoving = selectedRecipe.bookId === bookId;
+    const isRemoving = selectedRecipe.bookId === bookId || selectedRecipe.book_id === bookId;
     const targetBookId = isRemoving ? null : bookId;
-    const updatedRecipe = { ...selectedRecipe, bookId: targetBookId };
-    setSelectedRecipe(updatedRecipe);
+    const updatedRecipe = { 
+      ...selectedRecipe, 
+      bookId: targetBookId, 
+      book_id: targetBookId 
+    };
 
+    // 1. Optimistic UI updates
+    setSelectedRecipe(updatedRecipe);
     setRecipes(prev => prev.map(r => r.id === selectedRecipe.id ? updatedRecipe : r));
 
+    // 2. LocalStorage recipe updates
+    const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
+    storageKeys.forEach(k => {
+      try {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            const updated = list.map((r: any) => r.id === selectedRecipe.id ? updatedRecipe : r);
+            localStorage.setItem(k, JSON.stringify(updated));
+          }
+        }
+      } catch (_) {}
+    });
+
+    // 3. Update cookbooks in localStorage matching /books
     try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+      const bookKeys = ['zecratary_recipe_books', 'recipe_books', 'zecratary_books'];
+      bookKeys.forEach(bkKey => {
+        const raw = localStorage.getItem(bkKey);
+        const curBooks = raw ? JSON.parse(raw) : [...books];
+        if (Array.isArray(curBooks)) {
+          const updatedBooks = curBooks.map((b: any) => {
+            let rIds = Array.isArray(b.recipeIds) ? [...b.recipeIds] : (Array.isArray(b.recipe_ids) ? [...b.recipe_ids] : []);
+            if (b.id === bookId) {
+              if (isRemoving) {
+                rIds = rIds.filter((id: string) => id !== selectedRecipe.id);
+              } else if (!rIds.includes(selectedRecipe.id)) {
+                rIds.push(selectedRecipe.id);
+              }
+            } else if (targetBookId) {
+              rIds = rIds.filter((id: string) => id !== selectedRecipe.id);
+            }
+            return { ...b, recipeIds: rIds, recipe_ids: rIds };
+          });
+          localStorage.setItem(bkKey, JSON.stringify(updatedBooks));
+          setBooks(updatedBooks);
+        }
       });
     } catch (_) {}
+
+    // 4. Multi-endpoint server persistence to PostgreSQL
+    const targetUserId = (currentUser?.id || currentUser?.email || 'usr_admin_1').trim();
+    try {
+      await Promise.allSettled([
+        fetch('/api/recipes/saved', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            id: selectedRecipe.id, 
+            bookId: targetBookId, 
+            book_id: targetBookId,
+            userId: targetUserId,
+            user_id: targetUserId 
+          })
+        }),
+        fetch('/api/saved-recipes', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            id: selectedRecipe.id, 
+            bookId: targetBookId, 
+            book_id: targetBookId,
+            userId: targetUserId,
+            user_id: targetUserId 
+          })
+        }),
+        fetch('/api/books', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookId: bookId,
+            recipeId: selectedRecipe.id,
+            action: isRemoving ? 'remove' : 'add',
+            userId: targetUserId
+          })
+        })
+      ]);
+    } catch (_) {}
+
+    // 5. Global Event Dispatch
+    window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+    window.dispatchEvent(new Event('zecratary_recipes_updated'));
+    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+    window.dispatchEvent(new Event('storage'));
 
     const bookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
     showToast(isRemoving ? `Removed from "${bookTitle}"` : `Added to "${bookTitle}"!`, 'success');
@@ -36657,38 +36876,99 @@ export default function RecipesPage() {
     } catch (_) {}
   };
 
+  // ----------------------------------------------------------------------
+  // Task 2: Robust "Add to Plan" with Full Dispatch to /planner
+  // ----------------------------------------------------------------------
   const handleSaveToCalendar = async () => {
     if (!selectedRecipe || !currentUser) return;
     try {
-      const localPlan = localStorage.getItem('zecratary_meal_plan');
-      const currentPlan = localPlan ? JSON.parse(localPlan) : [];
+      const targetUserId = (currentUser.id || currentUser.email || 'usr_admin_1').trim();
+      const createdBy = (currentUser.email || targetUserId).trim();
+      const creatorName = (currentUser.name || 'Chef').trim();
 
       const newPlanItem = {
-        id: 'plan_' + Date.now(),
-        userId: currentUser.id,
-        createdBy: currentUser.email,
-        creatorName: currentUser.name,
+        id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+        userId: targetUserId,
+        user_id: targetUserId,
+        createdBy,
+        created_by: createdBy,
+        creatorName,
         date: planDate,
         recipeId: selectedRecipe.id,
+        recipe_id: selectedRecipe.id,
         recipeName: selectedRecipe.title || selectedRecipe.name,
+        recipeTitle: selectedRecipe.title || selectedRecipe.name,
+        title: selectedRecipe.title || selectedRecipe.name,
+        name: selectedRecipe.title || selectedRecipe.name,
         image: selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg',
+        imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg',
+        image_url: selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg',
         mealType: planMealType,
-        time: planTime,
-        notes: planNotes,
-        isLeftover: false
+        meal_type: planMealType,
+        time: planTime || (planMealType === 'Breakfast' ? '08:00' : planMealType === 'Lunch' ? '12:30' : planMealType === 'Dinner' ? '19:00' : '15:00'),
+        servings: Number(selectedRecipe.servings || currentTotalServings || 4),
+        prepTimeMinutes: Number(selectedRecipe.prepTimeMinutes || selectedRecipe.prepTime || 15),
+        cookTimeMinutes: Number(selectedRecipe.cookTimeMinutes || selectedRecipe.cookTime || 25),
+        calories: Number(selectedRecipe.calories || 0),
+        notes: planNotes || '',
+        note: planNotes || '',
+        recipe: selectedRecipe,
+        ingredients: selectedRecipe.ingredients || [],
+        instructions: selectedRecipe.instructions || selectedRecipe.steps || [],
+        isLeftover: false,
+        createdAt: new Date().toISOString()
       };
 
-      const updatedPlan = [...currentPlan, newPlanItem];
-      localStorage.setItem('zecratary_meal_plan', JSON.stringify(updatedPlan));
-
-      await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, meals: updatedPlan })
+      // 1. Synchronize across all Planner LocalStorage Keys
+      const plannerKeys = ['zecratary_planner', 'zecratary_meal_plan', 'planner_meals', 'meal_plan', 'zecratary_planner_meals'];
+      plannerKeys.forEach(key => {
+        try {
+          const raw = localStorage.getItem(key);
+          let list: any[] = [];
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) list = parsed;
+              else if (parsed && Array.isArray(parsed.meals)) list = parsed.meals;
+            } catch (_) {}
+          }
+          const filtered = list.filter((m: any) => m && m.id !== newPlanItem.id);
+          localStorage.setItem(key, JSON.stringify([...filtered, newPlanItem]));
+        } catch (_) {}
       });
 
+      // 2. Persist to PostgreSQL backend via /api/planner
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            userId: targetUserId,
+            user_id: targetUserId,
+            meal: newPlanItem,
+            meals: [newPlanItem],
+            ...newPlanItem
+          })
+        }),
+        fetch('/api/meal-plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            userId: targetUserId,
+            user_id: targetUserId,
+            meal: newPlanItem,
+            meals: [newPlanItem],
+            ...newPlanItem
+          })
+        })
+      ]);
+
+      // 3. Dispatch Live Events to update /planner in real-time
       window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      window.dispatchEvent(new Event('zecratary_planner_meals_updated'));
       window.dispatchEvent(new Event('storage'));
+
       setShowAddToPlanModal(false);
       showToast(t('mealScheduledToast', 'Recipe scheduled in your meal planner!'), 'success');
     } catch (_) {}
@@ -37064,7 +37344,7 @@ export default function RecipesPage() {
     }
   };
 
-  const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
+  const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
   const baseServings = selectedRecipe?.servings || 4;
   const currentTotalServings = baseServings * servingsMultiplier;
 
@@ -37487,6 +37767,7 @@ export default function RecipesPage() {
                   </span>
                 </div>
 
+                {/* Task 3: Clean Card Footer without JSON and Trash buttons */}
                 <div 
                   className="pt-2 border-t flex items-center justify-between gap-1 text-[11px]"
                   style={{ borderColor: 'var(--color-border)' }}
@@ -37494,7 +37775,7 @@ export default function RecipesPage() {
                   <button
                     type="button"
                     onClick={(e) => handleTogglePublic(e, recipe)}
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition cursor-pointer"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition cursor-pointer"
                     style={recipe.isPublic ? {
                       backgroundColor: 'rgba(16, 185, 129, 0.15)',
                       borderColor: 'var(--color-emerald)',
@@ -37507,30 +37788,8 @@ export default function RecipesPage() {
                     title={recipe.isPublic ? t('publicMarketplace', 'Public Marketplace') : t('privateRecipe', 'Private Recipe')}
                   >
                     {recipe.isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-                    <span>{recipe.isPublic ? t('publicMarketplace', 'Public') : t('privateRecipe', 'Private')}</span>
+                    <span>{recipe.isPublic ? t('publicMarketplace', 'Public Marketplace') : t('privateRecipe', 'Private Recipe')}</span>
                   </button>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleExportJson(recipe); }}
-                      className="px-2 py-1 rounded-lg text-white font-bold text-[10px] flex items-center gap-1 shadow-xs transition hover:opacity-90 cursor-pointer"
-                      style={{ backgroundColor: 'var(--color-emerald)' }}
-                      title={t('exportJsonBtn', 'Export JSON')}
-                    >
-                      <FileJson className="h-3 w-3" />
-                      <span>JSON</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleDeleteRecipe(recipe.id); }}
-                      className="p-1.5 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition cursor-pointer"
-                      title={t('deleteRecipe', 'Delete Recipe')}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>
@@ -37666,7 +37925,7 @@ export default function RecipesPage() {
                     </div>
                   </div>
 
-                  {/* Top Action Row */}
+                  {/* Task 1: Top Action Row with Books Dropdown matching /books */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
                     <div className="relative">
                       <button
@@ -37690,25 +37949,26 @@ export default function RecipesPage() {
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
                           <div 
-                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
+                            className="absolute left-0 top-full mt-2 w-72 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
                             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                               <span>{t('selectCookbook', 'Select Cookbook')}</span>
-                              <Link className="hover:underline" style={{ color: 'var(--color-primary)' }} href="/books">
-                                {t('manage', 'Manage')}
+                              <Link className="hover:underline flex items-center gap-1 font-bold" style={{ color: 'var(--color-primary)' }} href="/books">
+                                <span>{t('manage', 'Manage')}</span>
+                                <ExternalLink className="h-3 w-3"/>
                               </Link>
                             </div>
 
-                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                            <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
                               {books.length === 0 ? (
-                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>
+                                <div className="text-xs px-2.5 py-3 text-center opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
                                   {t('noCookbooksAvailable', 'No cookbooks available')}
                                 </div>
                               ) : (
                                 books.map((b) => {
-                                  const isAssigned = selectedRecipe.bookId === b.id;
+                                  const isAssigned = (selectedRecipe.bookId === b.id || selectedRecipe.book_id === b.id);
                                   return (
                                     <button
                                       key={b.id}
@@ -37717,14 +37977,19 @@ export default function RecipesPage() {
                                         handleAssignToBook(b.id);
                                         setIsBookDropdownOpen(false);
                                       }}
-                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+                                      className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer hover:bg-white/5"
                                       style={{
                                         backgroundColor: isAssigned ? 'rgba(224, 86, 56, 0.15)' : 'transparent',
                                         color: isAssigned ? 'var(--color-primary)' : 'var(--color-text)'
                                       }}
                                     >
-                                      <span className="truncate flex-1 pr-2">{b.title}</span>
-                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
+                                      <div className="min-w-0 flex-1 pr-2">
+                                        <p className="truncate font-bold">{b.title}</p>
+                                        {b.description && (
+                                          <p className="text-[10px] opacity-60 truncate">{b.description}</p>
+                                        )}
+                                      </div>
+                                      {isAssigned && <Check className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
                                     </button>
                                   );
                                 })
@@ -37735,6 +38000,7 @@ export default function RecipesPage() {
                       )}
                     </div>
 
+                    {/* Task 2: Add to Plan Button */}
                     <button
                       type="button"
                       onClick={() => setShowAddToPlanModal(true)}
@@ -37792,7 +38058,6 @@ export default function RecipesPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* RESTORED: Adjustable Timer Launcher (Opens 1-60 Min Modal) */}
                       <button
                         type="button"
                         onClick={handleOpenTimerModal}
@@ -38029,7 +38294,7 @@ export default function RecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* MODAL FOOTER: SOURCE AT BOTTOM RIGHT + DELETE & EXPORT */}
+                  {/* MODAL FOOTER: SOURCE AT BOTTOM RIGHT + DELETE & EXPORT (Retained In Modal) */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2">
                       <button
@@ -38052,7 +38317,6 @@ export default function RecipesPage() {
                       </button>
                     </div>
 
-                    {/* Source anchored to Bottom Right */}
                     {selectedRecipe.sourceUrl && (
                       <div className="text-right">
                         <a
@@ -38606,9 +38870,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* RESTORED: TIMER SETTINGS POPUP MODAL (Up to 60 Minutes)            */}
-      {/* ------------------------------------------------------------------ */}
+      {/* TIMER SETTINGS MODAL */}
       {isTimerModalOpen && (
         <div 
           onClick={() => setIsTimerModalOpen(false)}
@@ -38659,7 +38921,6 @@ export default function RecipesPage() {
               </p>
             </div>
 
-            {/* Minutes Display & Steppers */}
             <div 
               className="p-4 rounded-2xl border flex flex-col items-center justify-center gap-3 shadow-inner"
               style={{
@@ -38706,7 +38967,6 @@ export default function RecipesPage() {
                 </button>
               </div>
 
-              {/* Range slider (1 to 60) */}
               <input
                 type="range"
                 min={1}
@@ -38717,7 +38977,6 @@ export default function RecipesPage() {
               />
             </div>
 
-            {/* Quick Presets */}
             <div className="space-y-1.5">
               <span className="text-[11px] font-bold uppercase tracking-wider block" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('quickPresets', 'Quick Presets')}:
@@ -38745,7 +39004,6 @@ export default function RecipesPage() {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex justify-end gap-2.5 pt-2">
               <button
                 type="button"
@@ -38773,9 +39031,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* RESTORED: FLOATING BOTTOM-RIGHT COUNTDOWN TIMER WIDGET             */}
-      {/* ------------------------------------------------------------------ */}
+      {/* FLOATING TIMER WIDGET */}
       {activeTimer && (
         <div
           className={`fixed bottom-5 right-5 z-[80] border rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5 transition-all duration-300 backdrop-blur-xl animate-in slide-in-from-bottom-5 ${
@@ -38790,7 +39046,6 @@ export default function RecipesPage() {
             color: 'var(--color-text)'
           }}
         >
-          {/* Pulsing Timer Icon or Bell */}
           <div 
             className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md shrink-0 transition"
             style={{
@@ -38805,7 +39060,6 @@ export default function RecipesPage() {
             )}
           </div>
 
-          {/* Time & Recipe Meta */}
           <div className="space-y-0.5 pr-1">
             <div className="flex items-center gap-2">
               <span className="text-xl font-black tracking-tight font-mono tabular-nums" style={{ color: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-text)' }}>
@@ -38823,7 +39077,6 @@ export default function RecipesPage() {
             </p>
           </div>
 
-          {/* Controls: Pause/Resume & Dismiss/Reset */}
           <div className="flex items-center gap-1.5 pl-1 border-l" style={{ borderColor: 'var(--color-border)' }}>
             {activeTimer.remainingSeconds > 0 && (
               <button
@@ -38858,7 +39111,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* SUB-MODAL 1: ADD TO PLAN / CALENDAR MODAL */}
+      {/* SUB-MODAL 1: ADD TO PLAN / CALENDAR MODAL (Task 2) */}
       {showAddToPlanModal && selectedRecipe && (
         <div 
           onClick={() => setShowAddToPlanModal(false)}
@@ -39198,7 +39451,6 @@ export default function RecipesPage() {
               </div>
             </div>
 
-            {/* Step 1: Drag & Drop Cover Image */}
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
                 {t('dragDropImageLabel', 'Drag & Drop recipe image here')}
@@ -39256,7 +39508,6 @@ export default function RecipesPage() {
               )}
             </div>
 
-            {/* Step 2: Upload Recipe JSON File Field */}
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
                 {t('uploadJsonBtn', 'Upload JSON File')}
@@ -39316,7 +39567,6 @@ export default function RecipesPage() {
               </div>
             </div>
 
-            {/* Step 3: Imported Recipe Preview Card */}
             {importedRecipeData && (
               <div 
                 className="p-4 rounded-2xl border space-y-2 text-xs"
@@ -39344,7 +39594,6 @@ export default function RecipesPage() {
               </div>
             )}
 
-            {/* Modal Actions */}
             <div className="flex justify-end gap-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
@@ -42089,21 +42338,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ provide
 ## File: `apps/web/src/app/api/planner/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { query, parseDbRows } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-async function ensureTables() {
+async function ensurePlannerTable() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS planned_meals (
         id VARCHAR(120) PRIMARY KEY,
         user_id VARCHAR(100),
         created_by VARCHAR(255),
-        date VARCHAR(50) NOT NULL,
+        date VARCHAR(50) NOT NULL DEFAULT '',
         recipe_id VARCHAR(100),
-        recipe_name VARCHAR(255) NOT NULL,
+        recipe_name VARCHAR(255) NOT NULL DEFAULT 'Untitled Recipe',
         image TEXT,
         meal_type VARCHAR(50) DEFAULT 'Dinner',
         time VARCHAR(20) DEFAULT '',
@@ -42115,36 +42363,40 @@ async function ensureTables() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_planned_meals_user_date ON planned_meals(user_id, date);
-
-      CREATE TABLE IF NOT EXISTS planner_meals (
-        id VARCHAR(120) PRIMARY KEY,
-        user_id VARCHAR(100),
-        created_by VARCHAR(255),
-        date VARCHAR(50) NOT NULL,
-        recipe_id VARCHAR(100),
-        title VARCHAR(255) NOT NULL,
-        recipe_name VARCHAR(255),
-        image TEXT,
-        meal_type VARCHAR(50) DEFAULT 'Dinner',
-        time VARCHAR(20) DEFAULT '',
-        servings INT DEFAULT 4,
-        prep_minutes INT DEFAULT 15,
-        cook_minutes INT DEFAULT 25,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_planner_meals_user_date ON planner_meals(user_id, date);
     `);
-  } catch (_) {}
+
+    const migrations = [
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS date VARCHAR(50) DEFAULT \'\';',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS recipe_id VARCHAR(100);',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS recipe_name VARCHAR(255) DEFAULT \'Untitled Recipe\';',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS image TEXT;',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS meal_type VARCHAR(50) DEFAULT \'Dinner\';',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS time VARCHAR(20) DEFAULT \'\';',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS is_leftover BOOLEAN DEFAULT FALSE;',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT \'\';',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS servings INT DEFAULT 4;',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS prep_time_minutes INT DEFAULT 15;',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS cook_time_minutes INT DEFAULT 25;',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;',
+      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;'
+    ];
+
+    for (const sql of migrations) {
+      try { await query(sql); } catch (_) {}
+    }
+  } catch (e: any) {
+    console.warn('[planner:ensurePlannerTable] Notice:', e.message);
+  }
 }
 
 export async function GET(req: NextRequest) {
-  await ensureTables();
   try {
+    await ensurePlannerTable();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId')?.trim() || '';
-    const email = searchParams.get('email')?.toLowerCase().trim() || '';
+    const userId = searchParams.get('userId');
+    const email = searchParams.get('email');
 
     let sql = `
       SELECT 
@@ -42152,6 +42404,7 @@ export async function GET(req: NextRequest) {
         user_id as "userId", 
         user_id as "user_id",
         created_by as "createdBy", 
+        created_by as "created_by",
         date, 
         recipe_id as "recipeId", 
         recipe_id as "recipe_id",
@@ -42159,10 +42412,12 @@ export async function GET(req: NextRequest) {
         recipe_name as "title",
         image, 
         image as "imageUrl",
+        image as "image_url",
         meal_type as "mealType", 
         meal_type as "meal_type",
         time, 
         is_leftover as "isLeftover", 
+        is_leftover as "is_leftover",
         notes,
         servings,
         prep_time_minutes as "prepTimeMinutes",
@@ -42181,130 +42436,102 @@ export async function GET(req: NextRequest) {
       sql += ` ORDER BY date ASC, time ASC LIMIT 300`;
     }
 
-    const rows: any = await query(sql, params);
-    const rawItems = Array.isArray(rows) ? rows : (rows?.rows || []);
-
-    const normalized = rawItems.map((r: any) => ({
+    const res = await query(sql, params);
+    const rows = parseDbRows(res);
+    const normalized = rows.map((r: any) => ({
       ...r,
       date: (r.date || '').split('T')[0]
     }));
-
-    return NextResponse.json(
-      { success: true, meals: normalized },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    return NextResponse.json({ success: true, meals: normalized });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message, meals: [] }, { status: 500 });
+    console.warn('[planner:GET] Falling back to empty meals list:', err.message);
+    return NextResponse.json({ success: true, meals: [] });
   }
 }
 
 export async function POST(req: NextRequest) {
-  await ensureTables();
   try {
+    await ensurePlannerTable();
     const body = await req.json();
 
     let incomingMeals: any[] = [];
     let isBatchReplace = false;
     let targetUserId = body.userId || body.user_id || 'usr_admin_1';
-    let targetEmail = body.createdBy || body.created_by || 'admin@zecratary.com';
+    let targetEmail = body.createdBy || body.created_by || null;
 
     if (Array.isArray(body)) {
       incomingMeals = body;
     } else if (Array.isArray(body.meals)) {
       incomingMeals = body.meals;
       isBatchReplace = true;
-    } else if (body && typeof body === 'object' && (body.date || body.recipeName || body.title)) {
-      incomingMeals = [body];
-    } else {
-      return NextResponse.json({ success: false, error: 'Invalid payload structure' }, { status: 400 });
+    } else if (body && typeof body === 'object') {
+      const single = body.meal || body;
+      if (single.date || single.recipeName || single.title || single.recipeId) {
+        incomingMeals = [single];
+      }
+    }
+
+    if (incomingMeals.length === 0) {
+      return NextResponse.json({ success: true, count: 0, message: 'No meals to record' });
     }
 
     for (const meal of incomingMeals) {
-      const id = meal.id || 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      const id = meal.id || ('plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
       const rawDate = meal.date || new Date().toISOString().split('T')[0];
       const date = String(rawDate).split('T')[0];
-      const recipeName = meal.recipeName || meal.title || meal.name || 'Untitled Recipe';
+      const recipeName = meal.recipeName || meal.recipeTitle || meal.title || meal.name || 'Untitled Recipe';
       const recipeId = meal.recipeId || meal.recipe_id || null;
       const image = meal.image || meal.imageUrl || meal.image_url || null;
       const mealType = meal.mealType || meal.meal_type || 'Dinner';
-      const time = meal.time || '19:00';
+      const time = meal.time || '';
       const isLeftover = Boolean(meal.isLeftover || meal.is_leftover);
-      const notes = meal.notes || '';
-      const userId = meal.userId || meal.user_id || targetUserId;
-      const createdBy = meal.createdBy || meal.created_by || targetEmail;
+      const notes = meal.notes || meal.note || '';
+      const userId = meal.userId || meal.user_id || targetUserId || 'usr_admin_1';
+      const createdBy = meal.createdBy || meal.created_by || targetEmail || userId;
       const servings = parseInt(meal.servings) || 4;
-      const prepTime = parseInt(meal.prepTimeMinutes || meal.prep_time_minutes || meal.prep_time) || 15;
-      const cookTime = parseInt(meal.cookTimeMinutes || meal.cook_time_minutes || meal.cook_time) || 25;
+      const prepTime = parseInt(meal.prepTimeMinutes || meal.prep_time) || 15;
+      const cookTime = parseInt(meal.cookTimeMinutes || meal.cook_time) || 25;
 
-      // 1. Insert into planned_meals
-      await query(`
-        INSERT INTO planned_meals (
-          id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, servings, prep_time_minutes, cook_time_minutes, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          date = EXCLUDED.date,
-          recipe_id = EXCLUDED.recipe_id,
-          recipe_name = EXCLUDED.recipe_name,
-          image = EXCLUDED.image,
-          meal_type = EXCLUDED.meal_type,
-          time = EXCLUDED.time,
-          is_leftover = EXCLUDED.is_leftover,
-          notes = EXCLUDED.notes,
-          servings = EXCLUDED.servings,
-          prep_time_minutes = EXCLUDED.prep_time_minutes,
-          cook_time_minutes = EXCLUDED.cook_time_minutes,
-          updated_at = NOW();
-      `, [id, userId, createdBy, date, recipeId, recipeName, image, mealType, time, isLeftover, notes, servings, prepTime, cookTime]);
-
-      // 2. Mirror into planner_meals for dashboard stats compatibility
-      await query(`
-        INSERT INTO planner_meals (
-          id, user_id, created_by, date, recipe_id, title, recipe_name, image, meal_type, time, servings, prep_minutes, cook_minutes, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          date = EXCLUDED.date,
-          recipe_id = EXCLUDED.recipe_id,
-          title = EXCLUDED.title,
-          recipe_name = EXCLUDED.recipe_name,
-          image = EXCLUDED.image,
-          meal_type = EXCLUDED.meal_type,
-          time = EXCLUDED.time,
-          servings = EXCLUDED.servings,
-          prep_minutes = EXCLUDED.prep_minutes,
-          cook_minutes = EXCLUDED.cook_minutes,
-          updated_at = NOW();
-      `, [id, userId, createdBy, date, recipeId, recipeName, recipeName, image, mealType, time, servings, prepTime, cookTime]);
+      await query(
+        `INSERT INTO planned_meals (
+           id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, servings, prep_time_minutes, cook_time_minutes, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO UPDATE SET
+           date = EXCLUDED.date,
+           recipe_id = EXCLUDED.recipe_id,
+           recipe_name = EXCLUDED.recipe_name,
+           image = EXCLUDED.image,
+           meal_type = EXCLUDED.meal_type,
+           time = EXCLUDED.time,
+           is_leftover = EXCLUDED.is_leftover,
+           notes = EXCLUDED.notes,
+           servings = EXCLUDED.servings,
+           prep_time_minutes = EXCLUDED.prep_time_minutes,
+           cook_time_minutes = EXCLUDED.cook_time_minutes,
+           updated_at = CURRENT_TIMESTAMP`,
+        [id, userId, createdBy, date, recipeId, recipeName, image, mealType, time, isLeftover, notes, servings, prepTime, cookTime]
+      );
     }
 
     return NextResponse.json({ success: true, count: incomingMeals.length });
   } catch (err: any) {
+    console.error('[planner:POST] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  await ensureTables();
   try {
+    await ensurePlannerTable();
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
-    const dateRange = searchParams.get('dateRange'); // Format: startDate,endDate
-    const userId = searchParams.get('userId');
-
-    if (dateRange) {
-      const [start, end] = dateRange.split(',');
-      if (start && end) {
-        await query(`DELETE FROM planned_meals WHERE date >= $1 AND date <= $2`, [start, end]);
-        await query(`DELETE FROM planner_meals WHERE date >= $1 AND date <= $2`, [start, end]);
-        return NextResponse.json({ success: true, message: 'Date range meals deleted' });
-      }
-    }
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Meal ID is required' }, { status: 400 });
     }
 
-    await query(`DELETE FROM planned_meals WHERE id = $1`, [id.trim()]);
-    await query(`DELETE FROM planner_meals WHERE id = $1`, [id.trim()]);
+    await query('DELETE FROM planned_meals WHERE id = $1', [id.trim()]);
     return NextResponse.json({ success: true, id });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -47108,57 +47335,81 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/storage/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { 
-  getStorageSettings, 
-  saveStorageSettings, 
-  getUniversalDiskDiagnostics, 
-  cleanOrphanRecipeImages,
-  DEFAULT_STORAGE_CONFIG 
-} from '@/lib/storageService';
+import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+
+async function ensureStorageColumns() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await query('ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS storage_settings JSONB DEFAULT \'{}\'::jsonb;');
+    await query('ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS storage JSONB DEFAULT \'{}\'::jsonb;');
+  } catch (_) {}
+}
 
 export async function GET() {
   try {
-    const settings = await getStorageSettings();
-    const diskStats = getUniversalDiskDiagnostics();
-    return NextResponse.json(
-      { success: true, settings, diskStats },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    await ensureStorageColumns();
+    const res = await query('SELECT storage_settings, storage FROM admin_settings WHERE id = $1 LIMIT 1;', ['primary_settings']);
+    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+
+    let storage = {
+      provider: 'localhost',
+      localPath: '/recipes/images/',
+      recipesJsonDir: '/recipes/',
+      supabase: {
+        enabled: true,
+        endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
+        bucket: 'recipes',
+        region: 'us-west-1'
+      }
+    };
+
+    if (row && (row.storage_settings || row.storage)) {
+      const raw = row.storage_settings || row.storage;
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      storage = { ...storage, ...parsed };
+    } else {
+      // Fallback to server JSON store
+      const jsonPath = path.join(process.cwd(), 'data', 'admin_settings.json');
+      if (fs.existsSync(jsonPath)) {
+        try {
+          const fileData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+          if (fileData.storage_settings || fileData.storage) {
+            storage = { ...storage, ...(fileData.storage_settings || fileData.storage) };
+          }
+        } catch (_) {}
+      }
+    }
+
+    return NextResponse.json({ success: true, storage, settings: storage });
   } catch (err: any) {
-    return NextResponse.json({
-      success: true,
-      settings: DEFAULT_STORAGE_CONFIG,
-      diskStats: getUniversalDiskDiagnostics()
-    });
+    return NextResponse.json({ success: true, storage: { provider: 'localhost' } });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureStorageColumns();
     const body = await req.json();
+    const payload = body.storage || body.settings || body;
 
-    if (body.action === 'clean_orphans') {
-      const cleanResult = cleanOrphanRecipeImages();
-      const diskStats = getUniversalDiskDiagnostics();
-      return NextResponse.json({
-        success: true,
-        message: `Successfully cleaned up ${cleanResult.removedCount} orphan images. ${cleanResult.remainingCount} active images remaining.`,
-        diskStats,
-        cleanResult
-      });
-    }
+    await query(`
+      INSERT INTO admin_settings (id, storage_settings, updated_at)
+      VALUES ('primary_settings', $1::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        storage_settings = EXCLUDED.storage_settings,
+        updated_at = NOW();
+    `, [JSON.stringify(payload)]);
 
-    const updated = await saveStorageSettings(body);
-    const diskStats = getUniversalDiskDiagnostics();
-    return NextResponse.json({
-      success: true,
-      settings: updated,
-      diskStats,
-      message: 'Universal storage settings saved successfully'
-    });
+    return NextResponse.json({ success: true, storage: payload });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -58707,6 +58958,12 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "noSearchResultsTitle": "No Matching Cookbooks",
+    "noSearchResultsDesc": "No cookbooks match your current search query. Try searching with different keywords.",
+    "failedToCreateBook": "Failed to create cookbook. Please check your connection and try again.",
+    "failedToUpdateBook": "Failed to update cookbook. Please try again.",
+    "failedToDeleteBook": "Failed to delete cookbook. Please try again.",
+    "recipeImageAlt": "Recipe cover photo",
     "grid3x3": "3x3 Grid (9 per page)",
     "grid4x4": "4x4 Grid (16 per page)",
     "grid5x5": "5x5 Grid (25 per page)",
@@ -71656,26 +71913,8 @@ export default {
 
 ## File: `apps/web/src/lib/db.ts`
 ```typescript
-
-function resolveDatabaseSSL(url: string) {
-  if (!url) return false;
-  if (
-    url.includes('sslmode=disable') ||
-    url.includes('localhost') ||
-    url.includes('127.0.0.1') ||
-    url.includes('@postgres:') ||
-    process.env.PGSSLMODE === 'disable' ||
-    process.env.NODE_ENV !== 'production'
-  ) {
-    return false;
-  }
-  return { rejectUnauthorized: false };
-}
-
 // Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
-// GitHub: cygnusorbit/zecratary
-// Satisfies Constraint 8: Direct persistence to PostgreSQL & MySQL with driver-scoped SSL
-// Fully exports getPool, query, closePool, and backward-compatible pool proxy
+// GitHub: cygnusorbit/zecratary (Constraints 8, 10)
 
 import { Pool } from 'pg';
 import type { PoolConfig } from 'pg';
@@ -71685,6 +71924,8 @@ declare global {
   var __zecratary_pg_pool: Pool | undefined;
   // eslint-disable-next-line no-var
   var __zecratary_current_conn: string | undefined;
+  // eslint-disable-next-line no-var
+  var __zecratary_ssl_disabled: boolean | undefined;
 }
 
 export function getConnectionString(): string {
@@ -71722,18 +71963,19 @@ export function parseDbRows<T = any>(res: any): T[] {
   return [];
 }
 
-export function getPool(): Pool | null {
+export function getPool(forceNoSsl = false): Pool | null {
   const rawConnStr = getConnectionString();
   if (!rawConnStr || rawConnStr.includes('[YOUR-PASSWORD]')) {
     return null;
   }
 
-  // Reuse existing pool instance if connection string is unchanged
-  if (globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === rawConnStr) {
+  const shouldDisableSsl = forceNoSsl || globalThis.__zecratary_ssl_disabled;
+
+  // Reuse existing pool instance if connection string and SSL state are unchanged
+  if (globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === rawConnStr && !forceNoSsl) {
     return globalThis.__zecratary_pg_pool;
   }
 
-  // Cleanly close prior pool on connection change
   if (globalThis.__zecratary_pg_pool) {
     try {
       globalThis.__zecratary_pg_pool.end().catch(() => {});
@@ -71743,14 +71985,20 @@ export function getPool(): Pool | null {
 
   globalThis.__zecratary_current_conn = rawConnStr;
 
-  const isRemote = !rawConnStr.includes('localhost') && !rawConnStr.includes('127.0.0.1');
+  const isLocal =
+    rawConnStr.includes('localhost') ||
+    rawConnStr.includes('127.0.0.1') ||
+    rawConnStr.includes('@postgres:') ||
+    rawConnStr.includes('sslmode=disable') ||
+    process.env.PGSSLMODE === 'disable';
+
   const isSupabaseOrPooler =
     rawConnStr.includes('supabase') ||
     rawConnStr.includes('pooler') ||
     rawConnStr.includes('aws-0') ||
     rawConnStr.includes('sslmode=require');
 
-  // Strip conflicting sslmode query parameters to allow explicit driver-scoped SSL configuration
+  // Strip conflicting sslmode query parameters to allow explicit driver configuration
   const cleanConnStr = rawConnStr
     .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
     .replace(/[?&]$/, '');
@@ -71762,45 +72010,32 @@ export function getPool(): Pool | null {
     max: 10,
   };
 
-  // Driver-scoped SSL: Bypasses pooler CA chain verification without polluting global process.env
-  if (isRemote || isSupabaseOrPooler) {
-    poolConfig.ssl = {
-      rejectUnauthorized: false,
-    };
+  if (!shouldDisableSsl && !isLocal && isSupabaseOrPooler) {
+    poolConfig.ssl = { rejectUnauthorized: false };
+  } else {
+    poolConfig.ssl = false;
   }
 
   const newPool = new Pool(poolConfig);
 
   newPool.on('error', (err) => {
-    console.warn('[PostgreSQL Pool Client Notice]:', err.message);
+    console.warn('[PostgreSQL Pool Notice]:', err.message);
   });
 
   globalThis.__zecratary_pg_pool = newPool;
   return newPool;
 }
 
-/**
- * Backward-compatible pool proxy:
- * Allows routes to access pool.query(), pool.connect(), db.pool, etc.
- * Supports TS2339 in src/app/api/pantry/route.ts and other legacy endpoints.
- */
-export const pool: Pool & { [key: string]: any } = new Proxy({} as any, {
+export const pool = new Proxy({} as Pool, {
   get(_target, prop) {
     const activePool = getPool();
     if (!activePool) {
-      if (prop === 'then') return undefined;
-      if (prop === 'connect') return async () => ({
-        query: async () => ({ rows: [], rowCount: 0 }),
-        release: () => {},
-      });
       if (prop === 'query') return async () => ({ rows: [], rowCount: 0 });
-      if (prop === 'on') return () => {};
-      if (prop === 'end') return async () => {};
       return undefined;
     }
     const val = (activePool as any)[prop];
     return typeof val === 'function' ? val.bind(activePool) : val;
-  }
+  },
 });
 
 export async function query(sql: string, params: any[] = []): Promise<any> {
@@ -71812,26 +72047,45 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
   }
 
   if (dialect === 'postgres') {
-    const activePool = getPool();
-    if (!activePool) return [];
+    let poolInstance = getPool();
+    if (!poolInstance) return [];
 
     let client: any = null;
     try {
-      client = await activePool.connect();
+      try {
+        client = await poolInstance.connect();
+      } catch (connErr: any) {
+        // Automatic fallback when local PostgreSQL does not support SSL
+        if (
+          connErr?.message?.includes('does not support SSL') ||
+          connErr?.message?.includes('SSL connections')
+        ) {
+          globalThis.__zecratary_ssl_disabled = true;
+          poolInstance = getPool(true);
+          if (poolInstance) {
+            client = await poolInstance.connect();
+          } else {
+            throw connErr;
+          }
+        } else {
+          throw connErr;
+        }
+      }
+
       const res = await client.query(sql, params);
-      return Array.isArray(res) ? res : (res?.rows || []);
+      const rows = Array.isArray(res) ? res : (res?.rows || []);
+      (rows as any).rows = rows;
+      (rows as any).rowCount = res?.rowCount ?? rows.length;
+      return rows;
     } catch (err: any) {
       console.warn('[PostgreSQL Query Notice]:', err.message);
       throw err;
     } finally {
       if (client) {
-        try {
-          client.release();
-        } catch (_) {}
+        try { client.release(); } catch (_) {}
       }
     }
   } else {
-    // MySQL query executor with isolated runtime loader
     try {
       let mysqlModule: any = null;
       try {
@@ -71849,7 +72103,9 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
       const connection = await mysqlModule.createConnection(connStr);
       try {
         const [rows] = await connection.execute(sql, params);
-        return rows;
+        const result = Array.isArray(rows) ? rows : [rows];
+        (result as any).rows = result;
+        return result;
       } finally {
         await connection.end().catch(() => {});
       }
@@ -71862,26 +72118,22 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
 
 export async function closePool(): Promise<void> {
   if (globalThis.__zecratary_pg_pool) {
-    try {
-      await globalThis.__zecratary_pg_pool.end();
-    } catch (_) {}
+    try { await globalThis.__zecratary_pg_pool.end(); } catch (_) {}
     globalThis.__zecratary_pg_pool = undefined;
   }
 }
 
-const dbModule = {
+export default {
+  pool,
   query,
   getDatabaseDialect,
   getConnectionString,
   getPool,
-  pool,
   isPostgres,
   isMySQL,
   parseDbRows,
   closePool,
 };
-
-export default dbModule;
 
 ```
 
