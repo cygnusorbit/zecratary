@@ -48,6 +48,18 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "activePlanTag": "Active Plan",
+    "currentTierTag": "Current Tier",
+    "autoRenewCancelledMsg": "Auto-renewal has been cancelled. Your active features remain intact until expiry.",
+    "autoRenewResumedMsg": "Auto-renewal has been reactivated successfully!",
+    "noHistorySubtitle": "When you subscribe or switch plan tiers, payment receipts will automatically appear here.",
+    "fullInvoicesHub": "Full Invoices Hub",
+    "totalDue": "Total Due",
+    "failedSwitchPlan": "Failed to switch subscription plan",
+    "pciEncrypted": "Encrypted via PCI gateway",
+    "replenishedOnCycle": "Replenished on every billing cycle",
+    "availableForServices": "Available for store & token top-ups",
+    "paymentGatewayLabel": "Payment Gateway",
     "bonusTokensBadge": "+{bonus} Bonus Tokens",
     "oneTimePayment": "one-time",
     "mealPlannerCostLabel": "Weekly Meal Plan",

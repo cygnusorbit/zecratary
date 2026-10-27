@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.61",
+  "version": "8.1.62",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.61",
+  "version": "8.1.62",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -1869,27 +1869,32 @@ export default function RedirectToRecipes() {
 
 ## File: `apps/web/src/app/token/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   Coins, Wallet, Sparkles, TrendingUp, TrendingDown, Clock, 
   ArrowRight, CheckCircle2, AlertCircle, Search, RefreshCw, 
-  X, Check, ShieldAlert, ChevronLeft, ChevronRight, Zap, Award
+  X, Check, ShieldAlert, ChevronLeft, ChevronRight, Zap, Award, BookOpen
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 
 interface TokenPackage {
   id: string;
   name: string;
   tokens: number;
+  tokenAmount?: number;
   price: number;
+  priceDollars?: number;
+  badge?: string;
+  bonusTokens?: number;
   popular?: boolean;
+  isPopular?: boolean;
   bestValue?: boolean;
   description?: string;
 }
@@ -1906,9 +1911,9 @@ interface TokenTransaction {
 }
 
 const DEFAULT_PACKAGES: TokenPackage[] = [
-  { id: 'pkg_starter', name: 'Starter Pack', tokens: 100, price: 4.99, popular: false, description: 'Perfect for light exploration and weekend cooking.' },
-  { id: 'pkg_pro', name: 'Chef Pro Bundle', tokens: 500, price: 19.99, popular: true, description: 'Our most popular bundle for daily AI recipe formulation.' },
-  { id: 'pkg_unlimited', name: 'Master Gourmet Pack', tokens: 1500, price: 49.99, popular: false, bestValue: true, description: 'Maximum tokens with priority generation throughput.' }
+  { id: 'pkg_starter', name: 'Starter Spark', tokens: 250, tokenAmount: 250, price: 4.99, priceDollars: 4.99, badge: 'Popular', bonusTokens: 0, popular: true, description: 'Perfect for light exploration and everyday AI recipe formulations.' },
+  { id: 'pkg_chef', name: 'Culinary Master', tokens: 1000, tokenAmount: 1000, price: 14.99, priceDollars: 14.99, badge: 'Best Value', bonusTokens: 150, bestValue: true, description: 'Our most popular bundle with generous bonus tokens for daily cooking.' },
+  { id: 'pkg_executive', name: 'Kitchen Enterprise', tokens: 5000, tokenAmount: 5000, price: 49.99, priceDollars: 49.99, badge: 'VIP', bonusTokens: 1000, description: 'Maximum tokens with high-priority generation throughput and OCR parsing.' }
 ];
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -1917,7 +1922,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 
 export default function TokenPortalPage() {
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   // Balances & Telemetry
@@ -1925,11 +1930,19 @@ export default function TokenPortalPage() {
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenIcon, setTokenIcon] = useState<string>('');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
   const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
 
-  // Feature Costs
-  const [costs, setCosts] = useState({ chef: 1, import_url: 2, import_photo: 3, import_text: 1 });
+  // Complete Feature Consumption Costs (6 platform rates)
+  const [costs, setCosts] = useState({
+    chef: 2,
+    import_url: 5,
+    import_text: 2,
+    import_photo: 10,
+    meal_planner: 5,
+    macro_analysis: 3
+  });
   const [packages, setPackages] = useState<TokenPackage[]>(DEFAULT_PACKAGES);
 
   // KPI Stats
@@ -1945,7 +1958,7 @@ export default function TokenPortalPage() {
   const [purchasing, setPurchasing] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Confirmation Modal State (Autofill Safe Form-Free Container)
+  // Confirmation Modal State (Autofill Safe Container)
   const [confirmModalPackage, setConfirmModalPackage] = useState<TokenPackage | null>(null);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
@@ -1960,10 +1973,11 @@ export default function TokenPortalPage() {
     setLoading(true);
 
     try {
-      // Currency detection
+      // Dynamic currency detection
       if (typeof window !== 'undefined') {
+        const storedSym = localStorage.getItem('zecratary_currency_symbol');
         const cur = localStorage.getItem('zecratary_currency') || 'USD';
-        setCurrencySymbol(CURRENCY_SYMBOLS[cur] || '$');
+        setCurrencySymbol(storedSym || CURRENCY_SYMBOLS[cur] || '$');
       }
 
       const qParams = new URLSearchParams({
@@ -1981,13 +1995,44 @@ export default function TokenPortalPage() {
         const data = await res.json();
         if (data.success) {
           if (data.balance !== null && data.balance !== undefined) setTokenBalance(Number(data.balance));
+          if (data.walletBalance !== null && data.walletBalance !== undefined) setWalletBalance(Number(data.walletBalance));
           if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
+          if (data.tokenIcon !== undefined) setTokenIcon(data.tokenIcon || '');
           if (data.tokenName) setTokenName(data.tokenName);
           if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
-          if (data.costs) setCosts(data.costs);
+          
+          if (data.costs) {
+            setCosts({
+              chef: data.costs.chef ?? data.costs.aiChefCost ?? 2,
+              import_url: data.costs.import_url ?? data.costs.importUrlCost ?? 5,
+              import_text: data.costs.import_text ?? data.costs.importTextCost ?? 2,
+              import_photo: data.costs.import_photo ?? data.costs.importPhotoCost ?? 10,
+              meal_planner: data.costs.meal_planner ?? data.costs.mealPlannerCost ?? 5,
+              macro_analysis: data.costs.macro_analysis ?? data.costs.macroAnalysisCost ?? 3
+            });
+          }
 
           if (Array.isArray(data.packages) && data.packages.length > 0) {
-            setPackages(data.packages);
+            const mapped = data.packages.map((pkg: any) => {
+              const tokensVal = Number(pkg.tokens ?? pkg.tokenAmount ?? 0);
+              const priceVal = Number(pkg.price ?? pkg.priceDollars ?? 0);
+              const isPop = Boolean(pkg.popular ?? pkg.isPopular ?? (pkg.badge && String(pkg.badge).toLowerCase().includes('popular')));
+              const isBest = Boolean(pkg.bestValue ?? (pkg.badge && String(pkg.badge).toLowerCase().includes('value')));
+              return {
+                id: pkg.id,
+                name: pkg.name,
+                tokens: tokensVal,
+                tokenAmount: tokensVal,
+                price: priceVal,
+                priceDollars: priceVal,
+                badge: pkg.badge,
+                bonusTokens: Number(pkg.bonusTokens || 0),
+                popular: isPop,
+                bestValue: isBest,
+                description: pkg.description
+              };
+            });
+            setPackages(mapped);
           }
 
           if (Array.isArray(data.transactions)) {
@@ -1999,7 +2044,7 @@ export default function TokenPortalPage() {
         }
       }
 
-      // Fetch Live Store Wallet Balance
+      // Live Wallet Balance Sync
       try {
         const wRes = await fetch(`/api/wallet?email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' });
         if (wRes.ok) {
@@ -2007,7 +2052,9 @@ export default function TokenPortalPage() {
           if (wData.user && typeof wData.user.wallet_balance !== 'undefined') {
             setWalletBalance(parseFloat(wData.user.wallet_balance || 0));
           }
-          if (wData.settings?.currency) {
+          if (wData.walletSymbol || wData.currencySymbol) {
+            setCurrencySymbol(wData.walletSymbol || wData.currencySymbol);
+          } else if (wData.settings?.currency) {
             setCurrencySymbol(CURRENCY_SYMBOLS[wData.settings.currency] || '$');
           }
         }
@@ -2063,6 +2110,9 @@ export default function TokenPortalPage() {
     if (!confirmModalPackage || !currentUser) return;
     setPurchasing(true);
 
+    const tokensToBuy = Number(confirmModalPackage.tokens ?? confirmModalPackage.tokenAmount ?? 0);
+    const priceToPay = Number(confirmModalPackage.price ?? confirmModalPackage.priceDollars ?? 0);
+
     try {
       const res = await fetch('/api/tokens', {
         method: 'POST',
@@ -2070,8 +2120,10 @@ export default function TokenPortalPage() {
         body: JSON.stringify({
           action: 'purchase',
           packageId: confirmModalPackage.id,
-          tokens: confirmModalPackage.tokens,
-          price: confirmModalPackage.price,
+          tokens: tokensToBuy,
+          tokenAmount: tokensToBuy,
+          price: priceToPay,
+          priceDollars: priceToPay,
           packageName: confirmModalPackage.name,
           userId: currentUser.id || 'usr_admin_1',
           userEmail: currentUser.email || 'admin@zecratary.com'
@@ -2083,10 +2135,10 @@ export default function TokenPortalPage() {
         throw new Error(data.error || 'Token purchase failed.');
       }
 
-      const newBal = Number(data.balance ?? (tokenBalance + confirmModalPackage.tokens));
+      const newBal = Number(data.balance ?? (tokenBalance + tokensToBuy));
       setTokenBalance(newBal);
 
-      const newWalletBal = Math.max(0, walletBalance - Number(confirmModalPackage.price));
+      const newWalletBal = Math.max(0, walletBalance - priceToPay);
       setWalletBalance(newWalletBal);
 
       // Local user cache sync
@@ -2102,7 +2154,7 @@ export default function TokenPortalPage() {
         } catch (_) {}
       }
 
-      // Broadcast to all tabs and navigation header
+      // Broadcast to other tabs & UI capsules
       window.dispatchEvent(new Event('zecratary_tokens_updated'));
       window.dispatchEvent(new Event('zecratary_wallet_updated'));
       window.dispatchEvent(new Event('storage'));
@@ -2115,7 +2167,7 @@ export default function TokenPortalPage() {
 
       showToast(
         (t('purchaseSuccessToast', 'Successfully purchased {tokens} {symbol}!'))
-          .replace('{tokens}', confirmModalPackage.tokens.toLocaleString())
+          .replace('{tokens}', tokensToBuy.toLocaleString())
           .replace('{symbol}', tokenSymbol),
         'success'
       );
@@ -2130,8 +2182,9 @@ export default function TokenPortalPage() {
   };
 
   return (
+    // TASK 1: Full-Width (100%) Fluid Canvas with Responsive Padding
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
       {/* Toast Alert Banner */}
@@ -2154,7 +2207,10 @@ export default function TokenPortalPage() {
       )}
 
       {/* Top Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+      <div 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <div>
           <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
             {t('tokenPortalTitle', 'Token Portal')}
@@ -2214,6 +2270,7 @@ export default function TokenPortalPage() {
 
       {/* 1. KPI Telemetry Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Current Token Balance */}
         <div 
           className="p-5 rounded-3xl border shadow-xs flex flex-col justify-between space-y-3"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -2221,14 +2278,18 @@ export default function TokenPortalPage() {
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold opacity-75">{t('currentTokenBalance', 'Current Token Balance')}</span>
             <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-              <Coins className="h-4 w-4" />
+              <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={18} className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black font-mono">
-            {tokenBalance.toLocaleString()} <span className="text-amber-500 text-sm">{tokenSymbol}</span>
+          <div className="text-2xl font-black font-mono flex items-center gap-2">
+            <span>{tokenBalance.toLocaleString()}</span>
+            <span className="text-sm font-sans flex items-center gap-1 opacity-90">
+              <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block" />
+            </span>
           </div>
         </div>
 
+        {/* Store Wallet Balance */}
         <div 
           className="p-5 rounded-3xl border shadow-xs flex flex-col justify-between space-y-3"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -2244,6 +2305,7 @@ export default function TokenPortalPage() {
           </div>
         </div>
 
+        {/* Lifetime Tokens Used */}
         <div 
           className="p-5 rounded-3xl border shadow-xs flex flex-col justify-between space-y-3"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -2259,6 +2321,7 @@ export default function TokenPortalPage() {
           </div>
         </div>
 
+        {/* Lifetime Tokens Granted */}
         <div 
           className="p-5 rounded-3xl border shadow-xs flex flex-col justify-between space-y-3"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -2275,7 +2338,7 @@ export default function TokenPortalPage() {
         </div>
       </div>
 
-      {/* 2. Token Bundles Showcase */}
+      {/* 2. Token Bundles Showcase (Fluid Grid) */}
       <div 
         className="p-6 rounded-3xl border shadow-sm space-y-5"
         style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -2291,94 +2354,139 @@ export default function TokenPortalPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {packages.map((pkg) => (
-            <div
-              key={pkg.id}
-              className="p-5 rounded-3xl border flex flex-col justify-between space-y-4 shadow-xs hover:shadow-md transition relative group"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: pkg.popular ? 'var(--color-primary)' : 'var(--color-border)'
-              }}
-            >
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                    {pkg.name}
-                  </h4>
-                  {pkg.popular && (
-                    <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-white bg-[var(--color-primary)]">
-                      {t('popularBadge', 'Most Popular')}
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
+          {packages.map((pkg) => {
+            const displayTokens = Number(pkg.tokens ?? pkg.tokenAmount ?? 0);
+            const displayPrice = Number(pkg.price ?? pkg.priceDollars ?? 0);
+            const isPopular = Boolean(pkg.popular || (pkg.badge && pkg.badge.toLowerCase().includes('popular')));
+            const isBestValue = Boolean(pkg.bestValue || (pkg.badge && pkg.badge.toLowerCase().includes('value')));
+
+            return (
+              <div
+                key={pkg.id}
+                className="p-5 rounded-3xl border flex flex-col justify-between space-y-4 shadow-xs hover:shadow-md transition relative group"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: isPopular ? 'var(--color-primary)' : 'var(--color-border)'
+                }}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
+                      {pkg.name}
+                    </h4>
+                    {isPopular && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-white bg-[var(--color-primary)]">
+                        {pkg.badge || t('popularBadge', 'Most Popular')}
+                      </span>
+                    )}
+                    {isBestValue && !isPopular && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-emerald-400 border border-emerald-500/30 bg-emerald-500/10">
+                        {pkg.badge || t('bestValueBadge', 'Best Value')}
+                      </span>
+                    )}
+                    {!isPopular && !isBestValue && pkg.badge && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-[var(--color-primary)] border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10">
+                        {pkg.badge}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-baseline gap-1.5 font-mono">
+                    <span className="text-2xl font-black text-amber-500">
+                      +{displayTokens.toLocaleString()}
                     </span>
-                  )}
-                  {pkg.bestValue && (
-                    <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-emerald-400 border border-emerald-500/30 bg-emerald-500/10">
-                      {t('bestValueBadge', 'Best Value')}
+                    <span className="text-xs opacity-80 flex items-center gap-1">
+                      <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block" />
                     </span>
+                    {pkg.bonusTokens && pkg.bonusTokens > 0 ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 ml-1">
+                        +{(pkg.bonusTokens).toLocaleString()} Bonus
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {pkg.description ? (
+                    <p className="text-xs leading-relaxed opacity-75">
+                      {pkg.description}
+                    </p>
+                  ) : (
+                    <p className="text-xs leading-relaxed opacity-60">
+                      Top up your culinary workspace with {displayTokens.toLocaleString()} tokens.
+                    </p>
                   )}
                 </div>
 
-                <div className="flex items-baseline gap-1 font-mono">
-                  <span className="text-2xl font-black text-amber-500">
-                    +{pkg.tokens.toLocaleString()}
-                  </span>
-                  <span className="text-xs opacity-70">{tokenSymbol}</span>
+                <div className="pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-base font-black font-mono">
+                      {currencySymbol}{displayPrice.toFixed(2)}
+                    </span>
+                    <span className="text-[10px] opacity-60">{t('oneTimePayment', 'one-time')}</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setConfirmModalPackage(pkg)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow cursor-pointer hover:opacity-90 active:scale-95"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    {t('buyNowBtn', 'Buy Now')}
+                  </button>
                 </div>
-
-                {pkg.description && (
-                  <p className="text-xs leading-relaxed opacity-75">
-                    {pkg.description}
-                  </p>
-                )}
               </div>
-
-              <div className="pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
-                <span className="text-base font-black font-mono">
-                  {currencySymbol}{Number(pkg.price).toFixed(2)}
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => setConfirmModalPackage(pkg)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow cursor-pointer hover:opacity-90"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  {t('buyNowBtn', 'Buy Now')}
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
-      {/* 3. Feature Consumption Information Bar */}
+      {/* 3. Feature Consumption Information Bar (All 6 Rates) */}
       <div 
-        className="p-4 rounded-3xl border flex flex-col md:flex-row items-center justify-between gap-4 text-xs font-medium"
+        className="p-4 rounded-3xl border flex flex-col xl:flex-row items-center justify-between gap-4 text-xs font-medium"
         style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
       >
-        <span className="font-bold text-[var(--color-primary)] uppercase tracking-wider text-[11px]">
+        <span className="font-bold text-[var(--color-primary)] uppercase tracking-wider text-[11px] shrink-0">
           {t('featureCostsHeading', 'Feature Consumption Rates')}:
         </span>
 
-        <div className="flex flex-wrap items-center gap-4 text-xs font-bold">
-          <span className="flex items-center gap-1.5 opacity-80">
-            <Zap className="h-3.5 w-3.5 text-amber-400" />
-            {t('chefCostLabel', 'AI Chef Generation')}: <strong className="font-mono text-amber-500">{costs.chef} {tokenSymbol}</strong>
-          </span>
-          <span className="flex items-center gap-1.5 opacity-80">
-            <Zap className="h-3.5 w-3.5 text-sky-400" />
-            {t('importUrlCostLabel', 'Web URL Import')}: <strong className="font-mono text-sky-400">{costs.import_url} {tokenSymbol}</strong>
-          </span>
-          <span className="flex items-center gap-1.5 opacity-80">
-            <Zap className="h-3.5 w-3.5 text-emerald-400" />
-            {t('importPhotoCostLabel', 'Photo OCR Import')}: <strong className="font-mono text-emerald-400">{costs.import_photo} {tokenSymbol}</strong>
-          </span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 w-full text-xs font-bold">
+          <div className="flex items-center gap-1.5 opacity-90 p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <Zap className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+            <span className="truncate">{t('chefCostLabel', 'AI Chef')}:</span>
+            <strong className="font-mono text-amber-500 ml-auto">{costs.chef} {tokenSymbol}</strong>
+          </div>
+          <div className="flex items-center gap-1.5 opacity-90 p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <Zap className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+            <span className="truncate">{t('importUrlCostLabel', 'URL Scraper')}:</span>
+            <strong className="font-mono text-sky-400 ml-auto">{costs.import_url} {tokenSymbol}</strong>
+          </div>
+          <div className="flex items-center gap-1.5 opacity-90 p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <Zap className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+            <span className="truncate">{t('importPhotoCostLabel', 'Photo OCR')}:</span>
+            <strong className="font-mono text-emerald-400 ml-auto">{costs.import_photo} {tokenSymbol}</strong>
+          </div>
+          <div className="flex items-center gap-1.5 opacity-90 p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <Zap className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+            <span className="truncate">{t('importTextCostLabel', 'Text Parsing')}:</span>
+            <strong className="font-mono text-purple-400 ml-auto">{costs.import_text} {tokenSymbol}</strong>
+          </div>
+          <div className="flex items-center gap-1.5 opacity-90 p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <Zap className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+            <span className="truncate">{t('mealPlannerCostLabel', 'Meal Plan')}:</span>
+            <strong className="font-mono text-indigo-400 ml-auto">{costs.meal_planner} {tokenSymbol}</strong>
+          </div>
+          <div className="flex items-center gap-1.5 opacity-90 p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <Zap className="h-3.5 w-3.5 text-teal-400 shrink-0" />
+            <span className="truncate">{t('macroAnalysisCostLabel', 'Macro Analysis')}:</span>
+            <strong className="font-mono text-teal-400 ml-auto">{costs.macro_analysis} {tokenSymbol}</strong>
+          </div>
         </div>
       </div>
 
-      {/* 4. Token Audit Ledger Table */}
+      {/* 4. Token Audit Ledger Table (Autofill Guardrail & Accessible Region) */}
       <div 
         role="region"
+        aria-label="Token Transaction Audit Ledger"
         data-lpignore="true"
         className="p-6 rounded-3xl border shadow-sm space-y-4"
         style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -2416,6 +2524,8 @@ export default function TokenPortalPage() {
               <option value="import">{t('filterTypeImport', 'Recipe Import')}</option>
               <option value="purchase">{t('filterTypePurchase', 'Bundle Purchases')}</option>
               <option value="grant">{t('filterTypeGrant', 'Plan Grants')}</option>
+              <option value="planner">{t('filterTypePlanner', 'Meal Planner')}</option>
+              <option value="macro">{t('filterTypeMacro', 'Macro Analysis')}</option>
             </select>
           </div>
         </div>
@@ -2442,9 +2552,9 @@ export default function TokenPortalPage() {
                 {transactions.map((tx) => {
                   const isCredit = Number(tx.amount) > 0;
                   return (
-                    <tr key={tx.id} className="hover:bg-slate-800/20 transition">
+                    <tr key={tx.id} className="hover:opacity-80 transition">
                       <td className="py-3 px-3 font-mono text-[11px] opacity-75">
-                        {tx.created_at ? new Date(tx.created_at).toLocaleDateString() : '—'}
+                        {tx.created_at ? new Date(tx.created_at).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US')) : '—'}
                       </td>
                       <td className="py-3 px-3 font-mono text-[10px] opacity-60">
                         {tx.id.slice(0, 14)}...
@@ -2515,6 +2625,7 @@ export default function TokenPortalPage() {
           <div 
             onClick={(e) => e.stopPropagation()}
             role="region"
+            aria-label="Confirm Token Purchase Modal"
             data-lpignore="true"
             className="border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
@@ -2532,14 +2643,15 @@ export default function TokenPortalPage() {
               <div className="p-4 rounded-2xl border space-y-2.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div className="flex justify-between items-center">
                   <span className="opacity-75">{t('tokensToCredit', 'Tokens to Credit')}:</span>
-                  <span className="text-base font-black font-mono text-amber-500">
-                    +{confirmModalPackage.tokens.toLocaleString()} {tokenSymbol}
+                  <span className="text-base font-black font-mono text-amber-500 flex items-center gap-1">
+                    +{(Number(confirmModalPackage.tokens ?? confirmModalPackage.tokenAmount ?? 0)).toLocaleString()}
+                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block" />
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="opacity-75">{t('amountToDeduct', 'Cost to Deduct')}:</span>
                   <span className="text-base font-black font-mono text-rose-400">
-                    -{currencySymbol}{Number(confirmModalPackage.price).toFixed(2)}
+                    -{currencySymbol}{(Number(confirmModalPackage.price ?? confirmModalPackage.priceDollars ?? 0)).toFixed(2)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
@@ -2550,20 +2662,20 @@ export default function TokenPortalPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="opacity-75">{t('walletBalanceAfter', 'Projected Wallet Balance')}:</span>
-                  <span className={`font-mono font-black ${walletBalance >= confirmModalPackage.price ? 'text-emerald-400' : 'text-red-500'}`}>
-                    {currencySymbol}{Math.max(0, walletBalance - confirmModalPackage.price).toFixed(2)}
+                  <span className={`font-mono font-black ${walletBalance >= Number(confirmModalPackage.price ?? confirmModalPackage.priceDollars ?? 0) ? 'text-emerald-400' : 'text-red-500'}`}>
+                    {currencySymbol}{Math.max(0, walletBalance - Number(confirmModalPackage.price ?? confirmModalPackage.priceDollars ?? 0)).toFixed(2)}
                   </span>
                 </div>
               </div>
 
-              {walletBalance < confirmModalPackage.price && (
+              {walletBalance < Number(confirmModalPackage.price ?? confirmModalPackage.priceDollars ?? 0) && (
                 <div className="p-3 rounded-2xl border flex items-center justify-between text-[11px] text-amber-500" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#f59e0b' }}>
                   <span>
                     {(t('shortfallWarning', 'Insufficient wallet funds. Short by {amount}.'))
-                      .replace('{amount}', `${currencySymbol}${(confirmModalPackage.price - walletBalance).toFixed(2)}`)}
+                      .replace('{amount}', `${currencySymbol}${(Number(confirmModalPackage.price ?? confirmModalPackage.priceDollars ?? 0) - walletBalance).toFixed(2)}`)}
                   </span>
                   <Link
-                    href={`/wallet?amount=${(confirmModalPackage.price - walletBalance).toFixed(2)}`}
+                    href={`/wallet?amount=${(Number(confirmModalPackage.price ?? confirmModalPackage.priceDollars ?? 0) - walletBalance).toFixed(2)}`}
                     className="font-bold underline hover:opacity-80"
                   >
                     {t('topUpWalletBtn', 'Top Up Wallet')}
@@ -2583,7 +2695,7 @@ export default function TokenPortalPage() {
                 <button
                   type="button"
                   onClick={handleConfirmPurchase}
-                  disabled={purchasing || walletBalance < confirmModalPackage.price}
+                  disabled={purchasing || walletBalance < Number(confirmModalPackage.price ?? confirmModalPackage.priceDollars ?? 0)}
                   className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
@@ -43973,8 +44085,10 @@ export default function WalletPage() {
 
 ## File: `apps/web/src/app/api/token/route.ts`
 ```typescript
-// Compatibility forwarder for legacy and mobile clients
-export { GET, POST, OPTIONS, dynamic, revalidate } from '../tokens/route';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export { GET, POST, OPTIONS } from '../tokens/route';
 
 ```
 
@@ -57750,240 +57864,330 @@ export async function POST(req: Request) {
 
 ## File: `apps/web/src/app/api/tokens/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { queryMysql } from '@/lib/mysql';
-import { getTokenSettings } from '@/lib/tokenService';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-async function resolveUserFromReq(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  let rawUserId = searchParams.get('userId')?.trim() || '';
-  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
-
-  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
-  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
-
-  if (!rawUserId && !rawEmail) {
-    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user', 'zecratary_current_user'];
-    for (const cName of authCookies) {
-      const cVal = req.cookies.get(cName)?.value;
-      if (cVal) {
-        try {
-          const parsed = JSON.parse(decodeURIComponent(cVal));
-          if (parsed?.id) rawUserId = String(parsed.id);
-          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
-          if (rawUserId || rawEmail) break;
-        } catch (_) {}
-      }
-    }
-  }
-
-  return { userId: rawUserId, email: rawEmail };
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    const { userId, email } = await resolveUserFromReq(req);
-    const tokenSettings = await getTokenSettings();
-
-    let userRow: any = null;
-    let tokenBalance = 100;
-    let walletBalance = 0.00;
-
-    if (userId || email) {
-      const userRes = await query(
-        `SELECT id, email, name, 
-                COALESCE(token_balance, 0) as token_balance, 
-                COALESCE(wallet_balance, 0) as wallet_balance 
-         FROM users 
-         WHERE ($1 != '' AND id::text = $1) 
-            OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
-         LIMIT 1`,
-        [userId, email]
-      );
-      if (userRes && userRes.length > 0) {
-        userRow = userRes[0];
-        tokenBalance = Number(userRow.token_balance || 0);
-        walletBalance = parseFloat(userRow.wallet_balance || 0);
-      }
-    }
-
-    if (!userRow) {
-      const firstUserRes = await query(
-        `SELECT id, email, name, 
-                COALESCE(token_balance, 0) as token_balance, 
-                COALESCE(wallet_balance, 0) as wallet_balance 
-         FROM users 
-         ORDER BY created_at ASC LIMIT 1`
-      );
-      if (firstUserRes && firstUserRes.length > 0) {
-        userRow = firstUserRes[0];
-        tokenBalance = Number(userRow.token_balance || 0);
-        walletBalance = parseFloat(userRow.wallet_balance || 0);
-      }
-    }
-
-    const tSymbol = tokenSettings.tokenSymbol || '🪙';
-    const tIcon = tokenSettings.tokenIcon || tSymbol;
-
-    return NextResponse.json({
-      success: true,
-      balance: tokenBalance,
-      tokenBalance: tokenBalance,
-      token_balance: tokenBalance,
-      wallet_balance: walletBalance,
-      walletBalance: walletBalance,
-      tokenSymbol: tSymbol,
-      tokenIcon: tIcon,
-      tokenName: tokenSettings.tokenName || 'Foodie Token',
-      isEnabled: tokenSettings.isEnabled !== false,
-      user: userRow
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const { userId, email } = await resolveUserFromReq(req);
-    const body = await req.json().catch(() => ({}));
-    const action = body?.action || body?.type || 'purchase';
-    const packageId = body?.packageId || body?.package_id;
-    const tokens = Number(body?.tokens || body?.tokenCount || body?.amount || 0);
-    const cost = Number(body?.cost || body?.price || 0);
-    const paymentMethod = body?.paymentMethod || body?.payment_method || 'wallet';
-    const description = body?.description || 'Token Transaction';
-
-    const targetUserId = body?.userId || userId;
-    const targetEmail = body?.userEmail || body?.email || email;
-
-    if (!targetUserId && !targetEmail) {
-      return NextResponse.json({ success: false, error: 'User identifier required' }, { status: 400 });
-    }
-
-    // Attempt purchaseTokenPackage via tokenService if present
-    try {
-      const tokenService = await import('@/lib/tokenService');
-      if (typeof tokenService.purchaseTokenPackage === 'function') {
-        const result = await tokenService.purchaseTokenPackage({
-          userId: targetUserId,
-          userEmail: targetEmail,
-          packageId,
-          tokens,
-          amount: cost,
-          paymentMethod,
-          description
-        });
-        if (result && result.success) {
-          return NextResponse.json(result);
+function readServerTokenSettings(): any {
+  const candidatePaths = [
+    path.join(process.cwd(), 'apps/web/data/admin_settings.json'),
+    path.join(process.cwd(), 'data/admin_settings.json')
+  ];
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (parsed?.tokenSettings || parsed?.token_settings) {
+          return parsed.tokenSettings || parsed.token_settings;
         }
-      }
-    } catch (_) {}
-
-    // Direct Database Execution (PostgreSQL & MySQL - Constraint 8)
-    let currentTokens = 100;
-    let currentWallet = 0.00;
-
-    const uRes = await query(
-      `SELECT id, email, COALESCE(token_balance, 0) as token_balance, COALESCE(wallet_balance, 0) as wallet_balance
-       FROM users
-       WHERE ($1 != '' AND id::text = $1) OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2)))
-       LIMIT 1`,
-      [targetUserId || '', targetEmail || '']
-    ).catch(() => []);
-
-    if (uRes && uRes.length > 0) {
-      currentTokens = Number(uRes[0].token_balance || 0);
-      currentWallet = parseFloat(uRes[0].wallet_balance || 0);
+      } catch (_) {}
     }
-
-    let newTokens = currentTokens;
-    let newWallet = currentWallet;
-
-    if (action === 'deduct') {
-      if (currentTokens < tokens) {
-        return NextResponse.json({ success: false, error: 'Insufficient tokens' }, { status: 400 });
-      }
-      newTokens = currentTokens - tokens;
-    } else {
-      if (paymentMethod === 'wallet' && cost > 0) {
-        if (currentWallet < cost) {
-          return NextResponse.json({ success: false, error: 'Insufficient wallet balance' }, { status: 400 });
-        }
-        newWallet = currentWallet - cost;
-      }
-      newTokens = currentTokens + (tokens > 0 ? tokens : 100);
-    }
-
-    // Update PostgreSQL
-    try {
-      await query(
-        `UPDATE users SET token_balance = $1, wallet_balance = $2, updated_at = NOW()
-         WHERE ($3 != '' AND id::text = $3) OR ($4 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($4)))`,
-        [newTokens, newWallet, targetUserId || '', targetEmail || '']
-      );
-
-      await query(`
-        CREATE TABLE IF NOT EXISTS token_transactions (
-          id VARCHAR(64) PRIMARY KEY,
-          user_id VARCHAR(64),
-          user_email VARCHAR(255),
-          package_id VARCHAR(64),
-          amount INT NOT NULL,
-          type VARCHAR(32) DEFAULT 'purchase',
-          cost NUMERIC(10,2) DEFAULT 0,
-          payment_method VARCHAR(50) DEFAULT 'wallet',
-          description TEXT,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-      `).catch(() => {});
-
-      const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      await query(
-        `INSERT INTO token_transactions (id, user_id, user_email, package_id, amount, type, cost, payment_method, description, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
-        [txId, targetUserId || '', targetEmail || '', packageId || '', tokens || 100, action, cost, paymentMethod, description]
-      ).catch(() => {});
-    } catch (pgErr) {
-      console.warn('[tokens:POST] PostgreSQL update notice:', pgErr);
-    }
-
-    // Update MySQL (Constraint 8)
-    try {
-      await queryMysql(
-        `UPDATE users SET token_balance = ?, wallet_balance = ?, updated_at = NOW()
-         WHERE (? != '' AND id = ?) OR (? != '' AND LOWER(TRIM(email)) = LOWER(TRIM(?)))`,
-        [newTokens, newWallet, targetUserId || '', targetUserId || '', targetEmail || '', targetEmail || '']
-      );
-    } catch (_) {}
-
-    return NextResponse.json({
-      success: true,
-      tokenBalance: newTokens,
-      tokensAdded: tokens,
-      newBalance: newTokens,
-      walletBalance: newWallet,
-      newWalletBalance: newWallet
-    });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
+  return null;
 }
 
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
     headers: {
-      'Allow': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With'
-    }
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
   });
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+    const email = searchParams.get('email');
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const search = searchParams.get('search') || '';
+    const type = searchParams.get('type') || 'all';
+
+    let userBalance = 100;
+    let walletBalance = 0.00;
+    let tokenSymbol = '🪙';
+    let tokenIcon = '';
+    let tokenName = 'Foodie Token';
+    let isEnabled = true;
+    let costs = {
+      chef: 2,
+      import_url: 5,
+      import_text: 2,
+      import_photo: 10,
+      meal_planner: 5,
+      macro_analysis: 3
+    };
+    let packages: any[] = [];
+    let transactions: any[] = [];
+    let totalPages = 1;
+    let stats = { totalDeducted: 0, totalGranted: 0, totalEvents: 0 };
+
+    // 1. Fetch token settings from PostgreSQL / MySQL or local JSON
+    try {
+      const sRes: any = await Promise.race([
+        query(`SELECT * FROM token_settings WHERE id::text = 'primary_settings' OR id::text = '1' LIMIT 1`),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+      ]).catch(() => null);
+
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const fallback = readServerTokenSettings();
+
+      if (sRow) {
+        tokenName = sRow.token_name || sRow.tokenName || tokenName;
+        tokenSymbol = sRow.token_symbol || sRow.tokenSymbol || tokenSymbol;
+        tokenIcon = sRow.token_icon || sRow.tokenIcon || '';
+        isEnabled = sRow.is_enabled !== undefined ? sRow.is_enabled : (sRow.isEnabled !== undefined ? sRow.isEnabled : true);
+        costs = {
+          chef: sRow.ai_chef_cost ?? sRow.aiChefCost ?? 2,
+          import_url: sRow.import_url_cost ?? sRow.importUrlCost ?? 5,
+          import_text: sRow.import_text_cost ?? sRow.importTextCost ?? 2,
+          import_photo: sRow.import_photo_cost ?? sRow.importPhotoCost ?? 10,
+          meal_planner: sRow.meal_planner_cost ?? sRow.mealPlannerCost ?? 5,
+          macro_analysis: sRow.macro_analysis_cost ?? sRow.macroAnalysisCost ?? 3
+        };
+        const rawPkgs = typeof sRow.packages === 'string' ? JSON.parse(sRow.packages) : sRow.packages;
+        if (Array.isArray(rawPkgs)) packages = rawPkgs;
+      } else if (fallback) {
+        tokenName = fallback.tokenName || tokenName;
+        tokenSymbol = fallback.tokenSymbol || tokenSymbol;
+        tokenIcon = fallback.tokenIcon || '';
+        isEnabled = fallback.isEnabled !== undefined ? fallback.isEnabled : true;
+        if (fallback.packages && Array.isArray(fallback.packages)) packages = fallback.packages;
+        costs = {
+          chef: fallback.aiChefCost ?? 2,
+          import_url: fallback.importUrlCost ?? 5,
+          import_text: fallback.importTextCost ?? 2,
+          import_photo: fallback.importPhotoCost ?? 10,
+          meal_planner: fallback.mealPlannerCost ?? 5,
+          macro_analysis: fallback.macroAnalysisCost ?? 3
+        };
+      }
+    } catch (_) {}
+
+    // Fallback default packages if none configured
+    if (!packages || packages.length === 0) {
+      packages = [
+        { id: 'pkg_starter', name: 'Starter Spark', tokens: 250, tokenAmount: 250, price: 4.99, priceDollars: 4.99, badge: 'Popular', bonusTokens: 0, isPopular: true },
+        { id: 'pkg_chef', name: 'Culinary Master', tokens: 1000, tokenAmount: 1000, price: 14.99, priceDollars: 14.99, badge: 'Best Value', bonusTokens: 150, isPopular: false },
+        { id: 'pkg_executive', name: 'Kitchen Enterprise', tokens: 5000, tokenAmount: 5000, price: 49.99, priceDollars: 49.99, badge: 'VIP', bonusTokens: 1000, isPopular: false }
+      ];
+    } else {
+      // Normalize dual property schema
+      packages = packages.map((pkg) => {
+        const tok = Number(pkg.tokens ?? pkg.tokenAmount ?? 0);
+        const prc = Number(pkg.price ?? pkg.priceDollars ?? 0);
+        const isPop = Boolean(pkg.popular ?? pkg.isPopular ?? (pkg.badge && String(pkg.badge).toLowerCase().includes('popular')));
+        const isBest = Boolean(pkg.bestValue ?? (pkg.badge && String(pkg.badge).toLowerCase().includes('value')));
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          tokens: tok,
+          tokenAmount: tok,
+          price: prc,
+          priceDollars: prc,
+          badge: pkg.badge,
+          bonusTokens: Number(pkg.bonusTokens || 0),
+          popular: isPop,
+          isPopular: isPop,
+          bestValue: isBest,
+          description: pkg.description || undefined
+        };
+      });
+    }
+
+    // 2. Fetch User Balances (Safe across PostgreSQL & MySQL)
+    if (email || userId) {
+      try {
+        let uRow = null;
+        if (email) {
+          const byEmail: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE email = $1 LIMIT 1`, [email]).catch(() => null);
+          uRow = Array.isArray(byEmail) ? byEmail[0] : byEmail?.rows?.[0];
+        }
+        if (!uRow && userId) {
+          const isUuidOrInt = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId) || /^\d+$/.test(userId);
+          if (isUuidOrInt) {
+            const byId: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE id = $1 LIMIT 1`, [userId]).catch(() => null);
+            uRow = Array.isArray(byId) ? byId[0] : byId?.rows?.[0];
+          }
+        }
+
+        if (uRow) {
+          if (uRow.token_balance !== null && uRow.token_balance !== undefined) {
+            userBalance = Number(uRow.token_balance);
+          }
+          if (uRow.wallet_balance !== null && uRow.wallet_balance !== undefined) {
+            walletBalance = parseFloat(String(uRow.wallet_balance));
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Fetch User Audit Ledger & Stats
+    if (email || userId) {
+      try {
+        const cleanEmail = email || '';
+        let whereClauses = [`user_email = $1`];
+        let params: any[] = [cleanEmail];
+
+        const isUuidOrInt = userId && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId) || /^\d+$/.test(userId));
+        if (isUuidOrInt) {
+          whereClauses = [`(user_id = $1 OR user_email = $2)`];
+          params = [userId, cleanEmail];
+        }
+
+        if (search) {
+          params.push(`%${search}%`);
+          whereClauses.push(`(description ILIKE $${params.length} OR id ILIKE $${params.length})`);
+        }
+        if (type && type !== 'all') {
+          params.push(`%${type}%`);
+          whereClauses.push(`type ILIKE $${params.length}`);
+        }
+
+        const countQuery = `SELECT COUNT(*) as total FROM token_transactions WHERE ${whereClauses.join(' AND ')}`;
+        const cRes: any = await query(countQuery, params);
+        const total = parseInt((Array.isArray(cRes) ? cRes[0] : cRes?.rows?.[0])?.total || '0', 10);
+        totalPages = Math.max(1, Math.ceil(total / limit));
+
+        const offset = (page - 1) * limit;
+        params.push(limit, offset);
+        const txQuery = `
+          SELECT id, user_id, user_email, amount, balance_after, type, description, created_at
+          FROM token_transactions
+          WHERE ${whereClauses.join(' AND ')}
+          ORDER BY created_at DESC
+          LIMIT $${params.length - 1} OFFSET $${params.length}
+        `;
+        const txRes: any = await query(txQuery, params);
+        transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+
+        const statsParams = isUuidOrInt ? [userId, cleanEmail] : [cleanEmail];
+        const statsWhere = isUuidOrInt ? `(user_id = $1 OR user_email = $2)` : `user_email = $1`;
+        const statsRes: any = await query(`
+          SELECT 
+            COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_deducted,
+            COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_granted,
+            COUNT(*) as total_events
+          FROM token_transactions
+          WHERE ${statsWhere}
+        `, statsParams);
+        const sRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+        if (sRow) {
+          stats = {
+            totalDeducted: Number(sRow.total_deducted || 0),
+            totalGranted: Number(sRow.total_granted || 0),
+            totalEvents: Number(sRow.total_events || 0)
+          };
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json({
+      success: true,
+      balance: userBalance,
+      tokenBalance: userBalance,
+      walletBalance,
+      tokenSymbol,
+      tokenIcon,
+      tokenName,
+      isEnabled,
+      costs,
+      packages,
+      transactions,
+      page,
+      totalPages,
+      stats
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const action = body.action || 'purchase';
+    const userId = body.userId;
+    const userEmail = body.userEmail;
+
+    if (action === 'purchase' || action === 'purchase_package') {
+      const tokensToAdd = Number(body.tokens ?? body.tokenAmount ?? 0);
+      const priceToDeduct = Number(body.price ?? body.priceDollars ?? 0);
+      const packageName = body.packageName || 'Token Bundle';
+
+      if (!userId && !userEmail) {
+        return NextResponse.json({ success: false, error: 'User identifier required' }, { status: 400 });
+      }
+
+      let user = null;
+      if (userEmail) {
+        const byEmail: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE email = $1 LIMIT 1`, [userEmail]).catch(() => null);
+        user = Array.isArray(byEmail) ? byEmail[0] : byEmail?.rows?.[0];
+      }
+      if (!user && userId) {
+        const isUuidOrInt = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId) || /^\d+$/.test(userId);
+        if (isUuidOrInt) {
+          const byId: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE id = $1 LIMIT 1`, [userId]).catch(() => null);
+          user = Array.isArray(byId) ? byId[0] : byId?.rows?.[0];
+        }
+      }
+
+      if (!user) {
+        return NextResponse.json({ success: false, error: 'User account not found' }, { status: 404 });
+      }
+
+      const currentWallet = parseFloat(String(user.wallet_balance || 0));
+      if (currentWallet < priceToDeduct) {
+        return NextResponse.json({ 
+          success: false, 
+          error: `Insufficient wallet balance. Short by $${(priceToDeduct - currentWallet).toFixed(2)}.` 
+        }, { status: 400 });
+      }
+
+      const newWallet = currentWallet - priceToDeduct;
+      const newTokens = (Number(user.token_balance) || 0) + tokensToAdd;
+
+      await query(`
+        UPDATE users 
+        SET token_balance = $1, wallet_balance = $2, updated_at = NOW() 
+        WHERE id = $3
+      `, [newTokens, newWallet, user.id]);
+
+      const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+      await query(`
+        INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'purchase', $6, NOW())
+      `, [txId, String(user.id), user.email, tokensToAdd, newTokens, `Purchased bundle: ${packageName}`]);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Tokens purchased successfully!',
+        balance: newTokens,
+        walletBalance: newWallet,
+        tokensAdded: tokensToAdd,
+        amountDeducted: priceToDeduct
+      }, {
+        headers: { 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unsupported action' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
 }
 
 ```
@@ -63650,6 +63854,12 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "bonusTokensBadge": "+{bonus} Bonus Tokens",
+    "oneTimePayment": "one-time",
+    "mealPlannerCostLabel": "Weekly Meal Plan",
+    "macroAnalysisCostLabel": "Macro Nutritional Analysis",
+    "filterTypePlanner": "Meal Planner",
+    "filterTypeMacro": "Macro Analysis",
     "reconcilePaymentsBtn": "Reconcile Payments",
     "reconciling": "Reconciling...",
     "filterAdjustment": "Adjustments",
