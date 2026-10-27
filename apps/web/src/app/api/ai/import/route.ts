@@ -3,7 +3,7 @@ import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
 import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 import { scrapeRecipeFromUrl } from '@/lib/recipeScraper';
-import { downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
+import { downloadAndSaveImage, downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
 
 export const dynamic = 'force-dynamic';
 
