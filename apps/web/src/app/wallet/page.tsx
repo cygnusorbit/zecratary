@@ -1,13 +1,14 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   Wallet, CreditCard, Plus, RefreshCw, CheckCircle2, AlertCircle, 
-  Gift, ShieldCheck, ArrowRight, Search, ChevronLeft, ChevronRight, 
-  Coins, Sparkles, Check 
+  Gift, ShieldCheck, ArrowRight, History, Search, Filter, 
+  ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, 
+  Layers, Coins, Shield, ExternalLink, Info, Sparkles, RotateCw, Check
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -25,8 +26,8 @@ interface WalletSettings {
 
 interface WalletTx {
   id: string;
-  amount: number | string;
-  balance_after: number | string;
+  amount: number;
+  balance_after: number;
   type: string;
   gateway: string;
   gateway_tx_id?: string;
@@ -46,15 +47,12 @@ function WalletContent() {
 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // User & Balances
   const [user, setUser] = useState<User | null>(null);
   const [balance, setBalance] = useState<number>(0);
-
-  // Concurrency and Loop Prevention Guards
-  const isFetchingRef = useRef<boolean>(false);
-  const syncTimeoutRef = useRef<any>(null);
 
   // Settings
   const [settings, setSettings] = useState<WalletSettings>({
@@ -90,8 +88,8 @@ function WalletContent() {
     setTimeout(() => setToastMessage(null), 3800);
   };
 
-  // Pure Local State & Storage Synchronization (NO RECURSIVE EVENT DISPATCHES)
-  const syncLocalBalancePure = useCallback((newBal: number) => {
+  // Synchronize balance with localStorage and header counters
+  const syncLocalBalance = useCallback((newBal: number) => {
     setBalance(newBal);
     if (typeof window !== 'undefined') {
       try {
@@ -105,17 +103,22 @@ function WalletContent() {
           }
         }
       } catch (_) {}
+      window.dispatchEvent(new Event('zecratary_wallet_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      try {
+        const bc = new BroadcastChannel('zecratary_balance_channel');
+        bc.postMessage({ type: 'WALLET_UPDATED', wallet: newBal });
+        bc.close();
+      } catch (_) {}
     }
   }, []);
 
-  // Fetch Wallet Data (Idempotent GET without self-triggering event broadcasts)
-  const fetchWalletData = useCallback(async (activeUser: User | null, targetPage = page, search = searchQuery, filter = typeFilter) => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
-    setLoading(true);
-
+  // Fetch Wallet Data, Settings & Audit Ledger
+  const fetchWalletData = useCallback(async (activeUser: User | null, targetPage = 1, search = '', filter = 'all') => {
     const userEmail = activeUser?.email || 'admin@zecratary.com';
     const userId = activeUser?.id || 'usr_admin_1';
+    setLoading(true);
 
     try {
       const qParams = new URLSearchParams({
@@ -124,7 +127,8 @@ function WalletContent() {
         page: String(targetPage),
         limit: '10',
         search: search,
-        type: filter
+        type: filter,
+        t: String(Date.now())
       });
 
       const res = await fetch(`/api/wallet?${qParams.toString()}`, { cache: 'no-store' });
@@ -134,7 +138,7 @@ function WalletContent() {
           const wBal = typeof data.wallet_balance === 'number' 
             ? data.wallet_balance 
             : (typeof data.balance === 'number' ? data.balance : Number(data.user?.wallet_balance || 0));
-          syncLocalBalancePure(wBal);
+          syncLocalBalance(wBal);
 
           if (data.settings) {
             setSettings({
@@ -149,6 +153,9 @@ function WalletContent() {
               allowed_gateways: Array.isArray(data.settings.allowed_gateways) ? data.settings.allowed_gateways : ['stripe', 'paypal', 'manual'],
               allow_site_purchases: data.settings.allow_site_purchases !== false
             });
+            if (Array.isArray(data.settings.allowed_gateways) && !data.settings.allowed_gateways.includes(selectedGateway)) {
+              setSelectedGateway(data.settings.allowed_gateways[0] || 'stripe');
+            }
           }
 
           if (Array.isArray(data.transactions)) {
@@ -159,25 +166,44 @@ function WalletContent() {
         }
       }
     } catch (err) {
-      console.warn('[WalletPage] Read notice:', err);
+      console.warn('[WalletPage] Fetch error:', err);
     } finally {
       setLoading(false);
-      isFetchingRef.current = false;
     }
-  }, [syncLocalBalancePure, page, searchQuery, typeFilter]);
+  }, [syncLocalBalance, selectedGateway]);
 
-  // Stable ref for fetchWalletData to decouple primary lifecycle effect
-  const fetchRef = useRef(fetchWalletData);
-  useEffect(() => {
-    fetchRef.current = fetchWalletData;
-  });
+  // Reconciliation Handler for Stripe Checkout Sessions & External Payments
+  const handleReconcile = async () => {
+    if (!user) return;
+    setReconciling(true);
+    try {
+      const res = await fetch('/api/wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reconcile_wallet',
+          email: user.email,
+          userId: user.id || 'usr_admin_1'
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (typeof data.wallet_balance === 'number') {
+          syncLocalBalance(data.wallet_balance);
+        }
+        showToast(data.message || t('paymentReconciledToast', 'Payment verified! Your wallet has been credited.'), 'success');
+        fetchWalletData(user, page, searchQuery, typeFilter);
+      } else {
+        showToast(data.error || 'Reconciliation completed. No missing payments found.', 'info');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Failed to reconcile payments.', 'error');
+    } finally {
+      setReconciling(false);
+    }
+  };
 
-  // Isolated Document Title Effect (Doesn't trigger data re-fetching)
-  useEffect(() => {
-    document.title = `${t('storeWalletTitle', 'Store Wallet')} - Zecratary`;
-  }, [t]);
-
-  // Initial Mount Effect (Executes Strictly Once)
+  // Mount, Redirect & Cross-Tab Visibility Synchronization
   useEffect(() => {
     initAuthStorage();
     const u = getCurrentUser();
@@ -187,7 +213,7 @@ function WalletContent() {
     }
     setUser(u);
 
-    // Read initial URL parameters safely
+    // Read URL parameters
     const paramAmount = searchParams?.get('amount');
     if (paramAmount) {
       const parsedAmount = parseFloat(paramAmount);
@@ -201,50 +227,51 @@ function WalletContent() {
     const isSuccess = searchParams?.get('success') === 'true';
     if (sessionId || isSuccess) {
       showToast(t('paymentReconciledToast', 'Payment verified! Your wallet has been credited.'), 'success');
-      // Clean query parameters from URL to avoid re-verification on reload
-      try {
-        window.history.replaceState({}, '', '/wallet');
-      } catch (_) {}
     }
 
-    // Execute initial load
-    fetchRef.current(u);
+    fetchWalletData(u, page, searchQuery, typeFilter);
 
-    // Debounced listener for external window events (300ms throttle)
-    const handleDebouncedSync = () => {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      syncTimeoutRef.current = setTimeout(() => {
-        const active = getCurrentUser();
-        if (active) {
-          setUser(active);
-          fetchRef.current(active);
-        }
-      }, 300);
+    const handleSync = () => {
+      const active = getCurrentUser();
+      if (active) {
+        setUser(active);
+        fetchWalletData(active, page, searchQuery, typeFilter);
+      }
     };
 
-    window.addEventListener('zecratary_languages_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_dictionary_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_locale_changed', handleDebouncedSync);
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('focus', handleSync);
+    window.addEventListener('zecratary_wallet_updated', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('zecratary_balance_channel');
+      bc.onmessage = (ev) => {
+        if (ev.data?.type === 'WALLET_UPDATED' && typeof ev.data.wallet === 'number') {
+          setBalance(ev.data.wallet);
+        }
+      };
+    } catch (_) {}
 
     return () => {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      window.removeEventListener('zecratary_languages_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_locale_changed', handleDebouncedSync);
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('focus', handleSync);
+      window.removeEventListener('zecratary_wallet_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
+      if (bc) bc.close();
     };
-  }, []); // Strictly mount-only: []
-
-  // Re-fetch only on explicit page, search, or type filter changes
-  useEffect(() => {
-    if (user) {
-      fetchRef.current(user, page, searchQuery, typeFilter);
-    }
-  }, [page, searchQuery, typeFilter]);
+  }, [fetchWalletData, page, searchQuery, typeFilter, searchParams, router, t]);
 
   // Compute Active Deposit Amount and Bonus
   const finalDepositAmount = useMemo(() => {
     if (customAmount.trim()) {
-      return parseFloat(customAmount) || 0;
+      const val = parseFloat(customAmount);
+      return isNaN(val) ? 0 : val;
     }
     return selectedAmount || 0;
   }, [customAmount, selectedAmount]);
@@ -261,7 +288,6 @@ function WalletContent() {
     return (finalDepositAmount * activeBonusPercent) / 100;
   }, [finalDepositAmount, activeBonusPercent]);
 
-  // Execute User-Initiated Deposit Mutation (Broadcasts events ONLY on write)
   const handleDeposit = async () => {
     if (finalDepositAmount < settings.min_topup) {
       showToast((t('minTopupWarning', 'Minimum deposit is {min}')).replace('{min}', `${activeCurrencySymbol}${settings.min_topup}`), 'error');
@@ -271,7 +297,7 @@ function WalletContent() {
       showToast((t('maxTopupWarning', 'Maximum deposit is {max}')).replace('{max}', `${activeCurrencySymbol}${settings.max_topup}`), 'error');
       return;
     }
-    if (!user || submitting) return;
+    if (!user) return;
     setSubmitting(true);
 
     try {
@@ -303,19 +329,7 @@ function WalletContent() {
       const newBal = typeof data.wallet_balance === 'number' 
         ? data.wallet_balance 
         : (balance + finalDepositAmount + bonusAmount);
-      
-      syncLocalBalancePure(newBal);
-
-      // Explicitly broadcast balance changes ONLY upon write actions
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_wallet_updated'));
-        window.dispatchEvent(new Event('storage'));
-        try {
-          const bc = new BroadcastChannel('zecratary_balance_channel');
-          bc.postMessage({ type: 'WALLET_UPDATED', wallet: newBal });
-          bc.close();
-        } catch (_) {}
-      }
+      syncLocalBalance(newBal);
 
       showToast(
         (t('depositSuccessToast', 'Successfully deposited {amount} into your wallet!'))
@@ -325,7 +339,7 @@ function WalletContent() {
 
       setCustomAmount('');
       setSelectedAmount(settings.preset_amounts[0] || 50);
-      fetchRef.current(user, page, searchQuery, typeFilter);
+      fetchWalletData(user, page, searchQuery, typeFilter);
     } catch (err: any) {
       showToast(err.message || 'Deposit failed.', 'error');
     } finally {
@@ -334,8 +348,9 @@ function WalletContent() {
   };
 
   return (
+    /* TASK 1: Full-Width (100%) Fluid Canvas with Responsive Padding */
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
       {/* Toast Alert Banner */}
@@ -368,10 +383,22 @@ function WalletContent() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center flex-wrap gap-2.5">
           <button
             type="button"
-            onClick={() => fetchRef.current(user, page, searchQuery, typeFilter)}
+            onClick={handleReconcile}
+            disabled={reconciling}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            title={t('reconcilePaymentsBtn', 'Reconcile Payments')}
+          >
+            <RotateCw className={`h-4 w-4 ${reconciling ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+            <span>{reconciling ? t('reconciling', 'Reconciling...') : t('reconcilePaymentsBtn', 'Reconcile Payments')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => fetchWalletData(user, page, searchQuery, typeFilter)}
             disabled={loading}
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
@@ -419,12 +446,17 @@ function WalletContent() {
               <span>{t('totalSpent', 'Total Spent')}:</span>
               <span className="font-bold font-mono text-rose-400">-{activeCurrencySymbol}{stats.totalSpent.toFixed(2)}</span>
             </div>
+            <div className="flex justify-between items-center opacity-80">
+              <span>{t('totalEvents', 'Total Events')}:</span>
+              <span className="font-bold font-mono">{stats.totalEvents}</span>
+            </div>
           </div>
         </div>
 
         {/* Top-Up Control Center (8 Cols) - FORM-FREE ACCESSIBLE CONTAINER */}
         <div 
           role="region"
+          aria-label={t('depositFunds', 'Deposit Funds')}
           data-lpignore="true"
           className="lg:col-span-8 p-6 rounded-3xl border shadow-sm space-y-5 transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -471,7 +503,7 @@ function WalletContent() {
             </div>
           </div>
 
-          {/* Custom Amount Input */}
+          {/* Custom Amount Input with Safe Focus Handling */}
           <div>
             <label className="block text-xs font-bold mb-1 opacity-80">{t('orCustomAmount', 'Or enter custom amount')}</label>
             <div className="relative">
@@ -484,11 +516,15 @@ function WalletContent() {
                 autoComplete="off"
                 data-lpignore="true"
                 data-form-type="other"
+                spellCheck="false"
                 placeholder="50.00"
                 value={customAmount}
                 onChange={(e) => {
-                  setCustomAmount(e.target.value);
-                  setSelectedAmount(0);
+                  const val = e.target.value;
+                  setCustomAmount(val);
+                  if (val.trim() !== '') {
+                    setSelectedAmount(0);
+                  }
                 }}
                 className="w-full pl-8 pr-4 py-2.5 rounded-xl border text-sm font-mono font-bold outline-none"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
@@ -496,7 +532,7 @@ function WalletContent() {
             </div>
           </div>
 
-          {/* Payment Gateway Options with Check Icon */}
+          {/* Payment Gateway Options */}
           <div className="space-y-2">
             <label className="block text-xs font-bold opacity-80">{t('paymentGateway', 'Payment Gateway')}</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -577,6 +613,7 @@ function WalletContent() {
       {/* 2. Transaction Audit Ledger Table */}
       <div 
         role="region"
+        aria-label={t('walletLedgerTitle', 'Wallet Transaction Ledger')}
         data-lpignore="true"
         className="p-6 rounded-3xl border shadow-sm space-y-4"
         style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -613,11 +650,12 @@ function WalletContent() {
               <option value="topup">{t('filterTopup', 'Deposits')}</option>
               <option value="purchase">{t('filterPurchase', 'Purchases')}</option>
               <option value="refund">{t('filterRefund', 'Refunds')}</option>
+              <option value="adjustment">{t('filterAdjustment', 'Adjustments')}</option>
             </select>
           </div>
         </div>
 
-        {/* Ledger Table */}
+        {/* Ledger Table with Verified Arithmetic Sign Logic */}
         <div className="overflow-x-auto">
           {transactions.length === 0 ? (
             <div className="py-12 text-center text-xs opacity-50">
@@ -638,7 +676,8 @@ function WalletContent() {
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                 {transactions.map((tx) => {
-                  const isCredit = Number(tx.amount) > 0;
+                  const amt = Number(tx.amount || 0);
+                  const isDebit = amt < 0;
                   return (
                     <tr key={tx.id} className="hover:bg-slate-800/20 transition">
                       <td className="py-3 px-3 font-mono text-[11px] opacity-75">
@@ -658,8 +697,8 @@ function WalletContent() {
                       <td className="py-3 px-3 font-medium">
                         {tx.description}
                       </td>
-                      <td className={`py-3 px-3 text-right font-bold font-mono ${isCredit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isCredit ? `+${activeCurrencySymbol}${Number(tx.amount).toFixed(2)}` : `-${activeCurrencySymbol}${Math.abs(Number(tx.amount)).toFixed(2)}`}
+                      <td className={`py-3 px-3 text-right font-bold font-mono ${isDebit ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        {isDebit ? `-${activeCurrencySymbol}${Math.abs(amt).toFixed(2)}` : `+${activeCurrencySymbol}${amt.toFixed(2)}`}
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-bold opacity-80">
                         {activeCurrencySymbol}{Number(tx.balance_after || 0).toFixed(2)}
@@ -710,6 +749,7 @@ function WalletContent() {
   );
 }
 
+// Wrap in Suspense boundary for Next.js App Router query parameter safety
 export default function WalletPage() {
   return (
     <Suspense fallback={

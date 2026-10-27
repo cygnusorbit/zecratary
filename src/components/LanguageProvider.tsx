@@ -48,6 +48,9 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "reconcilePaymentsBtn": "Reconcile Payments",
+    "reconciling": "Reconciling...",
+    "filterAdjustment": "Adjustments",
     "clipboardError": "Clipboard access unavailable.",
     "catProduce": "Produce",
     "catMeatSeafood": "Meat & Seafood",
