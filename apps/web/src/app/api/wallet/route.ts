@@ -5,13 +5,11 @@ import Stripe from 'stripe';
 export const dynamic = 'force-dynamic';
 
 let cachedPool: Pool | null = null;
+let isSchemaEnsured = false;
 
-// Strictly typed pool accessor guaranteeing non-null Pool return (Resolves TS2322)
 function getPool(): Pool {
   const existing = cachedPool;
-  if (existing) {
-    return existing;
-  }
+  if (existing) return existing;
   const conn = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
   const ssl = Boolean(conn && (conn.includes('sslmode=require') || conn.includes('neon.tech') || conn.includes('supabase.co')));
   const instance = new Pool({
@@ -22,7 +20,6 @@ function getPool(): Pool {
   return instance;
 }
 
-// Module-scoped type-safe database row extractor (Resolves TS7006 and TS2339)
 function parseDbRows<T = any>(res: any): T[] {
   if (!res) return [];
   if (Array.isArray(res)) return res;
@@ -31,40 +28,46 @@ function parseDbRows<T = any>(res: any): T[] {
 }
 
 async function ensureWalletTables(client: any) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS wallet_settings (
-      id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
-      is_enabled BOOLEAN DEFAULT true,
-      currency VARCHAR(10) DEFAULT 'USD',
-      min_topup NUMERIC(10,2) DEFAULT 5.00,
-      max_topup NUMERIC(10,2) DEFAULT 1000.00,
-      preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
-      bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
-      allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
-      allow_site_purchases BOOLEAN DEFAULT true,
-      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
+  if (isSchemaEnsured) return;
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS wallet_settings (
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
+        is_enabled BOOLEAN DEFAULT true,
+        currency VARCHAR(10) DEFAULT 'USD',
+        min_topup NUMERIC(10,2) DEFAULT 5.00,
+        max_topup NUMERIC(10,2) DEFAULT 1000.00,
+        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
+        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
+        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
+        allow_site_purchases BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
 
-    CREATE TABLE IF NOT EXISTS wallet_transactions (
-      id VARCHAR(64) PRIMARY KEY,
-      user_id VARCHAR(64),
-      user_email VARCHAR(255) NOT NULL,
-      type VARCHAR(32) NOT NULL,
-      amount NUMERIC(10,2) NOT NULL,
-      balance_after NUMERIC(10,2) NOT NULL,
-      gateway VARCHAR(32) DEFAULT 'stripe',
-      gateway_tx_id VARCHAR(255),
-      status VARCHAR(32) DEFAULT 'succeeded',
-      description TEXT,
-      metadata JSONB DEFAULT '{}',
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        user_email VARCHAR(255) NOT NULL,
+        type VARCHAR(32) NOT NULL,
+        amount NUMERIC(10,2) NOT NULL,
+        balance_after NUMERIC(10,2) NOT NULL,
+        gateway VARCHAR(32) DEFAULT 'stripe',
+        gateway_tx_id VARCHAR(255),
+        status VARCHAR(32) DEFAULT 'succeeded',
+        description TEXT,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
 
-    CREATE INDEX IF NOT EXISTS idx_wallet_tx_user_email ON wallet_transactions(user_email);
-    CREATE INDEX IF NOT EXISTS idx_wallet_tx_gateway_id ON wallet_transactions(gateway_tx_id);
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance INT DEFAULT 100;
-  `);
+      CREATE INDEX IF NOT EXISTS idx_wallet_tx_user_email ON wallet_transactions(user_email);
+      CREATE INDEX IF NOT EXISTS idx_wallet_tx_gateway_id ON wallet_transactions(gateway_tx_id);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance INT DEFAULT 100;
+    `);
+    isSchemaEnsured = true;
+  } catch (e) {
+    // Continue even if catalog DDL encounters lock
+  }
 }
 
 async function resolveUserFromReq(req: NextRequest) {
@@ -95,9 +98,10 @@ async function resolveUserFromReq(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const pool = getPool();
-  const client = await pool.connect();
+  let client: any = null;
 
   try {
+    client = await pool.connect();
     await ensureWalletTables(client);
     const { userId, email } = await resolveUserFromReq(req);
     const { searchParams } = new URL(req.url);
@@ -107,7 +111,6 @@ export async function GET(req: NextRequest) {
     const search = searchParams.get('search') || '';
     const typeFilter = searchParams.get('type') || 'all';
 
-    // 1. Fetch wallet settings
     const settingsRes = await client.query(`SELECT * FROM wallet_settings WHERE id = 'current' LIMIT 1`);
     const settingsRows = parseDbRows(settingsRes);
     let walletSettings = {
@@ -135,7 +138,6 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    // Harmonize with primary payment_gateways config
     try {
       const pgRes = await client.query("SELECT payment_gateways FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;");
       const pgRows = parseDbRows(pgRes);
@@ -149,7 +151,6 @@ export async function GET(req: NextRequest) {
       }
     } catch (_) {}
 
-    // 2. Fetch User Record & Balances
     let user: any = null;
     let walletBalance = 0.00;
     let tokenBalance = 100;
@@ -171,25 +172,10 @@ export async function GET(req: NextRequest) {
         walletBalance = parseFloat(user.wallet_balance || 0);
         tokenBalance = Number(user.token_balance || 0);
       }
-    } else {
-      const firstUserRes = await client.query(
-        `SELECT id, email, name, 
-                COALESCE(wallet_balance, 0) as wallet_balance,
-                COALESCE(token_balance, 0) as token_balance 
-         FROM users 
-         ORDER BY created_at ASC LIMIT 1`
-      );
-      const firstUserRows = parseDbRows(firstUserRes);
-      if (firstUserRows.length > 0) {
-        user = firstUserRows[0];
-        walletBalance = parseFloat(user.wallet_balance || 0);
-        tokenBalance = Number(user.token_balance || 0);
-      }
     }
 
     const targetEmail = (user?.email || email || '').toLowerCase().trim();
 
-    // 3. Fetch Ledger Statistics
     let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
     if (targetEmail) {
       const statsRes = await client.query(`
@@ -209,7 +195,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 4. Query Paginated Transactions
     let transactions: any[] = [];
     let totalCount = 0;
 
@@ -265,22 +250,20 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
 export async function POST(req: NextRequest) {
   const pool = getPool();
-  const client = await pool.connect();
+  let client: any = null;
 
   try {
+    client = await pool.connect();
     await ensureWalletTables(client);
     const body = await req.json().catch(() => ({}));
     const action = body.action || 'topup';
 
-    // --------------------------------------------------------------------------
-    // ACTION 1: Verify Stripe Return Session (Atomic Advisory Lock)
-    // --------------------------------------------------------------------------
     if (action === 'verify_stripe_session') {
       const sessionId = body.sessionId?.trim() || body.session_id?.trim();
       if (!sessionId) {
@@ -362,9 +345,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --------------------------------------------------------------------------
-    // ACTION 2: Manual / On-Demand Reconciliation
-    // --------------------------------------------------------------------------
     if (action === 'reconcile_wallet') {
       const email = (body.email || '').toLowerCase().trim();
       const userId = String(body.userId || 'usr_admin_1').trim();
@@ -400,7 +380,6 @@ export async function POST(req: NextRequest) {
         `, [userId, email]);
 
         let creditedAmount = 0;
-        // EXPLICIT (r: any) TYPING - RESOLVES TS7006
         parseDbRows(syncRes).forEach((r: any) => { 
           creditedAmount += Number(r.amount || 0); 
         });
@@ -429,9 +408,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --------------------------------------------------------------------------
-    // ACTION 3: Standard Top-Up Deposit
-    // --------------------------------------------------------------------------
     const { email, userId, amount, bonus = 0, gateway = 'stripe' } = body;
     const topupAmt = parseFloat(String(amount || 0));
     const bonusAmt = parseFloat(String(bonus || 0));
@@ -488,6 +464,6 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
