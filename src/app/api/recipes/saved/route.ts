@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     }
 
     const rows: any = await query(sql, params);
-    const list = Array.isArray(rows) ? rows : (rows?.rows || []);
+    const list = (Array.isArray(rows) ? rows : (((rows as any)?.rows) || []));
 
     const sanitized = list.map((r: any) => ({
       id: r.id,

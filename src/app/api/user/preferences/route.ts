@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
       'SELECT * FROM user_dietary_preferences WHERE user_id = $1 LIMIT 1',
       [userId]
     );
-    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+    const row = (Array.isArray(res) ? res[0] : (res as any)?.rows?.[0]);
 
     if (row) {
       return NextResponse.json({

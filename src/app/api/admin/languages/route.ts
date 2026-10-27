@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     // 1. Try PostgreSQL / MySQL with safe SELECT *
     try {
       const res: any = await query('SELECT * FROM admin_settings WHERE id IN (\'primary_settings\', \'1\') OR key = \'current\' LIMIT 1');
-      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      const row = (Array.isArray(res) ? res[0] : (res as any)?.rows?.[0]);
       if (row) {
         if (row.supported_languages) {
           const parsed = typeof row.supported_languages === 'string'

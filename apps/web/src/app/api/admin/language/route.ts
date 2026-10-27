@@ -238,7 +238,7 @@ export async function GET() {
         WHERE id = 'primary_settings' OR id = '1' 
         ORDER BY updated_at DESC LIMIT 1;
       `);
-      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      const row = (Array.isArray(res) ? res[0] : (res as any)?.rows?.[0]);
       if (row) {
         if (row.supported_languages) {
           const parsed = typeof row.supported_languages === 'string'

@@ -62,7 +62,7 @@ export async function GET(req: Request) {
           'SELECT * FROM planned_meals WHERE user_id = $1 OR user_id = $2 ORDER BY date ASC, time ASC',
           [userId, 'usr_admin_1']
         );
-        const list = Array.isArray(rows) ? rows : (rows?.rows || []);
+        const list = (Array.isArray(rows) ? rows : (((rows as any)?.rows) || []));
         const formatted = list.map((r: any) => ({
           id: r.id,
           userId: r.user_id,

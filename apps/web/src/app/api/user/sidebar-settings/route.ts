@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
         LIMIT 1;
       `, [userId, email]);
 
-      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      const row = (Array.isArray(res) ? res[0] : (res as any)?.rows?.[0]);
       if (row) {
         let sections = row.collapsed_sections || row.collapsed || [];
         if (typeof sections === 'string') {

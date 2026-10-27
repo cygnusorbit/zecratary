@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     sql += ' ORDER BY created_at DESC';
 
     const rows: any = await query(sql, params);
-    const rawItems = Array.isArray(rows) ? rows : (rows?.rows || []);
+    const rawItems = (Array.isArray(rows) ? rows : (((rows as any)?.rows) || []));
 
     const formatted = rawItems.map((r: any) => ({
       id: r.id,

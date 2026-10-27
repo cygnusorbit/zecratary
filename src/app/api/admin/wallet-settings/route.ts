@@ -37,7 +37,7 @@ export async function GET() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
-    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    const sRow = (Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]);
     if (sRow) {
       settings = {
         currency: sRow.currency || 'USD',
@@ -58,7 +58,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (uRes) {
-      users = Array.isArray(uRes) ? uRes : (uRes.rows || []);
+      users = (Array.isArray(uRes) ? uRes : (((uRes as any)?.rows) || []));
     }
 
     // 3. Fetch recent wallet transactions
@@ -75,7 +75,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (txRes) {
-      transactions = Array.isArray(txRes) ? txRes : (txRes.rows || []);
+      transactions = (Array.isArray(txRes) ? txRes : (((txRes as any)?.rows) || []));
     }
   } catch (err: any) {
     console.warn('[Wallet Settings API] Fallback to server JSON store:', err?.message || err);
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
         [delta, email]
       );
 
-      const userRow = Array.isArray(userRes) ? userRes[0] : userRes?.rows?.[0];
+      const userRow = (Array.isArray(userRes) ? userRes[0] : (userRes as any)?.rows?.[0]);
       const newBalance = userRow ? Number(userRow.wallet_balance) : 0;
       const txId = 'wtx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 

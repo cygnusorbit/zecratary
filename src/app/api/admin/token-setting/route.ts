@@ -37,7 +37,7 @@ export async function GET() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
-    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    const sRow = (Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]);
     if (sRow) {
       settings = {
         tokenName: sRow.token_name || sRow.tokenName,
@@ -64,7 +64,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (txRes) {
-      transactions = Array.isArray(txRes) ? txRes : (txRes.rows || []);
+      transactions = (Array.isArray(txRes) ? txRes : (((txRes as any)?.rows) || []));
     }
   } catch (err: any) {
     console.warn('[Token API] Fallback to server JSON store:', err?.message || err);

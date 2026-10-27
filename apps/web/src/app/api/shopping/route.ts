@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
       rows = await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => []);
     }
 
-    const raw = Array.isArray(rows) ? rows : (rows?.rows || []);
+    const raw = (Array.isArray(rows) ? rows : (((rows as any)?.rows) || []));
 
     const formatted = raw.map((r: any) => ({
       id: r.id,

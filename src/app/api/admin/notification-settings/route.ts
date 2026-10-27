@@ -36,7 +36,7 @@ export async function GET() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
-    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    const sRow = (Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]);
     if (sRow) {
       settings = {
         channelInApp: sRow.channel_in_app !== undefined ? Boolean(sRow.channel_in_app) : true,
@@ -76,7 +76,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (bRes) {
-      customBroadcasts = Array.isArray(bRes) ? bRes : (bRes.rows || []);
+      customBroadcasts = (Array.isArray(bRes) ? bRes : (((bRes as any)?.rows) || []));
       customBroadcasts = customBroadcasts.map((b: any) => ({
         id: b.id,
         title: b.title,

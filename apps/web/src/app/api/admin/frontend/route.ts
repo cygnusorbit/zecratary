@@ -201,7 +201,7 @@ export async function GET(req: NextRequest) {
         ORDER BY created_at DESC 
         LIMIT 60;
       `).catch(() => []);
-      const list = Array.isArray(recipes) ? recipes : (recipes?.rows || []);
+      const list = (Array.isArray(recipes) ? recipes : (((recipes as any)?.rows) || []));
       return NextResponse.json(
         { success: true, recipes: list },
         { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
@@ -213,7 +213,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const rows: any = await query('SELECT * FROM frontend_pages ORDER BY is_default DESC, order_index ASC, created_at ASC;');
-    const pages = Array.isArray(rows) ? rows : (rows?.rows || []);
+    const pages = (Array.isArray(rows) ? rows : (((rows as any)?.rows) || []));
 
     const sanitizedPages = pages.map((p: any) => {
       let elementsArray: any[] = [];
@@ -294,7 +294,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Page ID required' }, { status: 400 });
       }
       const check: any = await query('SELECT is_default, slug FROM frontend_pages WHERE id = $1;', [pageId]);
-      const target = Array.isArray(check) ? check[0] : check?.rows?.[0];
+      const target = (Array.isArray(check) ? check[0] : (check as any)?.rows?.[0]);
       if (target?.is_default || target?.slug === '/' || target?.slug === 'home') {
         return NextResponse.json({ success: false, error: 'Cannot delete the active default homepage' }, { status: 400 });
       }

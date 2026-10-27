@@ -71,7 +71,7 @@ export async function GET(req: Request) {
         new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
       ]).catch(() => null);
 
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRow = (Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]);
       const fallback = readServerTokenSettings();
 
       if (sRow) {
@@ -143,13 +143,13 @@ export async function GET(req: Request) {
         let uRow = null;
         if (email) {
           const byEmail: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE email = $1 LIMIT 1`, [email]).catch(() => null);
-          uRow = Array.isArray(byEmail) ? byEmail[0] : byEmail?.rows?.[0];
+          uRow = (Array.isArray(byEmail) ? byEmail[0] : (byEmail as any)?.rows?.[0]);
         }
         if (!uRow && userId) {
           const isUuidOrInt = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId) || /^\d+$/.test(userId);
           if (isUuidOrInt) {
             const byId: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE id = $1 LIMIT 1`, [userId]).catch(() => null);
-            uRow = Array.isArray(byId) ? byId[0] : byId?.rows?.[0];
+            uRow = (Array.isArray(byId) ? byId[0] : (byId as any)?.rows?.[0]);
           }
         }
 
@@ -188,7 +188,7 @@ export async function GET(req: Request) {
 
         const countQuery = `SELECT COUNT(*) as total FROM token_transactions WHERE ${whereClauses.join(' AND ')}`;
         const cRes: any = await query(countQuery, params);
-        const total = parseInt((Array.isArray(cRes) ? cRes[0] : cRes?.rows?.[0])?.total || '0', 10);
+        const total = parseInt(((Array.isArray(cRes) ? cRes[0] : (cRes as any)?.rows?.[0]))?.total || '0', 10);
         totalPages = Math.max(1, Math.ceil(total / limit));
 
         const offset = (page - 1) * limit;
@@ -201,7 +201,7 @@ export async function GET(req: Request) {
           LIMIT $${params.length - 1} OFFSET $${params.length}
         `;
         const txRes: any = await query(txQuery, params);
-        transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+        transactions = (Array.isArray(txRes) ? txRes : (((txRes as any)?.rows) || []));
 
         const statsParams = isUuidOrInt ? [userId, cleanEmail] : [cleanEmail];
         const statsWhere = isUuidOrInt ? `(user_id = $1 OR user_email = $2)` : `user_email = $1`;
@@ -213,7 +213,7 @@ export async function GET(req: Request) {
           FROM token_transactions
           WHERE ${statsWhere}
         `, statsParams);
-        const sRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+        const sRow = (Array.isArray(statsRes) ? statsRes[0] : (statsRes as any)?.rows?.[0]);
         if (sRow) {
           stats = {
             totalDeducted: Number(sRow.total_deducted || 0),
@@ -269,13 +269,13 @@ export async function POST(req: Request) {
       let user = null;
       if (userEmail) {
         const byEmail: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE email = $1 LIMIT 1`, [userEmail]).catch(() => null);
-        user = Array.isArray(byEmail) ? byEmail[0] : byEmail?.rows?.[0];
+        user = (Array.isArray(byEmail) ? byEmail[0] : (byEmail as any)?.rows?.[0]);
       }
       if (!user && userId) {
         const isUuidOrInt = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId) || /^\d+$/.test(userId);
         if (isUuidOrInt) {
           const byId: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE id = $1 LIMIT 1`, [userId]).catch(() => null);
-          user = Array.isArray(byId) ? byId[0] : byId?.rows?.[0];
+          user = (Array.isArray(byId) ? byId[0] : (byId as any)?.rows?.[0]);
         }
       }
 

@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
       }
 
       const bookRows: any = await query('SELECT recipe_ids FROM recipe_books WHERE id = $1;', [bookId]);
-      const currentBook = Array.isArray(bookRows) ? bookRows[0] : bookRows?.rows?.[0];
+      const currentBook = (Array.isArray(bookRows) ? bookRows[0] : (bookRows as any)?.rows?.[0]);
 
       if (!currentBook) {
         return NextResponse.json({ success: false, error: 'Cookbook not found' }, { status: 404 });

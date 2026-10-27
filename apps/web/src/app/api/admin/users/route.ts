@@ -47,7 +47,7 @@ export async function GET() {
 
   // Try PostgreSQL or MySQL if available
   try {
-    const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null }));
+    const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any }));
     if (typeof getDbPool === 'function') {
       const pool = await getDbPool();
       if (pool) {
@@ -122,7 +122,7 @@ export async function POST(req: Request) {
 
     // Persist to relational DB if available
     try {
-      const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null }));
+      const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any }));
       if (typeof getDbPool === 'function') {
         const pool = await getDbPool();
         if (pool) {
@@ -182,7 +182,7 @@ export async function DELETE(req: Request) {
 
     // Remove from DB if connected
     try {
-      const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null }));
+      const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any }));
       if (typeof getDbPool === 'function') {
         const pool = await getDbPool();
         if (pool) {
