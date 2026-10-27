@@ -3,9 +3,10 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
-  Coins, Sparkles, CheckCircle2, AlertCircle, Save, RefreshCw, 
-  Plus, Trash2, Edit3, Shield, Activity, Database, 
-  CreditCard, History, Sliders, Layers, DollarSign
+  Sparkles, CheckCircle2, AlertCircle, Save, RefreshCw, 
+  Plus, Trash2, Edit3, Shield, Activity, 
+  CreditCard, History, Sliders, Layers,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -107,9 +108,11 @@ export default function AdminTokenSettingPage() {
   const [pkgBadge, setPkgBadge] = useState('Hot');
   const [pkgBonus, setPkgBonus] = useState<number>(50);
 
-  // Ledger filter state
+  // Ledger filter & pagination state (Default: 10 per page)
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [ledgerFilterType, setLedgerFilterType] = useState('all');
+  const [ledgerPage, setLedgerPage] = useState<number>(1);
+  const [ledgerPageSize, setLedgerPageSize] = useState<number>(10);
 
   const isFetchingRef = useRef<boolean>(false);
   const isSavingRef = useRef<boolean>(false);
@@ -147,9 +150,10 @@ export default function AdminTokenSettingPage() {
             });
           }
 
+          const activeSymbol = loaded.tokenSymbol || '🪙';
           setSettings({
             tokenName: loaded.tokenName || 'Foodie Token',
-            tokenSymbol: loaded.tokenSymbol || '🪙',
+            tokenSymbol: activeSymbol,
             startingBalance: loaded.startingBalance !== undefined ? loaded.startingBalance : 100,
             isEnabled: loaded.isEnabled !== undefined ? Boolean(loaded.isEnabled) : true,
             importUrlCost: loaded.importUrlCost !== undefined ? loaded.importUrlCost : 5,
@@ -161,6 +165,10 @@ export default function AdminTokenSettingPage() {
             planAllocations: mergedPlanAllocations,
             packages: Array.isArray(loaded.packages) && loaded.packages.length > 0 ? loaded.packages : DEFAULT_TOKEN_PACKAGES
           });
+
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_token_symbol', activeSymbol);
+          }
         }
         if (Array.isArray(data.transactions)) {
           setTransactions(data.transactions);
@@ -194,6 +202,11 @@ export default function AdminTokenSettingPage() {
     };
   }, [loadTokenData, tr]);
 
+  // Reset pagination page on filter/search change
+  useEffect(() => {
+    setLedgerPage(1);
+  }, [ledgerSearch, ledgerFilterType, ledgerPageSize]);
+
   // Save Settings to Database & Server File
   const handleSaveSettings = async () => {
     if (saving || isSavingRef.current) return;
@@ -201,19 +214,33 @@ export default function AdminTokenSettingPage() {
     isSavingRef.current = true;
     setFeedback(null);
 
+    const activeSymbol = settings.tokenSymbol.trim() || '🪙';
+    const payload = { ...settings, tokenSymbol: activeSymbol };
+
     try {
       const res = await fetch('/api/admin/token-setting', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tokenSettings: settings })
+        body: JSON.stringify({ tokenSettings: payload })
       });
 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_tokens_updated'));
-          window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+          localStorage.setItem('zecratary_token_symbol', activeSymbol);
+          localStorage.setItem('zecratary_token_name', payload.tokenName || 'Foodie Token');
+          localStorage.setItem('zecratary_token_settings', JSON.stringify(payload));
+          localStorage.setItem('zecratary_tokens_updated_at', Date.now().toString());
+
+          window.dispatchEvent(new CustomEvent('zecratary_tokens_updated', { detail: payload }));
+          window.dispatchEvent(new CustomEvent('zecratary_token_settings_updated', { detail: payload }));
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+
+          try {
+            const bc = new BroadcastChannel('zecratary_balance_channel');
+            bc.postMessage({ type: 'TOKEN_SETTINGS_UPDATED', tokenSymbol: activeSymbol, settings: payload });
+            bc.close();
+          } catch (_) {}
         }
         showToast('success', tr('toastTokenSettingsSaved', 'Token configurations saved and synchronized with PostgreSQL & MySQL!'));
       } else {
@@ -321,39 +348,50 @@ export default function AdminTokenSettingPage() {
     });
   }, [transactions, ledgerSearch, ledgerFilterType]);
 
+  // Paginated ledger records (Task 2)
+  const totalLedgerRecords = filteredTransactions.length;
+  const totalLedgerPages = Math.max(1, Math.ceil(totalLedgerRecords / ledgerPageSize));
+  const paginatedTransactions = useMemo(() => {
+    const start = (ledgerPage - 1) * ledgerPageSize;
+    return filteredTransactions.slice(start, start + ledgerPageSize);
+  }, [filteredTransactions, ledgerPage, ledgerPageSize]);
+
+  // Active dynamic token symbol
+  const activeTokenSymbol = settings.tokenSymbol || '🪙';
+
   return (
     <div 
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Top Header & Primary Action Bar */}
+      {/* 1. Top Header & Primary Action Bar (Task 1: Removed Synced badge, Task 3: Dynamic Emoji in Title) */}
       <div 
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
         style={{ borderColor: 'var(--color-border)' }}
       >
-        <div>
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-            <Coins className="h-6 w-6" style={{ color: 'var(--color-primary)' }} />
-            {tr('tokenSettingTitle', 'Token System & Economy Configuration')}
-          </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {tr('tokenSettingSubtitle', 'Configure platform token economy, feature consumption costs, purchasable packages, and recurring plan allocations.')}
-          </p>
+        <div className="flex items-center gap-3">
+          <div 
+            className="w-10 h-10 rounded-2xl border flex items-center justify-center text-2xl shadow-xs select-none transition-transform duration-200 shrink-0"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)' 
+            }}
+            title={`Active Token Symbol: ${activeTokenSymbol}`}
+          >
+            {activeTokenSymbol}
+          </div>
+
+          <div>
+            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              {tr('tokenSettingTitle', 'Token System & Economy Configuration')}
+            </h1>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              {tr('tokenSettingSubtitle', 'Configure platform token economy, feature consumption costs, purchasable packages, and recurring plan allocations.')}
+            </p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <div 
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
-              borderColor: 'var(--color-border)', 
-              color: 'var(--color-text)' 
-            }}
-          >
-            <Database className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-            <span>{tr('syncStatusPostgres', 'Synced with PostgreSQL & MySQL')}</span>
-          </div>
-
           <button
             type="button"
             onClick={loadTokenData}
@@ -504,7 +542,7 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
 
-        {/* Token Identity Section */}
+        {/* Token Identity Section (Task 3: Dynamic Live Emoji Preview) */}
         <div 
           className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -547,24 +585,32 @@ export default function AdminTokenSettingPage() {
               <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
                 {tr('tokenSymbolLabel', 'Token Symbol / Emoji')}
               </label>
-              <input
-                id="cfg_token_symbol"
-                name="cfg_token_symbol"
-                type="text"
-                autoComplete="off"
-                autoCorrect="off"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                spellCheck="false"
-                maxLength={4}
-                value={settings.tokenSymbol}
-                onChange={(e) => setSettings({ ...settings, tokenSymbol: e.target.value })}
-                placeholder={tr('tokenSymbolPlaceholder', 'e.g. 🪙 or 🌟')}
-                className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold text-center"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  id="cfg_token_symbol"
+                  name="cfg_token_symbol"
+                  type="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.tokenSymbol}
+                  onChange={(e) => setSettings({ ...settings, tokenSymbol: e.target.value })}
+                  placeholder={tr('tokenSymbolPlaceholder', 'e.g. 🪙, 💎, ⚡, ⭐')}
+                  className="flex-1 px-3.5 py-2.5 rounded-xl border outline-none font-bold text-center"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <div 
+                  className="w-10 h-10 shrink-0 rounded-xl border flex items-center justify-center text-xl shadow-inner select-none transition-all duration-200"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  title="Dynamic Live Preview"
+                >
+                  {activeTokenSymbol}
+                </div>
+              </div>
             </div>
 
             <div>
@@ -644,7 +690,7 @@ export default function AdminTokenSettingPage() {
                     className="w-16 px-2.5 py-1.5 rounded-lg border font-mono font-bold text-center outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
-                  <span className="font-bold">{settings.tokenSymbol}</span>
+                  <span className="font-bold text-sm">{activeTokenSymbol}</span>
                 </div>
               </div>
             ))}
@@ -836,7 +882,7 @@ export default function AdminTokenSettingPage() {
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">{settings.tokenSymbol}</span>
+                    <span className="text-xl">{activeTokenSymbol}</span>
                     <span className="text-base font-black font-mono" style={{ color: 'var(--color-text)' }}>
                       +{pkg.tokenAmount.toLocaleString()}
                     </span>
@@ -945,7 +991,7 @@ export default function AdminTokenSettingPage() {
                               className="w-28 px-3 py-1.5 rounded-xl border outline-none font-mono font-bold"
                               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                             />
-                            <span className="font-bold">{settings.tokenSymbol} {tr('tokensPerMonth', 'tokens/mo')}</span>
+                            <span className="font-bold">{activeTokenSymbol} {tr('tokensPerMonth', 'tokens/mo')}</span>
                           </div>
                         </td>
                       </tr>
@@ -986,7 +1032,7 @@ export default function AdminTokenSettingPage() {
                                 className="w-28 px-3 py-1.5 rounded-xl border outline-none font-mono font-bold"
                                 style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                               />
-                              <span className="font-bold">{settings.tokenSymbol} {tr('tokensPerMonth', 'tokens/mo')}</span>
+                              <span className="font-bold">{activeTokenSymbol} {tr('tokensPerMonth', 'tokens/mo')}</span>
                             </div>
                           </td>
                         </tr>
@@ -1000,7 +1046,7 @@ export default function AdminTokenSettingPage() {
         </div>
       </div>
 
-      {/* TAB 4: TOKEN AUDIT LEDGER */}
+      {/* TAB 4: TOKEN AUDIT LEDGER (Task 2: Pagination with default 10/page) */}
       <div 
         role="region"
         aria-label="Token Transaction Audit Ledger"
@@ -1018,7 +1064,8 @@ export default function AdminTokenSettingPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Filter by Type */}
             <select
               value={ledgerFilterType}
               onChange={(e) => setLedgerFilterType(e.target.value)}
@@ -1031,6 +1078,28 @@ export default function AdminTokenSettingPage() {
               <option value="grants">{tr('filterGrants', 'Grants & Signups')}</option>
             </select>
 
+            {/* Rows Per Page Selector (Default: 10) */}
+            <div 
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('perPage', 'Rows:')}
+              </span>
+              <select
+                value={ledgerPageSize}
+                onChange={(e) => setLedgerPageSize(Number(e.target.value))}
+                className="bg-transparent text-xs font-bold outline-none cursor-pointer"
+                style={{ color: 'var(--color-text)' }}
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+
+            {/* Clear Ledger Action */}
             <button
               type="button"
               onClick={handleClearLedger}
@@ -1041,6 +1110,7 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
 
+        {/* Ledger Table Container */}
         <div 
           className="border rounded-3xl overflow-hidden shadow-xl transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -1061,14 +1131,14 @@ export default function AdminTokenSettingPage() {
                 </tr>
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                {filteredTransactions.length === 0 ? (
+                {paginatedTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
                       {tr('noLedgerRecords', 'No recent token transactions recorded.')}
                     </td>
                   </tr>
                 ) : (
-                  filteredTransactions.map((tx) => {
+                  paginatedTransactions.map((tx) => {
                     const isPositive = tx.amount > 0;
                     return (
                       <tr key={tx.id} className="transition" style={{ borderColor: 'var(--color-border)' }}>
@@ -1090,7 +1160,7 @@ export default function AdminTokenSettingPage() {
                         </td>
 
                         <td className="px-5 py-4 font-mono font-black" style={{ color: isPositive ? 'var(--color-emerald, #10b981)' : '#ef4444' }}>
-                          {isPositive ? `+${tx.amount}` : tx.amount} {settings.tokenSymbol}
+                          {isPositive ? `+${tx.amount}` : tx.amount} {activeTokenSymbol}
                         </td>
 
                         <td className="px-5 py-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
@@ -1110,6 +1180,87 @@ export default function AdminTokenSettingPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* Ledger Pagination Bar (Task 2) */}
+        <div 
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 px-1 text-xs"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          <div className="font-mono text-xs font-semibold">
+            {totalLedgerRecords > 0 ? (
+              <>
+                {tr('showingRecords', 'Showing')}{' '}
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {(ledgerPage - 1) * ledgerPageSize + 1}
+                </strong>
+                {' - '}
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {Math.min(ledgerPage * ledgerPageSize, totalLedgerRecords)}
+                </strong>
+                {' '}{tr('ofTotal', 'of')}{' '}
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {totalLedgerRecords}
+                </strong>
+                {' '}{tr('records', 'transactions')}
+              </>
+            ) : (
+              <span>0 {tr('records', 'transactions')}</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={ledgerPage <= 1}
+              onClick={() => setLedgerPage(1)}
+              className="px-2.5 py-1.5 rounded-xl border font-bold text-xs transition disabled:opacity-30 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title={tr('firstPage', 'First Page')}
+            >
+              «
+            </button>
+
+            <button
+              type="button"
+              disabled={ledgerPage <= 1}
+              onClick={() => setLedgerPage(prev => Math.max(1, prev - 1))}
+              className="p-1.5 rounded-xl border transition disabled:opacity-30 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title={tr('prevPage', 'Previous Page')}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+
+            <span 
+              className="px-3.5 py-1.5 rounded-xl font-mono font-bold border shadow-xs text-xs"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            >
+              {tr('page', 'Page')} {ledgerPage} / {totalLedgerPages}
+            </span>
+
+            <button
+              type="button"
+              disabled={ledgerPage >= totalLedgerPages}
+              onClick={() => setLedgerPage(prev => Math.min(totalLedgerPages, prev + 1))}
+              className="p-1.5 rounded-xl border transition disabled:opacity-30 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title={tr('nextPage', 'Next Page')}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              disabled={ledgerPage >= totalLedgerPages}
+              onClick={() => setLedgerPage(totalLedgerPages)}
+              className="px-2.5 py-1.5 rounded-xl border font-bold text-xs transition disabled:opacity-30 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title={tr('lastPage', 'Last Page')}
+            >
+              »
+            </button>
           </div>
         </div>
       </div>
