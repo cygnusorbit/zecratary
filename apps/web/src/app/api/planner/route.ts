@@ -1,200 +1,209 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { query, parseDbRows } from '@/lib/db';
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export const dynamic = 'force-dynamic';
+let queryDb: any = null;
+try {
+  const dbModule = require('@/lib/db');
+  queryDb = dbModule.query || dbModule.default?.query || dbModule.pool?.query;
+} catch (_) {}
 
-async function ensurePlannerTable() {
+const DATA_DIR = path.join(process.cwd(), 'data');
+const MEALS_FILE = path.join(DATA_DIR, 'planned_meals.json');
+
+function ensureDataFile() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(MEALS_FILE)) {
+    fs.writeFileSync(MEALS_FILE, JSON.stringify([], null, 2), 'utf-8');
+  }
+}
+
+async function ensureDatabaseTable() {
+  if (!queryDb) return false;
   try {
-    await query(`
+    await queryDb(`
       CREATE TABLE IF NOT EXISTS planned_meals (
-        id VARCHAR(120) PRIMARY KEY,
-        user_id VARCHAR(100),
-        created_by VARCHAR(255),
-        date VARCHAR(50) NOT NULL DEFAULT '',
-        recipe_id VARCHAR(100),
-        recipe_name VARCHAR(255) NOT NULL DEFAULT 'Untitled Recipe',
-        image TEXT,
-        meal_type VARCHAR(50) DEFAULT 'Dinner',
-        time VARCHAR(20) DEFAULT '',
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        date VARCHAR(32) NOT NULL,
+        meal_type VARCHAR(64) NOT NULL,
+        recipe_id VARCHAR(255),
+        recipe_name VARCHAR(255) NOT NULL,
+        time VARCHAR(32),
+        servings INT DEFAULT 2,
+        notes TEXT,
         is_leftover BOOLEAN DEFAULT FALSE,
-        notes TEXT DEFAULT '',
-        servings INT DEFAULT 4,
-        prep_time_minutes INT DEFAULT 15,
-        cook_time_minutes INT DEFAULT 25,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        calories INT DEFAULT 0,
+        protein INT DEFAULT 0,
+        carbs INT DEFAULT 0,
+        fat INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-
-    const migrations = [
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS date VARCHAR(50) DEFAULT \'\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS recipe_id VARCHAR(100);',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS recipe_name VARCHAR(255) DEFAULT \'Untitled Recipe\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS image TEXT;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS meal_type VARCHAR(50) DEFAULT \'Dinner\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS time VARCHAR(20) DEFAULT \'\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS is_leftover BOOLEAN DEFAULT FALSE;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT \'\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS servings INT DEFAULT 4;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS prep_time_minutes INT DEFAULT 15;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS cook_time_minutes INT DEFAULT 25;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;'
-    ];
-
-    for (const sql of migrations) {
-      try { await query(sql); } catch (_) {}
-    }
-  } catch (e: any) {
-    console.warn('[planner:ensurePlannerTable] Notice:', e.message);
+    return true;
+  } catch (err) {
+    console.warn('Planner DB table creation notice:', err);
+    return false;
   }
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   try {
-    await ensurePlannerTable();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
-    const email = searchParams.get('email');
+    const userId = searchParams.get('userId') || searchParams.get('email') || 'usr_admin_1';
 
-    let sql = `
-      SELECT 
-        id, 
-        user_id as "userId", 
-        user_id as "user_id",
-        created_by as "createdBy", 
-        created_by as "created_by",
-        date, 
-        recipe_id as "recipeId", 
-        recipe_id as "recipe_id",
-        recipe_name as "recipeName", 
-        recipe_name as "title",
-        image, 
-        image as "imageUrl",
-        image as "image_url",
-        meal_type as "mealType", 
-        meal_type as "meal_type",
-        time, 
-        is_leftover as "isLeftover", 
-        is_leftover as "is_leftover",
-        notes,
-        servings,
-        prep_time_minutes as "prepTimeMinutes",
-        cook_time_minutes as "cookTimeMinutes"
-      FROM planned_meals
-    `;
-    const params: any[] = [];
-
-    if (userId && email) {
-      sql += ` WHERE user_id = $1 OR created_by = $2 OR user_id = 'usr_admin_1' OR user_id IS NULL ORDER BY date ASC, time ASC`;
-      params.push(userId, email);
-    } else if (userId) {
-      sql += ` WHERE user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL ORDER BY date ASC, time ASC`;
-      params.push(userId);
-    } else {
-      sql += ` ORDER BY date ASC, time ASC LIMIT 300`;
+    const dbReady = await ensureDatabaseTable();
+    if (dbReady && queryDb) {
+      try {
+        const rows = await queryDb(
+          'SELECT * FROM planned_meals WHERE user_id = $1 OR user_id = $2 ORDER BY date ASC, time ASC',
+          [userId, 'usr_admin_1']
+        );
+        const list = Array.isArray(rows) ? rows : (rows?.rows || []);
+        const formatted = list.map((r: any) => ({
+          id: r.id,
+          userId: r.user_id,
+          date: r.date,
+          mealType: r.meal_type,
+          recipeId: r.recipe_id,
+          recipeName: r.recipe_name,
+          time: r.time || '12:00',
+          servings: Number(r.servings) || 2,
+          notes: r.notes || '',
+          isLeftover: Boolean(r.is_leftover),
+          calories: Number(r.calories) || 0,
+          protein: Number(r.protein) || 0,
+          carbs: Number(r.carbs) || 0,
+          fat: Number(r.fat) || 0
+        }));
+        return NextResponse.json({ success: true, meals: formatted });
+      } catch (_) {}
     }
 
-    const res = await query(sql, params);
-    const rows = parseDbRows(res);
-    const normalized = rows.map((r: any) => ({
-      ...r,
-      date: (r.date || '').split('T')[0]
-    }));
-    return NextResponse.json({ success: true, meals: normalized });
-  } catch (err: any) {
-    console.warn('[planner:GET] Falling back to empty meals list:', err.message);
-    return NextResponse.json({ success: true, meals: [] });
+    ensureDataFile();
+    const raw = fs.readFileSync(MEALS_FILE, 'utf-8');
+    const all = raw ? JSON.parse(raw) : [];
+    const userMeals = Array.isArray(all) 
+      ? all.filter((m: any) => m.userId === userId || m.user_id === userId || m.userId === 'usr_admin_1')
+      : [];
+    return NextResponse.json({ success: true, meals: userMeals });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    await ensurePlannerTable();
     const body = await req.json();
+    const userId = body.userId || body.user_id || 'usr_admin_1';
+    const mealsToPersist = Array.isArray(body.meals) ? body.meals : (body.meal ? [body.meal] : []);
 
-    let incomingMeals: any[] = [];
-    let isBatchReplace = false;
-    let targetUserId = body.userId || body.user_id || 'usr_admin_1';
-    let targetEmail = body.createdBy || body.created_by || null;
-
-    if (Array.isArray(body)) {
-      incomingMeals = body;
-    } else if (Array.isArray(body.meals)) {
-      incomingMeals = body.meals;
-      isBatchReplace = true;
-    } else if (body && typeof body === 'object') {
-      const single = body.meal || body;
-      if (single.date || single.recipeName || single.title || single.recipeId) {
-        incomingMeals = [single];
+    const dbReady = await ensureDatabaseTable();
+    if (dbReady && queryDb) {
+      try {
+        for (const m of mealsToPersist) {
+          const id = m.id || ('meal_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+          await queryDb(`
+            INSERT INTO planned_meals (
+              id, user_id, date, meal_type, recipe_id, recipe_name, time, servings, notes, is_leftover, calories, protein, carbs, fat, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              date = EXCLUDED.date,
+              meal_type = EXCLUDED.meal_type,
+              recipe_id = EXCLUDED.recipe_id,
+              recipe_name = EXCLUDED.recipe_name,
+              time = EXCLUDED.time,
+              servings = EXCLUDED.servings,
+              notes = EXCLUDED.notes,
+              is_leftover = EXCLUDED.is_leftover,
+              calories = EXCLUDED.calories,
+              protein = EXCLUDED.protein,
+              carbs = EXCLUDED.carbs,
+              fat = EXCLUDED.fat,
+              updated_at = NOW();
+          `, [
+            id,
+            userId,
+            m.date,
+            m.mealType || m.meal_type || 'Dinner',
+            m.recipeId || m.recipe_id || null,
+            m.recipeName || m.recipe_name || 'Chef Special',
+            m.time || '12:00',
+            Number(m.servings) || 2,
+            m.notes || '',
+            Boolean(m.isLeftover || m.is_leftover),
+            Number(m.calories) || 0,
+            Number(m.protein) || 0,
+            Number(m.carbs) || 0,
+            Number(m.fat) || 0
+          ]);
+        }
+      } catch (dbErr) {
+        console.warn('Planner DB upsert notice:', dbErr);
       }
     }
 
-    if (incomingMeals.length === 0) {
-      return NextResponse.json({ success: true, count: 0, message: 'No meals to record' });
-    }
+    ensureDataFile();
+    const raw = fs.readFileSync(MEALS_FILE, 'utf-8');
+    let all = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(all)) all = [];
 
-    for (const meal of incomingMeals) {
-      const id = meal.id || ('plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
-      const rawDate = meal.date || new Date().toISOString().split('T')[0];
-      const date = String(rawDate).split('T')[0];
-      const recipeName = meal.recipeName || meal.recipeTitle || meal.title || meal.name || 'Untitled Recipe';
-      const recipeId = meal.recipeId || meal.recipe_id || null;
-      const image = meal.image || meal.imageUrl || meal.image_url || null;
-      const mealType = meal.mealType || meal.meal_type || 'Dinner';
-      const time = meal.time || '';
-      const isLeftover = Boolean(meal.isLeftover || meal.is_leftover);
-      const notes = meal.notes || meal.note || '';
-      const userId = meal.userId || meal.user_id || targetUserId || 'usr_admin_1';
-      const createdBy = meal.createdBy || meal.created_by || targetEmail || userId;
-      const servings = parseInt(meal.servings) || 4;
-      const prepTime = parseInt(meal.prepTimeMinutes || meal.prep_time) || 15;
-      const cookTime = parseInt(meal.cookTimeMinutes || meal.cook_time) || 25;
+    mealsToPersist.forEach((newM: any) => {
+      const idx = all.findIndex((ex: any) => ex.id === newM.id);
+      if (idx >= 0) {
+        all[idx] = { ...all[idx], ...newM, userId };
+      } else {
+        all.push({ ...newM, userId });
+      }
+    });
 
-      await query(
-        `INSERT INTO planned_meals (
-           id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, servings, prep_time_minutes, cook_time_minutes, updated_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
-         ON CONFLICT (id) DO UPDATE SET
-           date = EXCLUDED.date,
-           recipe_id = EXCLUDED.recipe_id,
-           recipe_name = EXCLUDED.recipe_name,
-           image = EXCLUDED.image,
-           meal_type = EXCLUDED.meal_type,
-           time = EXCLUDED.time,
-           is_leftover = EXCLUDED.is_leftover,
-           notes = EXCLUDED.notes,
-           servings = EXCLUDED.servings,
-           prep_time_minutes = EXCLUDED.prep_time_minutes,
-           cook_time_minutes = EXCLUDED.cook_time_minutes,
-           updated_at = CURRENT_TIMESTAMP`,
-        [id, userId, createdBy, date, recipeId, recipeName, image, mealType, time, isLeftover, notes, servings, prepTime, cookTime]
-      );
-    }
-
-    return NextResponse.json({ success: true, count: incomingMeals.length });
-  } catch (err: any) {
-    console.error('[planner:POST] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    fs.writeFileSync(MEALS_FILE, JSON.stringify(all, null, 2), 'utf-8');
+    return NextResponse.json({ success: true, count: mealsToPersist.length });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-export async function DELETE(req: NextRequest) {
+export async function DELETE(req: Request) {
   try {
-    await ensurePlannerTable();
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
+    const mealId = searchParams.get('id');
+    const date = searchParams.get('date');
+    const clearAll = searchParams.get('clearAll') === 'true';
+    const userId = searchParams.get('userId') || 'usr_admin_1';
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Meal ID is required' }, { status: 400 });
+    const dbReady = await ensureDatabaseTable();
+    if (dbReady && queryDb) {
+      try {
+        if (clearAll) {
+          await queryDb('DELETE FROM planned_meals WHERE user_id = $1', [userId]);
+        } else if (mealId) {
+          await queryDb('DELETE FROM planned_meals WHERE id = $1', [mealId]);
+        } else if (date) {
+          await queryDb('DELETE FROM planned_meals WHERE user_id = $1 AND date = $2', [userId, date]);
+        }
+      } catch (_) {}
     }
 
-    await query('DELETE FROM planned_meals WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, id });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    ensureDataFile();
+    const raw = fs.readFileSync(MEALS_FILE, 'utf-8');
+    let all = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(all)) {
+      if (clearAll) {
+        all = all.filter((m: any) => m.userId !== userId && m.user_id !== userId);
+      } else if (mealId) {
+        all = all.filter((m: any) => m.id !== mealId);
+      } else if (date) {
+        all = all.filter((m: any) => !((m.userId === userId || m.user_id === userId) && m.date === date));
+      }
+      fs.writeFileSync(MEALS_FILE, JSON.stringify(all, null, 2), 'utf-8');
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
