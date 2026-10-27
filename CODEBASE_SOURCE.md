@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.52",
+  "version": "8.1.55",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.52",
+  "version": "8.1.55",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -1853,6 +1853,16 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       </div>
     </LanguageProvider>
   );
+}
+
+```
+
+## File: `apps/web/src/app/saved/page.tsx`
+```typescript
+import { redirect } from 'next/navigation';
+
+export default function RedirectToRecipes() {
+  redirect('/recipes');
 }
 
 ```
@@ -4654,414 +4664,438 @@ export default function ShoppingPage() {
 
 ## File: `apps/web/src/app/planner/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, 
-  Sparkles, Copy, Share2, Trash2, ShoppingCart, Clock, Users, 
-  Flame, CheckCircle2, AlertCircle, X, Search, Check, RefreshCw, 
-  ArrowRight, Lock, BookOpen, Utensils, Heart
+  Sparkles, Copy, Share2, ShoppingCart, Edit2, Trash2, Clock, 
+  Utensils, CheckCircle2, AlertCircle, ShieldCheck, Lock, 
+  ArrowRight, X, Flame
 } from 'lucide-react';
-import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-interface ScheduledMeal {
+interface PlannedMeal {
   id: string;
   userId: string;
-  createdBy?: string;
-  date: string; // YYYY-MM-DD
+  date: string;
+  mealType: string;
   recipeId?: string;
   recipeName: string;
-  title?: string;
-  image?: string;
-  imageUrl?: string;
-  mealType: string; // Breakfast | Lunch | Dinner | Snack
-  time?: string;
-  isLeftover?: boolean;
+  time: string;
+  servings: number;
   notes?: string;
-  servings?: number;
-  prepTimeMinutes?: number;
-  cookTimeMinutes?: number;
+  isLeftover?: boolean;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
 }
 
-const MEAL_SLOTS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
-
-const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-function getStartOfWeek(date: Date): Date {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Sunday
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
+interface SavedRecipe {
+  id: string;
+  title: string;
+  name?: string;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  ingredients?: any[];
 }
 
-function formatDateKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
+const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+
+function formatISODate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return `${year}-${month}-${day}`;
+}
+
+function getWeekDates(baseDate: Date): Date[] {
+  const current = new Date(baseDate);
+  const day = current.getDay();
+  const diff = current.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(current.setDate(diff));
+
+  const week: Date[] = [];
+  for (let i = 0; i < 7; i++) {
+    const nextDay = new Date(monday);
+    nextDay.setDate(monday.getDate() + i);
+    week.push(nextDay);
+  }
+  return week;
 }
 
 export default function PlannerPage() {
-  const router = useRouter();
   const { t } = useTranslation();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  // Active Week Date State
-  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => getStartOfWeek(new Date()));
-  const [scheduledMeals, setScheduledMeals] = useState<ScheduledMeal[]>([]);
-  const [savedRecipes, setSavedRecipes] = useState<any[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
 
-  // Add / Schedule Meal Modal State (Form-Free Accessible Container)
-  const [showAddModal, setShowAddModal] = useState<boolean>(false);
-  const [modalDate, setModalDate] = useState<string>('');
-  const [modalMealType, setModalMealType] = useState<string>('Dinner');
-  const [modalDishTitle, setModalDishTitle] = useState<string>('');
-  const [modalTime, setModalTime] = useState<string>('19:00');
-  const [modalServings, setModalServings] = useState<number>(4);
-  const [modalNotes, setModalNotes] = useState<string>('');
-  const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<any | null>(null);
+  const [meals, setMeals] = useState<PlannedMeal[]>([]);
+  const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
-  // Saved Recipe Picker Modal State
-  const [showRecipePicker, setShowRecipePicker] = useState<boolean>(false);
-  const [recipeSearchQuery, setRecipeSearchQuery] = useState<string>('');
+  // Subscription Macro Telemetry
+  const [canViewMacros, setCanViewMacros] = useState<boolean>(true);
+  const [activePlanName, setActivePlanName] = useState<string>('Nutrition Pro');
 
-  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3500);
-  };
+  // Modal Dialog States (Zero Form Tags - Constraint 9)
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedDateKey, setSelectedDateKey] = useState<string>('');
+  const [editingMeal, setEditingMeal] = useState<PlannedMeal | null>(null);
 
-  // 1. Fetch Scheduled Meals from PostgreSQL /api/planner
-  const loadPlannerMeals = useCallback(async (user: User | null) => {
-    const targetUserId = user?.id || 'usr_admin_1';
-    setLoading(true);
+  // Add/Edit Modal Input States
+  const [inputMealType, setInputMealType] = useState('Dinner');
+  const [inputRecipeId, setInputRecipeId] = useState('');
+  const [inputCustomName, setInputCustomName] = useState('');
+  const [inputTime, setInputTime] = useState('19:00');
+  const [inputServings, setInputServings] = useState(2);
+  const [inputNotes, setInputNotes] = useState('');
+  const [inputIsLeftover, setInputIsLeftover] = useState(false);
+
+  const weekDates = useMemo(() => getWeekDates(currentWeekStart), [currentWeekStart]);
+  const activeWeekKeys = useMemo(() => weekDates.map(d => formatISODate(d)), [weekDates]);
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ type, message });
+    setTimeout(() => {
+      setToast((prev) => (prev?.message === message ? null : prev));
+    }, 3500);
+  }, []);
+
+  const fetchSubscriptionAndPlans = useCallback(async () => {
+    try {
+      const user = getCurrentUser();
+      const userPlan = user?.plan || user?.subscriptionTier || 'pro';
+      setActivePlanName(String(userPlan).toUpperCase());
+
+      const res = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const plans = Array.isArray(data.plans) ? data.plans : (Array.isArray(data) ? data : []);
+        const matched = plans.find((p: any) => 
+          (p.slug && p.slug.toLowerCase() === String(userPlan).toLowerCase()) ||
+          (p.name && p.name.toLowerCase() === String(userPlan).toLowerCase())
+        );
+        if (matched && matched.can_view_macros !== undefined) {
+          setCanViewMacros(Boolean(matched.can_view_macros));
+          return;
+        }
+      }
+      const isFreeTier = String(userPlan).toLowerCase().includes('taster') || String(userPlan).toLowerCase().includes('free');
+      setCanViewMacros(!isFreeTier);
+    } catch (_) {
+      setCanViewMacros(true);
+    }
+  }, []);
+
+  const loadSavedRecipes = useCallback(async () => {
+    try {
+      const res = await fetch('/api/saved-recipes', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data.recipes) ? data.recipes : (Array.isArray(data) ? data : []);
+        if (list.length > 0) {
+          setSavedRecipes(list);
+          return;
+        }
+      }
+    } catch (_) {}
 
     try {
-      let fetchedMeals: ScheduledMeal[] = [];
-      const res = await fetch(`/api/planner?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
+      const cached = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSavedRecipes(parsed);
+          return;
+        }
+      }
+    } catch (_) {}
+
+    setSavedRecipes([
+      { id: 'rec_1', title: 'Grilled Mediterranean Salmon', calories: 480, protein: 42, carbs: 12, fat: 28 },
+      { id: 'rec_2', title: 'Avocado Quinoa Salad Bowl', calories: 380, protein: 14, carbs: 48, fat: 16 },
+      { id: 'rec_3', title: 'Thai Basil Chicken Stir-Fry', calories: 520, protein: 46, carbs: 24, fat: 22 },
+      { id: 'rec_4', title: 'Protein Oatmeal with Berries', calories: 340, protein: 22, carbs: 54, fat: 6 }
+    ]);
+  }, []);
+
+  const loadMeals = useCallback(async () => {
+    setLoading(true);
+    const user = getCurrentUser();
+    const userId = user?.id || user?.email || 'usr_admin_1';
+
+    try {
+      const res = await fetch(`/api/planner?userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.meals)) {
-          fetchedMeals = data.meals.map((m: any) => ({
-            id: m.id,
-            userId: m.userId || targetUserId,
-            createdBy: m.createdBy || user?.email,
-            date: String(m.date).split('T')[0],
-            recipeId: m.recipeId || null,
-            recipeName: m.recipeName || m.title || 'Scheduled Meal',
-            title: m.recipeName || m.title || 'Scheduled Meal',
-            image: m.image || m.imageUrl || '/uploads/recipes/default.jpg',
-            imageUrl: m.image || m.imageUrl || '/uploads/recipes/default.jpg',
-            mealType: m.mealType || 'Dinner',
-            time: m.time || '',
-            notes: m.notes || '',
-            servings: Number(m.servings || 4),
-            prepTimeMinutes: Number(m.prepTimeMinutes || 15),
-            cookTimeMinutes: Number(m.cookTimeMinutes || 25)
-          }));
+          setMeals(data.meals);
+          localStorage.setItem('zecratary_planned_meals', JSON.stringify(data.meals));
+          setLoading(false);
+          return;
         }
       }
+    } catch (_) {}
 
-      setScheduledMeals(fetchedMeals);
-
-      // 2. Fetch live Saved Recipes for the Recipe Picker Modal
-      try {
-        const rRes = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
-        if (rRes.ok) {
-          const rData = await rRes.json();
-          const rList = Array.isArray(rData) ? rData : (rData?.recipes || []);
-          setSavedRecipes(rList);
+    try {
+      const cached = localStorage.getItem('zecratary_planned_meals');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          setMeals(parsed);
         }
-      } catch (_) {}
+      }
+    } catch (_) {}
 
-    } catch (e) {
-      console.warn('[PlannerPage] Error loading meals:', e);
-    } finally {
-      setLoading(false);
-    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
     document.title = `${t('mealPlannerTitle', 'Weekly Meal Planner')} - Zecratary`;
-    initAuthStorage();
-    const user = getCurrentUser();
-    if (!user) {
-      router.replace('/login');
-      return;
-    }
-    setCurrentUser(user);
-    loadPlannerMeals(user);
+    loadMeals();
+    loadSavedRecipes();
+    fetchSubscriptionAndPlans();
 
     const handleSync = () => {
-      const u = getCurrentUser();
-      if (u) {
-        setCurrentUser(u);
-        loadPlannerMeals(u);
-      }
+      loadMeals();
+      loadSavedRecipes();
+      fetchSubscriptionAndPlans();
     };
 
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_planner_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_users_updated', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('storage', handleSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_planner_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_users_updated', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
-  }, [loadPlannerMeals, router, t]);
+  }, [loadMeals, loadSavedRecipes, fetchSubscriptionAndPlans, t]);
 
-  // Compute 7 days of the active week
-  const weekDays = useMemo(() => {
-    const days: { date: Date; dateKey: string; dayNameKey: string; dayName: string }[] = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(currentWeekStart);
-      d.setDate(d.getDate() + i);
-      const dateKey = formatDateKey(d);
-      const dayName = DAY_NAMES[i];
-      const dayNameKey = `day${dayName}`;
-      days.push({ date: d, dateKey, dayNameKey, dayName });
+  // Compute Live Macro Averages for the Current Week
+  const activeWeekMeals = useMemo(() => {
+    return meals.filter(m => activeWeekKeys.includes(m.date));
+  }, [meals, activeWeekKeys]);
+
+  const weeklyNutritionalAverages = useMemo(() => {
+    if (activeWeekMeals.length === 0) {
+      return { calories: 0, protein: 0, carbs: 0, fat: 0 };
     }
-    return days;
-  }, [currentWeekStart]);
+    const totals = activeWeekMeals.reduce((acc, m) => {
+      acc.calories += Number(m.calories || 0);
+      acc.protein += Number(m.protein || 0);
+      acc.carbs += Number(m.carbs || 0);
+      acc.fat += Number(m.fat || 0);
+      return acc;
+    }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
 
-  // Navigate Weeks
+    const divisor = 7;
+    return {
+      calories: Math.round(totals.calories / divisor),
+      protein: Math.round(totals.protein / divisor),
+      carbs: Math.round(totals.carbs / divisor),
+      fat: Math.round(totals.fat / divisor)
+    };
+  }, [activeWeekMeals]);
+
+  // Week Navigation Handlers
   const handlePrevWeek = () => {
-    const d = new Date(currentWeekStart);
-    d.setDate(d.getDate() - 7);
-    setCurrentWeekStart(d);
+    setCurrentWeekStart(prev => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() - 7);
+      return d;
+    });
   };
 
   const handleNextWeek = () => {
-    const d = new Date(currentWeekStart);
-    d.setDate(d.getDate() + 7);
+    setCurrentWeekStart(prev => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() + 7);
+      return d;
+    });
+  };
+
+  const handleTodayWeek = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
     setCurrentWeekStart(d);
   };
 
-  const handleToday = () => {
-    setCurrentWeekStart(getStartOfWeek(new Date()));
-  };
+  // Smart Auto-Planner: Fill Missing Slots
+  const handleAutoPlanWeek = async () => {
+    if (savedRecipes.length === 0) {
+      showToast(t('noSavedRecipesToPlan', 'Save some recipes first before auto-planning your week.'), 'error');
+      return;
+    }
 
-  // Group meals for the active 7 days
-  const activeWeekMeals = useMemo(() => {
-    const keys = new Set(weekDays.map(d => d.dateKey));
-    return scheduledMeals.filter(m => keys.has(m.date));
-  }, [scheduledMeals, weekDays]);
+    const user = getCurrentUser();
+    const userId = user?.id || user?.email || 'usr_admin_1';
+    const newBatch: PlannedMeal[] = [];
+    let recipeIdx = 0;
 
-  // Daily Nutritional Averages
-  const weeklyNutrition = useMemo(() => {
-    let totalCalories = 0;
-    let totalProtein = 0;
-    let totalCarbs = 0;
-    let totalFat = 0;
+    activeWeekKeys.forEach((dateKey) => {
+      const existingForDay = meals.filter(m => m.date === dateKey);
+      const scheduledTypes = existingForDay.map(m => m.mealType);
 
-    activeWeekMeals.forEach(m => {
-      // Find matching saved recipe if available for detailed macros
-      const matched = savedRecipes.find(r => r.id === m.recipeId || (r.title || r.name)?.toLowerCase() === m.recipeName?.toLowerCase());
-      const cals = Number(matched?.calories || 450);
-      const prot = Number(matched?.proteinGrams || 25);
-      const carbs = Number(matched?.carbsGrams || 40);
-      const fat = Number(matched?.fatGrams || 15);
-
-      totalCalories += cals;
-      totalProtein += prot;
-      totalCarbs += carbs;
-      totalFat += fat;
+      ['Breakfast', 'Lunch', 'Dinner'].forEach((slot) => {
+        if (!scheduledTypes.includes(slot)) {
+          const rec = savedRecipes[recipeIdx % savedRecipes.length];
+          recipeIdx++;
+          newBatch.push({
+            id: 'meal_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+            userId,
+            date: dateKey,
+            mealType: slot,
+            recipeId: rec.id,
+            recipeName: rec.title || rec.name || 'Chef Dish',
+            time: slot === 'Breakfast' ? '08:00' : slot === 'Lunch' ? '12:30' : '19:00',
+            servings: 2,
+            notes: t('autoScheduledNote', 'Auto-scheduled by Chef AI'),
+            isLeftover: false,
+            calories: Number(rec.calories) || 450,
+            protein: Number(rec.protein) || 30,
+            carbs: Number(rec.carbs) || 40,
+            fat: Number(rec.fat) || 15
+          });
+        }
+      });
     });
 
-    return {
-      avgCalories: Math.round(totalCalories / 7),
-      avgProtein: Math.round(totalProtein / 7),
-      avgCarbs: Math.round(totalCarbs / 7),
-      avgFat: Math.round(totalFat / 7)
-    };
-  }, [activeWeekMeals, savedRecipes]);
+    if (newBatch.length === 0) {
+      showToast(t('weekAlreadyFilled', 'Your active week is already fully planned!'), 'info');
+      return;
+    }
 
-  // Check Macro Access
-  const canViewMacros = useMemo(() => {
-    if (!currentUser) return false;
-    const plan = (currentUser.subscription_plan || currentUser.role || '').toLowerCase();
-    return plan.includes('pro') || plan.includes('premium') || plan.includes('nutrition') || currentUser.role === 'admin';
-  }, [currentUser]);
-
-  // Open Modal
-  const handleOpenAddModal = (dateKey: string, mealType: string = 'Dinner') => {
-    setModalDate(dateKey);
-    setModalMealType(mealType);
-    setModalDishTitle('');
-    setModalTime('19:00');
-    setModalServings(4);
-    setModalNotes('');
-    setSelectedRecipeForModal(null);
-    setShowAddModal(true);
-  };
-
-  // Save Scheduled Meal
-  const handleConfirmScheduleMeal = async () => {
-    if (!modalDishTitle.trim() || !currentUser) return;
-
-    const newMeal: ScheduledMeal = {
-      id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      userId: currentUser.id || 'usr_admin_1',
-      createdBy: currentUser.email || 'admin@zecratary.com',
-      date: modalDate,
-      recipeId: selectedRecipeForModal?.id || null,
-      recipeName: modalDishTitle.trim(),
-      title: modalDishTitle.trim(),
-      image: selectedRecipeForModal?.imageUrl || selectedRecipeForModal?.image || '/uploads/recipes/default.jpg',
-      imageUrl: selectedRecipeForModal?.imageUrl || selectedRecipeForModal?.image || '/uploads/recipes/default.jpg',
-      mealType: modalMealType,
-      time: modalTime || '19:00',
-      notes: modalNotes.trim(),
-      servings: Number(modalServings || 4),
-      prepTimeMinutes: Number(selectedRecipeForModal?.prepTimeMinutes || 15),
-      cookTimeMinutes: Number(selectedRecipeForModal?.cookTimeMinutes || 25)
-    };
-
-    const updated = [...scheduledMeals, newMeal];
-    setScheduledMeals(updated);
+    const merged = [...meals, ...newBatch];
+    setMeals(merged);
+    localStorage.setItem('zecratary_planned_meals', JSON.stringify(merged));
 
     try {
       await fetch('/api/planner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMeal)
+        body: JSON.stringify({ userId, meals: newBatch })
       });
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
-      showToast(t('mealScheduledSuccessToast', 'Meal scheduled successfully!'));
     } catch (_) {}
 
-    setShowAddModal(false);
+    showToast(`${t('plannedMealsAdded', 'Successfully scheduled')} ${newBatch.length} ${t('mealsAcrossWeek', 'meals across your week!')}`);
   };
 
-  // Delete Single Scheduled Meal
-  const handleDeleteMeal = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const updated = scheduledMeals.filter(m => m.id !== id);
-    setScheduledMeals(updated);
-
-    try {
-      await fetch(`/api/planner?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
-      showToast(t('mealDeletedToast', 'Meal removed from planner.'));
-    } catch (_) {}
-  };
-
-  // Clear Active Week Meals
-  const handleClearWeek = async () => {
-    if (activeWeekMeals.length === 0) return;
-    if (!confirm(t('confirmClearWeek', 'Are you sure you want to clear all scheduled meals for this week?'))) return;
-
-    const startDate = weekDays[0].dateKey;
-    const endDate = weekDays[6].dateKey;
-    const weekIds = new Set(activeWeekMeals.map(m => m.id));
-    const updated = scheduledMeals.filter(m => !weekIds.has(m.id));
-    setScheduledMeals(updated);
-
-    try {
-      await fetch(`/api/planner?dateRange=${encodeURIComponent(`${startDate},${endDate}`)}`, { method: 'DELETE' });
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
-      showToast(t('weekClearedToast', 'All meals for this week cleared.'));
-    } catch (_) {}
-  };
-
-  // Copy Current Week to Next Week
+  // Copy Week to Next Week
   const handleCopyWeek = async () => {
-    if (activeWeekMeals.length === 0) return;
+    if (activeWeekMeals.length === 0) {
+      showToast(t('noMealsToCopy', 'There are no meals in the current week to copy.'), 'error');
+      return;
+    }
 
-    const copiedMeals: ScheduledMeal[] = activeWeekMeals.map(m => {
-      const [y, mo, d] = m.date.split('-').map(Number);
-      const targetDate = new Date(y, mo - 1, d + 7);
+    const user = getCurrentUser();
+    const userId = user?.id || user?.email || 'usr_admin_1';
+    const clonedMeals: PlannedMeal[] = activeWeekMeals.map(m => {
+      const d = new Date(m.date);
+      d.setDate(d.getDate() + 7);
       return {
         ...m,
-        id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-        date: formatDateKey(targetDate)
+        id: 'meal_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+        date: formatISODate(d)
       };
     });
 
-    const updated = [...scheduledMeals, ...copiedMeals];
-    setScheduledMeals(updated);
+    const merged = [...meals, ...clonedMeals];
+    setMeals(merged);
+    localStorage.setItem('zecratary_planned_meals', JSON.stringify(merged));
 
     try {
       await fetch('/api/planner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meals: copiedMeals })
+        body: JSON.stringify({ userId, meals: clonedMeals })
       });
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
-      showToast(t('weekCopiedSuccessToast', 'Copied this week’s meals to the next week!'));
     } catch (_) {}
+
+    showToast(t('weekCopiedSuccess', 'Current week duplicated to next week successfully!'));
   };
 
-  // Share Weekly Meal Plan (Copy to Clipboard)
-  const handleSharePlan = async () => {
-    if (activeWeekMeals.length === 0) return;
+  // Share Week Itinerary
+  const handleShareWeek = () => {
+    if (activeWeekMeals.length === 0) {
+      showToast(t('noMealsToShare', 'No planned meals to share this week.'), 'error');
+      return;
+    }
 
-    let text = `🗓️ ${t('mealPlannerTitle', 'Weekly Meal Planner')} (${weekDays[0].dateKey} - ${weekDays[6].dateKey})\n\n`;
-    weekDays.forEach(day => {
-      const dayMeals = activeWeekMeals.filter(m => m.date === day.dateKey);
-      if (dayMeals.length > 0) {
-        text += `📌 ${t(day.dayNameKey, day.dayName)} (${day.dateKey}):\n`;
-        dayMeals.forEach(m => {
-          text += `  • [${t(`slot${m.mealType}`, m.mealType)}] ${m.recipeName} (${m.servings || 4} servings)\n`;
-        });
-        text += '\n';
-      }
-    });
+    const title = `📅 ${t('weeklyMealPlanTitle', 'Zecratary Weekly Meal Plan')} (${activeWeekKeys[0]} - ${activeWeekKeys[6]})\n\n`;
+    const lines = activeWeekKeys.map(dk => {
+      const dayMeals = meals.filter(m => m.date === dk);
+      if (dayMeals.length === 0) return `${dk}: No meals scheduled`;
+      const dishStrings = dayMeals.map(m => `  • [${m.mealType}] ${m.recipeName} (${m.time})`).join('\n');
+      return `${dk}:\n${dishStrings}`;
+    }).join('\n\n');
 
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast(t('planSharedSuccessToast', 'Weekly meal plan copied to clipboard!'));
-    } catch (_) {
-      showToast('Could not access clipboard.');
+    const shareText = title + lines;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(shareText);
+      showToast(t('mealPlanCopiedClipboard', 'Weekly itinerary copied to clipboard!'));
+    } else {
+      showToast(t('clipboardNotAvailable', 'Clipboard not supported in this browser.'), 'error');
     }
   };
 
-  // Generate Grocery List to /shopping
-  const handleGenerateGroceryList = async () => {
-    if (activeWeekMeals.length === 0) return;
-    const targetUserId = currentUser?.id || 'usr_admin_1';
+  // Generate Grocery Shopping List
+  const handleGenerateShoppingList = async () => {
+    if (activeWeekMeals.length === 0) {
+      showToast(t('noMealsForShoppingList', 'Schedule meals before generating a shopping list.'), 'error');
+      return;
+    }
 
-    const itemsToPost: any[] = [];
-    activeWeekMeals.forEach(meal => {
-      const matched = savedRecipes.find(r => r.id === meal.recipeId || (r.title || r.name)?.toLowerCase() === meal.recipeName?.toLowerCase());
-      if (matched && Array.isArray(matched.ingredients)) {
-        matched.ingredients.forEach((ing: any) => {
-          itemsToPost.push({
-            id: 'shop_' + Math.random().toString(36).substring(2, 7),
-            userId: targetUserId,
-            item: typeof ing === 'string' ? ing : ing.name || ing.item,
-            amount: typeof ing === 'object' ? ing.amount || '1' : '1',
-            unit: typeof ing === 'object' ? ing.unit || '' : '',
-            category: typeof ing === 'object' ? ing.category || 'Produce' : 'Produce',
-            checked: false
+    const user = getCurrentUser();
+    const userId = user?.id || user?.email || 'usr_admin_1';
+    const groceryItems: any[] = [];
+
+    activeWeekMeals.forEach(m => {
+      const rec = savedRecipes.find(r => r.id === m.recipeId);
+      if (rec && Array.isArray(rec.ingredients) && rec.ingredients.length > 0) {
+        rec.ingredients.forEach(ing => {
+          groceryItems.push({
+            id: 'shop_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+            userId,
+            name: typeof ing === 'string' ? ing : (ing.name || ing.item || 'Ingredient'),
+            amount: typeof ing === 'object' && ing.amount ? ing.amount : '1',
+            unit: typeof ing === 'object' && ing.unit ? ing.unit : 'unit',
+            category: 'Pantry & Produce',
+            checked: false,
+            sourceMeal: m.recipeName
           });
         });
       } else {
-        itemsToPost.push({
-          id: 'shop_' + Math.random().toString(36).substring(2, 7),
-          userId: targetUserId,
-          item: `Ingredients for ${meal.recipeName}`,
+        groceryItems.push({
+          id: 'shop_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+          userId,
+          name: `${m.recipeName} (${t('ingredientsBundle', 'Ingredients Bundle')})`,
           amount: '1',
-          unit: 'pkg',
-          category: 'Produce',
-          checked: false
+          unit: 'kit',
+          category: 'Meal Kit',
+          checked: false,
+          sourceMeal: m.recipeName
         });
       }
     });
@@ -5070,520 +5104,952 @@ export default function PlannerPage() {
       await fetch('/api/shopping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: itemsToPost })
+        body: JSON.stringify({ userId, items: groceryItems })
       });
-      window.dispatchEvent(new Event('zecratary_shopping_updated'));
-      showToast(t('groceryListCreatedToast', 'Ingredients added to your shopping list!'));
     } catch (_) {}
+
+    try {
+      const currentShop = localStorage.getItem('zecratary_shopping_list');
+      const parsed = currentShop ? JSON.parse(currentShop) : [];
+      localStorage.setItem('zecratary_shopping_list', JSON.stringify([...groceryItems, ...parsed]));
+      window.dispatchEvent(new Event('zecratary_shopping_updated'));
+    } catch (_) {}
+
+    showToast(`${t('shoppingListGenerated', 'Generated')} ${groceryItems.length} ${t('groceryItemsSuccess', 'grocery items and synced to /shopping!')}`);
   };
 
-  const filteredPickerRecipes = useMemo(() => {
-    const q = recipeSearchQuery.toLowerCase().trim();
-    if (!q) return savedRecipes;
-    return savedRecipes.filter(r => 
-      (r.title || r.name || '').toLowerCase().includes(q) ||
-      (r.description || '').toLowerCase().includes(q)
-    );
-  }, [savedRecipes, recipeSearchQuery]);
+  // Add Meal Action (Accessible Modal Handler)
+  const openAddMealModal = (dateKey: string) => {
+    setSelectedDateKey(dateKey);
+    setInputMealType('Dinner');
+    setInputRecipeId(savedRecipes[0]?.id || '');
+    setInputCustomName('');
+    setInputTime('19:00');
+    setInputServings(2);
+    setInputNotes('');
+    setInputIsLeftover(false);
+    setShowAddModal(true);
+  };
+
+  const handleSaveAddMeal = async () => {
+    const selectedRec = savedRecipes.find(r => r.id === inputRecipeId);
+    const finalName = inputCustomName.trim() || selectedRec?.title || selectedRec?.name || t('customMeal', 'Custom Meal');
+
+    const user = getCurrentUser();
+    const userId = user?.id || user?.email || 'usr_admin_1';
+
+    const newMeal: PlannedMeal = {
+      id: 'meal_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+      userId,
+      date: selectedDateKey,
+      mealType: inputMealType,
+      recipeId: selectedRec ? selectedRec.id : undefined,
+      recipeName: finalName,
+      time: inputTime || '12:00',
+      servings: Number(inputServings) || 2,
+      notes: inputNotes.trim(),
+      isLeftover: inputIsLeftover,
+      calories: Number(selectedRec?.calories) || 450,
+      protein: Number(selectedRec?.protein) || 30,
+      carbs: Number(selectedRec?.carbs) || 40,
+      fat: Number(selectedRec?.fat) || 15
+    };
+
+    const updated = [...meals, newMeal];
+    setMeals(updated);
+    localStorage.setItem('zecratary_planned_meals', JSON.stringify(updated));
+    setShowAddModal(false);
+
+    try {
+      await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, meal: newMeal })
+      });
+    } catch (_) {}
+
+    showToast(`${t('mealScheduledToast', 'Meal scheduled for')} ${selectedDateKey}`);
+  };
+
+  // Edit Meal Action (Accessible Modal Handler)
+  const openEditMealModal = (meal: PlannedMeal) => {
+    setEditingMeal(meal);
+    setInputMealType(meal.mealType);
+    setInputRecipeId(meal.recipeId || '');
+    setInputCustomName(meal.recipeName);
+    setInputTime(meal.time || '12:00');
+    setInputServings(meal.servings || 2);
+    setInputNotes(meal.notes || '');
+    setInputIsLeftover(Boolean(meal.isLeftover));
+    setShowEditModal(true);
+  };
+
+  const handleSaveEditMeal = async () => {
+    if (!editingMeal) return;
+
+    const selectedRec = savedRecipes.find(r => r.id === inputRecipeId);
+    const finalName = inputCustomName.trim() || selectedRec?.title || selectedRec?.name || editingMeal.recipeName;
+
+    const user = getCurrentUser();
+    const userId = user?.id || user?.email || 'usr_admin_1';
+
+    const updatedMeal: PlannedMeal = {
+      ...editingMeal,
+      mealType: inputMealType,
+      recipeId: selectedRec ? selectedRec.id : editingMeal.recipeId,
+      recipeName: finalName,
+      time: inputTime,
+      servings: Number(inputServings) || 2,
+      notes: inputNotes.trim(),
+      isLeftover: inputIsLeftover,
+      calories: selectedRec?.calories ?? editingMeal.calories,
+      protein: selectedRec?.protein ?? editingMeal.protein,
+      carbs: selectedRec?.carbs ?? editingMeal.carbs,
+      fat: selectedRec?.fat ?? editingMeal.fat
+    };
+
+    const updatedList = meals.map(m => m.id === updatedMeal.id ? updatedMeal : m);
+    setMeals(updatedList);
+    localStorage.setItem('zecratary_planned_meals', JSON.stringify(updatedList));
+    setShowEditModal(false);
+
+    try {
+      await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, meal: updatedMeal })
+      });
+    } catch (_) {}
+
+    showToast(t('mealUpdatedToast', 'Meal schedule updated successfully!'));
+  };
+
+  const handleDeleteMeal = async (mealId: string) => {
+    const remaining = meals.filter(m => m.id !== mealId);
+    setMeals(remaining);
+    localStorage.setItem('zecratary_planned_meals', JSON.stringify(remaining));
+
+    const user = getCurrentUser();
+    const userId = user?.id || user?.email || 'usr_admin_1';
+
+    try {
+      await fetch(`/api/planner?id=${encodeURIComponent(mealId)}&userId=${encodeURIComponent(userId)}`, {
+        method: 'DELETE'
+      });
+    } catch (_) {}
+
+    showToast(t('mealDeletedToast', 'Meal removed from planner.'));
+  };
+
+  const formatWeekRangeString = () => {
+    if (weekDates.length < 7) return '';
+    const start = weekDates[0];
+    const end = weekDates[6];
+    const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+    return `${start.toLocaleDateString(undefined, options)} - ${end.toLocaleDateString(undefined, { ...options, year: 'numeric' })}`;
+  };
 
   return (
-    <div 
-      className="max-w-7xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+    <div
+      id="zecratary-planner-canvas"
+      role="region"
+      aria-label={t('mealPlannerTitle', 'Weekly Meal Planner')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)'
+      }}
     >
       {/* Toast Alert Banner */}
-      {toastMessage && (
-        <div 
-          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
+      {toast && (
+        <div
+          className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl shadow-2xl border text-xs font-bold flex items-center gap-2.5 animate-in fade-in slide-in-from-bottom-3"
           style={{
             backgroundColor: 'var(--color-card)',
-            borderColor: toastMessage.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            borderColor: toast.type === 'error' ? '#ef4444' : 'var(--color-emerald)',
             color: 'var(--color-text)'
           }}
         >
-          {toastMessage.type === 'success' ? (
-            <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+          {toast.type === 'error' ? (
+            <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
           ) : (
-            <AlertCircle className="h-4 w-4 text-red-500" />
+            <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
           )}
-          <span>{toastMessage.text}</span>
+          <span>{toast.message}</span>
         </div>
       )}
 
-      {/* Top Header Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-        <div>
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {t('mealPlannerTitle', 'Weekly Meal Planner')}
-          </h1>
+      {/* Header Bar: Actions & Week Controls */}
+      <div 
+        className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b pb-5"
+        style={{ borderColor: 'var(--color-border)' }}
+      >
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <CalendarIcon className="h-6 w-6" /> {t('mealPlannerTitle', 'Weekly Meal Planner')}
+            </h1>
+            <span 
+              className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
+              }}
+            >
+              {activePlanName}
+            </span>
+          </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('mealPlannerSubtitle', 'Organize your weekly meals, balance nutritional targets, and generate grocery lists.')}
+            {t('mealPlannerSubtitle', 'Architect your weekly nutrition, balance macros, and sync directly to your grocery shopping list.')}
           </p>
         </div>
 
-        {/* Action Buttons Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-          <Link
-            href="/chef"
-            className="px-3.5 py-2 rounded-xl text-white transition flex items-center gap-1.5 shadow-md hover:opacity-90 cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary)' }}
+        {/* Action Controls Toolbar */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Week Selector Pills */}
+          <div 
+            className="flex items-center rounded-xl border p-1"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <Sparkles className="h-4 w-4" />
-            <span>{t('planWeekBtn', 'AI Auto-Plan')}</span>
-          </Link>
-
-          <button
-            type="button"
-            onClick={handleCopyWeek}
-            disabled={activeWeekMeals.length === 0}
-            className="px-3 py-2 rounded-xl border transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-80 disabled:opacity-40"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-          >
-            <Copy className="h-3.5 w-3.5" />
-            <span>{t('copyWeekBtn', 'Copy Week')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSharePlan}
-            disabled={activeWeekMeals.length === 0}
-            className="px-3 py-2 rounded-xl border transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-80 disabled:opacity-40"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-          >
-            <Share2 className="h-3.5 w-3.5" />
-            <span>{t('sharePlanBtn', 'Share Plan')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleGenerateGroceryList}
-            disabled={activeWeekMeals.length === 0}
-            className="px-3 py-2 rounded-xl border transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-80 disabled:opacity-40"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-emerald)' }}
-          >
-            <ShoppingCart className="h-3.5 w-3.5" />
-            <span>{t('groceryListBtn', 'Generate Grocery List')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleClearWeek}
-            disabled={activeWeekMeals.length === 0}
-            className="px-3 py-2 rounded-xl border text-red-400 hover:bg-red-500/10 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-            style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span>{t('clearWeekBtn', 'Clear Week')}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Date Navigation & Macro Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-        {/* Date Navigator Strip (7 Cols) */}
-        <div 
-          className="lg:col-span-7 p-4 rounded-3xl border flex items-center justify-between gap-4 shadow-sm"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handlePrevWeek}
-              className="p-2 rounded-xl border transition cursor-pointer hover:opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              className="p-1.5 rounded-lg hover:opacity-80 transition cursor-pointer"
               title={t('prevWeek', 'Previous Week')}
+              style={{ color: 'var(--color-text)' }}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               type="button"
-              onClick={handleToday}
-              className="px-3 py-2 rounded-xl border text-xs font-bold transition cursor-pointer hover:opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              onClick={handleTodayWeek}
+              className="px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer"
+              style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' }}
             >
               {t('todayBtn', 'Today')}
             </button>
             <button
               type="button"
               onClick={handleNextWeek}
-              className="p-2 rounded-xl border transition cursor-pointer hover:opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              className="p-1.5 rounded-lg hover:opacity-80 transition cursor-pointer"
               title={t('nextWeek', 'Next Week')}
+              style={{ color: 'var(--color-text)' }}
             >
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
 
-          <div className="text-right">
-            <span className="text-xs font-black" style={{ color: 'var(--color-primary)' }}>
-              {weekDays[0].dateKey} — {weekDays[6].dateKey}
-            </span>
-            <span className="block text-[10px] opacity-70">
-              {activeWeekMeals.length} meals scheduled
-            </span>
-          </div>
-        </div>
+          <span className="text-xs font-bold px-2 hidden sm:inline" style={{ color: 'var(--color-text)' }}>
+            {formatWeekRangeString()}
+          </span>
 
-        {/* Nutritional Macro Summary Banner (5 Cols) */}
-        <div 
-          className="lg:col-span-5 p-4 rounded-3xl border shadow-sm flex flex-col justify-between relative overflow-hidden"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-[var(--color-primary)]">
-              {t('dailyNutritionalAverage', 'Daily Nutritional Average')}
-            </span>
-            {!canViewMacros && (
-              <Link 
-                href="/subscriptions"
-                className="text-[10px] font-bold text-amber-500 hover:underline flex items-center gap-1"
-              >
-                <Lock className="h-3 w-3" />
-                <span>{t('unlockMacrosBadge', 'Upgrade to Unlock')}</span>
-              </Link>
-            )}
-          </div>
+          {/* Smart Auto-Plan Button */}
+          <button
+            type="button"
+            onClick={handleAutoPlanWeek}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer hover:opacity-90"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-primary)',
+              color: 'var(--color-primary)'
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>{t('planWeekBtn', 'Plan Week')}</span>
+          </button>
 
-          <div className="grid grid-cols-4 gap-2 text-center">
-            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-              <span className="text-[10px] opacity-70 block">{t('calories', 'Calories')}</span>
-              <span className="text-sm font-black font-mono">
-                {canViewMacros ? weeklyNutrition.avgCalories : '••••'}
-              </span>
-            </div>
-            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-              <span className="text-[10px] opacity-70 block">{t('protein', 'Protein')}</span>
-              <span className="text-sm font-black font-mono text-emerald-400">
-                {canViewMacros ? `${weeklyNutrition.avgProtein}g` : '••g'}
-              </span>
-            </div>
-            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-              <span className="text-[10px] opacity-70 block">{t('carbs', 'Carbs')}</span>
-              <span className="text-sm font-black font-mono text-amber-400">
-                {canViewMacros ? `${weeklyNutrition.avgCarbs}g` : '••g'}
-              </span>
-            </div>
-            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-              <span className="text-[10px] opacity-70 block">{t('fat', 'Fat')}</span>
-              <span className="text-sm font-black font-mono text-sky-400">
-                {canViewMacros ? `${weeklyNutrition.avgFat}g` : '••g'}
-              </span>
-            </div>
-          </div>
+          {/* Copy Week Button */}
+          <button
+            type="button"
+            onClick={handleCopyWeek}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer hover:opacity-90"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" />
+            <span>{t('copyWeekBtn', 'Copy Week')}</span>
+          </button>
+
+          {/* Share Button */}
+          <button
+            type="button"
+            onClick={handleShareWeek}
+            className="p-2 rounded-xl border transition cursor-pointer hover:opacity-90"
+            title={t('shareWeekPlan', 'Share Weekly Meal Plan')}
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <Share2 className="h-4 w-4" />
+          </button>
+
+          {/* Generate Shopping List CTA */}
+          <button
+            type="button"
+            onClick={handleGenerateShoppingList}
+            className="px-4 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-md transition cursor-pointer hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-emerald)' }}
+          >
+            <ShoppingCart className="h-3.5 w-3.5" />
+            <span>{t('syncShoppingListBtn', 'Shopping List')}</span>
+          </button>
         </div>
       </div>
 
-      {/* 7-Day Interactive Meal Calendar Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-3.5 items-start">
-        {weekDays.map(day => {
-          const isToday = day.dateKey === formatDateKey(new Date());
-          const dayMeals = activeWeekMeals.filter(m => m.date === day.dateKey);
+      {/* Daily Nutritional Average Card (Subscription Macro Gated) */}
+      <div 
+        role="region"
+        aria-label={t('nutritionalAverageTitle', 'Daily Nutritional Average')}
+        data-lpignore="true"
+        className="w-full rounded-3xl p-5 border shadow-sm transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)',
+          boxSizing: 'border-box'
+        }}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <Flame className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+            <div>
+              <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                {t('nutritionalAverageTitle', 'Daily Nutritional Average')}
+              </h2>
+              <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('nutritionalAverageSubtitle', 'Calculated dynamically based on scheduled dishes for this week.')}
+              </p>
+            </div>
+          </div>
 
-          return (
-            <div 
-              key={day.dateKey}
-              className="border rounded-3xl p-3.5 space-y-3 shadow-xs flex flex-col justify-between min-h-[380px]"
+          <div>
+            {canViewMacros ? (
+              <div 
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                }}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>{t('macrosActiveBadge', 'Macros Active')}</span>
+              </div>
+            ) : (
+              <Link
+                href="/subscriptions"
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold text-white shadow-sm transition hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Lock className="h-3 w-3" />
+                <span>{t('upgradeToViewMacros', 'Upgrade to View Macros')}</span>
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            )}
+          </div>
+        </div>
+
+        {/* Nutritional Metrics Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: t('macroCalories', 'Calories'), value: `${weeklyNutritionalAverages.calories} kcal`, color: 'var(--color-primary)' },
+            { label: t('macroProtein', 'Protein'), value: `${weeklyNutritionalAverages.protein}g`, color: 'var(--color-emerald)' },
+            { label: t('macroCarbs', 'Carbs'), value: `${weeklyNutritionalAverages.carbs}g`, color: '#f59e0b' },
+            { label: t('macroFat', 'Fat'), value: `${weeklyNutritionalAverages.fat}g`, color: '#6366f1' },
+          ].map((macro, idx) => (
+            <div
+              key={idx}
+              className="p-3.5 rounded-2xl border transition-colors duration-200"
               style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: isToday ? 'var(--color-primary)' : 'var(--color-border)'
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
               }}
             >
-              <div>
-                {/* Day Header */}
-                <div className="flex items-center justify-between border-b pb-2 mb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div>
-                    <h3 className={`text-xs font-black ${isToday ? 'text-[var(--color-primary)]' : ''}`}>
-                      {t(day.dayNameKey, day.dayName)}
-                    </h3>
-                    <span className="text-[10px] opacity-60 font-mono">
-                      {day.dateKey.slice(5)}
-                    </span>
-                  </div>
-                  {isToday && (
-                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full text-white bg-[var(--color-primary)]">
-                      {t('todayBtn', 'Today')}
-                    </span>
-                  )}
+              <div className="text-[11px] font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                {macro.label}
+              </div>
+              <div 
+                className={`text-lg font-black tracking-tight ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`}
+                style={{ color: macro.color }}
+              >
+                {macro.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 7-Day Responsive Calendar Canvas Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+        {weekDates.map((dateObj) => {
+          const dateKey = formatISODate(dateObj);
+          const dayName = dateObj.toLocaleDateString(undefined, { weekday: 'short' });
+          const dayNumber = dateObj.getDate();
+          const isToday = formatISODate(new Date()) === dateKey;
+          const dayMeals = meals.filter(m => m.date === dateKey);
+
+          return (
+            <div
+              key={dateKey}
+              role="region"
+              aria-label={`${dayName} ${dateKey}`}
+              data-lpignore="true"
+              className="flex flex-col rounded-3xl border shadow-sm transition duration-200 overflow-hidden"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: isToday ? 'var(--color-primary)' : 'var(--color-border)',
+                borderWidth: isToday ? '2px' : '1px'
+              }}
+            >
+              {/* Day Header */}
+              <div 
+                className="p-3 border-b flex items-center justify-between"
+                style={{
+                  backgroundColor: isToday ? 'var(--color-inner-dark)' : 'transparent',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-black uppercase" style={{ color: isToday ? 'var(--color-primary)' : 'var(--color-text)' }}>
+                    {dayName}
+                  </span>
+                  <span 
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isToday ? 'text-white' : ''}`}
+                    style={isToday ? { backgroundColor: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
+                  >
+                    {dayNumber}
+                  </span>
                 </div>
 
-                {/* Scheduled Meals List for the Day */}
-                <div className="space-y-2">
-                  {dayMeals.length === 0 ? (
-                    <div className="py-8 text-center text-[11px] opacity-40">
-                      {t('noMealsScheduled', 'No meals scheduled')}
-                    </div>
-                  ) : (
-                    dayMeals.map(meal => (
-                      <div 
-                        key={meal.id}
-                        className="p-2.5 rounded-2xl border space-y-1.5 relative group shadow-xs hover:border-[var(--color-primary)] transition"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
-                            {t(`slot${meal.mealType}`, meal.mealType)}
-                          </span>
+                <button
+                  type="button"
+                  onClick={() => openAddMealModal(dateKey)}
+                  className="p-1 rounded-lg hover:opacity-80 transition cursor-pointer"
+                  style={{ color: 'var(--color-primary)' }}
+                  title={t('addMealForDay', 'Add Meal')}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Day Planned Meals List */}
+              <div className="p-2.5 flex-1 space-y-2.5 min-h-[160px]">
+                {dayMeals.length === 0 ? (
+                  <div 
+                    onClick={() => openAddMealModal(dateKey)}
+                    className="h-full border border-dashed rounded-2xl flex flex-col items-center justify-center text-center p-4 cursor-pointer hover:opacity-80 transition group"
+                    style={{ borderColor: 'var(--color-border)', minHeight: '130px' }}
+                  >
+                    <Plus className="h-5 w-5 mb-1 group-hover:scale-110 transition" style={{ color: 'var(--color-text-secondary)' }} />
+                    <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('noMealsPlannedYet', 'Empty slot')}
+                    </span>
+                  </div>
+                ) : (
+                  dayMeals.map((meal) => (
+                    <div
+                      key={meal.id}
+                      className="p-2.5 rounded-2xl border transition group relative shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span 
+                          className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          {meal.mealType}
+                        </span>
+
+                        <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition">
                           <button
                             type="button"
-                            onClick={(e) => handleDeleteMeal(e, meal.id)}
-                            className="text-red-400 hover:text-red-300 opacity-60 hover:opacity-100 transition cursor-pointer p-0.5"
-                            title="Delete Meal"
+                            onClick={() => openEditMealModal(meal)}
+                            className="p-1 rounded-md hover:bg-black/10 cursor-pointer"
+                            title={t('editMealBtn', 'Edit')}
+                            style={{ color: 'var(--color-text-secondary)' }}
+                          >
+                            <Edit2 className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMeal(meal.id)}
+                            className="p-1 rounded-md hover:bg-red-500/20 text-red-500 cursor-pointer"
+                            title={t('deleteMealBtn', 'Delete')}
                           >
                             <Trash2 className="h-3 w-3" />
                           </button>
                         </div>
-
-                        <h4 className="font-bold text-xs leading-snug line-clamp-2" style={{ color: 'var(--color-text)' }}>
-                          {meal.recipeName}
-                        </h4>
-
-                        <div className="flex items-center justify-between text-[10px] opacity-75 font-mono pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                          <span>{meal.time || '19:00'}</span>
-                          <span>{(meal.prepTimeMinutes || 15) + (meal.cookTimeMinutes || 25)}m</span>
-                        </div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
 
-              {/* Add Meal Button for Day */}
-              <button
-                type="button"
-                onClick={() => handleOpenAddModal(day.dateKey, 'Dinner')}
-                className="w-full py-2 rounded-xl border text-[11px] font-bold transition flex items-center justify-center gap-1.5 cursor-pointer hover:bg-slate-800/30"
-                style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>{t('addMealBtn', 'Add Meal')}</span>
-              </button>
+                      <div className="text-xs font-bold line-clamp-2 leading-tight" style={{ color: 'var(--color-text)' }}>
+                        {meal.recipeName}
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          <span>{meal.time}</span>
+                        </div>
+                        {meal.isLeftover && (
+                          <span 
+                            className="px-1.5 py-0.5 rounded text-[9px] font-bold"
+                            style={{ backgroundColor: 'var(--color-card)', color: '#f59e0b' }}
+                          >
+                            {t('leftoverBadge', 'Leftover')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           );
         })}
       </div>
 
-      {/* SCHEDULE MEAL MODAL (Autofill Safe Accessible Container) */}
+      {/* ACCESSIBLE MODAL: ADD MEAL (FORMLESS DIV CONTAINER - Constraint 9) */}
       {showAddModal && (
         <div 
-          onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          role="dialog" 
+          aria-modal="true" 
+          aria-label={t('addMealTitle', 'Schedule a Meal')}
+          data-lpignore="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"
         >
           <div 
-            onClick={(e) => e.stopPropagation()}
-            role="region"
-            data-lpignore="true"
-            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            className="w-full max-w-lg rounded-3xl p-6 shadow-2xl border space-y-4 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
           >
-            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-                {t('addMealModalTitle', 'Schedule Meal')}
-              </h3>
-              <button type="button" onClick={() => setShowAddModal(false)} className="p-1 rounded-lg">
-                <X className="h-4 w-4" />
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                  <Plus className="h-4 w-4" /> {t('addMealTitle', 'Schedule a Meal')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('forDate', 'For')}: <span className="font-bold">{selectedDateKey}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="p-1 rounded-full hover:opacity-75 transition cursor-pointer"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="space-y-3.5">
-              {/* Select from Saved Recipes Action */}
-              <button
-                type="button"
-                onClick={() => setShowRecipePicker(true)}
-                className="w-full py-2.5 px-3 rounded-xl border font-bold text-xs flex items-center justify-between cursor-pointer hover:opacity-80 transition"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
-              >
-                <span className="flex items-center gap-2">
-                  <BookOpen className="h-4 w-4" />
-                  {selectedRecipeForModal ? selectedRecipeForModal.title : t('selectFromSaved', 'Select from Saved Recipes')}
-                </span>
-                <ArrowRight className="h-4 w-4" />
-              </button>
+            {/* Accessible Div Form Fields */}
+            <div className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('mealSlotLabel', 'Meal Slot *')}
+                </label>
+                <select
+                  value={inputMealType}
+                  onChange={(e) => setInputMealType(e.target.value)}
+                  className="w-full border rounded-xl px-3 py-2.5 outline-none font-bold cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  {MEAL_TYPES.map(type => (
+                    <option key={type} value={type} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div>
-                <label className="block font-bold mb-1 opacity-80">{t('dishTitleLabel', 'Dish / Recipe Title *')}</label>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('selectFromSavedRecipes', 'Select from Saved Recipes')}
+                </label>
+                <select
+                  value={inputRecipeId}
+                  onChange={(e) => {
+                    setInputRecipeId(e.target.value);
+                    const chosen = savedRecipes.find(r => r.id === e.target.value);
+                    if (chosen) setInputCustomName(chosen.title || chosen.name || '');
+                  }}
+                  className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <option value="">{t('orCustomDishBelow', '-- Or enter custom dish below --')}</option>
+                  {savedRecipes.map(r => (
+                    <option key={r.id} value={r.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {r.title || r.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('customDishName', 'Dish / Recipe Name *')}
+                </label>
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
-                  placeholder={t('dishTitlePlaceholder', 'e.g. Grilled Salmon with Asparagus')}
-                  value={modalDishTitle}
-                  onChange={(e) => setModalDishTitle(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-medium"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  placeholder={t('dishNamePlaceholder', 'e.g. Avocado Toast or Protein Shake')}
+                  value={inputCustomName}
+                  onChange={(e) => setInputCustomName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveAddMeal();
+                    }
+                  }}
+                  className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1 opacity-80">{t('mealDateLabel', 'Scheduled Date')}</label>
-                  <input
-                    type="date"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    value={modalDate}
-                    onChange={(e) => setModalDate(e.target.value)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1 opacity-80">{t('mealSlotLabel', 'Meal Slot')}</label>
-                  <select
-                    value={modalMealType}
-                    onChange={(e) => setModalMealType(e.target.value)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  >
-                    {MEAL_SLOTS.map(s => (
-                      <option key={s} value={s}>{t(`slot${s}`, s)}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1 opacity-80">{t('mealTimeLabel', 'Time (Optional)')}</label>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('mealTimeLabel', 'Time')}
+                  </label>
                   <input
                     type="time"
                     autoComplete="off"
                     data-lpignore="true"
-                    value={modalTime}
-                    onChange={(e) => setModalTime(e.target.value)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                    data-form-type="other"
+                    value={inputTime}
+                    onChange={(e) => setInputTime(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
                   />
                 </div>
-
                 <div>
-                  <label className="block font-bold mb-1 opacity-80">{t('servingsLabel', 'Servings')}</label>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('servingsLabel', 'Servings')}
+                  </label>
                   <input
                     type="number"
                     min="1"
+                    max="20"
                     autoComplete="off"
                     data-lpignore="true"
-                    value={modalServings}
-                    onChange={(e) => setModalServings(parseInt(e.target.value) || 1)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                    data-form-type="other"
+                    value={inputServings}
+                    onChange={(e) => setInputServings(Math.max(1, Number(e.target.value)))}
+                    className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1 opacity-80">{t('notesLabel', 'Cooking Notes (Optional)')}</label>
-                <textarea
-                  rows={2}
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('notesLabel', 'Notes')}
+                </label>
+                <input
+                  type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
-                  value={modalNotes}
-                  onChange={(e) => setModalNotes(e.target.value)}
-                  placeholder="e.g. Defrost chicken overnight..."
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none resize-none font-medium"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  placeholder={t('notesPlaceholder', 'e.g. Prep chicken in the morning')}
+                  value={inputNotes}
+                  onChange={(e) => setInputNotes(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveAddMeal();
+                    }
+                  }}
+                  className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
                 />
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 border rounded-xl font-bold transition cursor-pointer hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  {t('cancelBtn', 'Cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmScheduleMeal}
-                  disabled={!modalDishTitle.trim()}
-                  className="px-5 py-2 text-white font-bold rounded-xl transition shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  {t('confirmScheduleBtn', 'Confirm Schedule')}
-                </button>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="add-leftover-check"
+                  checked={inputIsLeftover}
+                  onChange={(e) => setInputIsLeftover(e.target.checked)}
+                  className="w-4 h-4 rounded cursor-pointer"
+                />
+                <label htmlFor="add-leftover-check" className="font-semibold cursor-pointer" style={{ color: 'var(--color-text)' }}>
+                  {t('markAsLeftover', 'Mark dish as leftover from previous meal')}
+                </label>
               </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-80"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {t('cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAddMeal}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-md transition cursor-pointer hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('scheduleMealBtn', 'Schedule Meal')}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* SAVED RECIPE PICKER MODAL */}
-      {showRecipePicker && (
+      {/* ACCESSIBLE MODAL: EDIT MEAL (FORMLESS DIV CONTAINER - Constraint 9) */}
+      {showEditModal && editingMeal && (
         <div 
-          onClick={() => setShowRecipePicker(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          role="dialog" 
+          aria-modal="true" 
+          aria-label={t('editMealTitle', 'Edit Meal Schedule')}
+          data-lpignore="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"
         >
           <div 
-            onClick={(e) => e.stopPropagation()}
-            role="region"
-            data-lpignore="true"
-            className="border rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative p-5 space-y-3 cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            className="w-full max-w-lg rounded-3xl p-6 shadow-2xl border space-y-4 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
           >
-            <div className="flex justify-between items-center border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-                {t('selectFromSaved', 'Select from Saved Recipes')}
-              </h3>
-              <button type="button" onClick={() => setShowRecipePicker(false)} className="p-1 rounded-lg">
-                <X className="h-4 w-4" />
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                  <Edit2 className="h-4 w-4" /> {t('editMealTitle', 'Edit Meal Schedule')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {editingMeal.date} • {editingMeal.mealType}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="p-1 rounded-full hover:opacity-75 transition cursor-pointer"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="relative">
-              <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none opacity-60" />
-              <input
-                type="text"
-                autoComplete="off"
-                data-lpignore="true"
-                data-form-type="other"
-                placeholder={t('searchSavedRecipesModal', 'Search your recipe collection...')}
-                value={recipeSearchQuery}
-                onChange={(e) => setRecipeSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
+            {/* Formless Edit Fields */}
+            <div className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('mealSlotLabel', 'Meal Slot *')}
+                </label>
+                <select
+                  value={inputMealType}
+                  onChange={(e) => setInputMealType(e.target.value)}
+                  className="w-full border rounded-xl px-3 py-2.5 outline-none font-bold cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  {MEAL_TYPES.map(type => (
+                    <option key={type} value={type} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('dishNameLabel', 'Dish / Recipe Name *')}
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-form-type="other"
+                  value={inputCustomName}
+                  onChange={(e) => setInputCustomName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveEditMeal();
+                    }
+                  }}
+                  className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('mealTimeLabel', 'Time')}
+                  </label>
+                  <input
+                    type="time"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    value={inputTime}
+                    onChange={(e) => setInputTime(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('servingsLabel', 'Servings')}
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    value={inputServings}
+                    onChange={(e) => setInputServings(Math.max(1, Number(e.target.value)))}
+                    className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('notesLabel', 'Notes')}
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-form-type="other"
+                  value={inputNotes}
+                  onChange={(e) => setInputNotes(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveEditMeal();
+                    }
+                  }}
+                  className="w-full border rounded-xl px-3 py-2.5 outline-none font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="edit-leftover-check"
+                  checked={inputIsLeftover}
+                  onChange={(e) => setInputIsLeftover(e.target.checked)}
+                  className="w-4 h-4 rounded cursor-pointer"
+                />
+                <label htmlFor="edit-leftover-check" className="font-semibold cursor-pointer" style={{ color: 'var(--color-text)' }}>
+                  {t('markAsLeftover', 'Mark dish as leftover from previous meal')}
+                </label>
+              </div>
             </div>
 
-            <div className="overflow-y-auto flex-1 space-y-2 pr-1 custom-scrollbar max-h-80">
-              {filteredPickerRecipes.length === 0 ? (
-                <div className="py-8 text-center text-xs opacity-50">
-                  No recipes found.
-                </div>
-              ) : (
-                filteredPickerRecipes.map(recipe => (
-                  <div
-                    key={recipe.id}
-                    onClick={() => {
-                      setSelectedRecipeForModal(recipe);
-                      setModalDishTitle(recipe.title || recipe.name);
-                      setModalServings(Number(recipe.servings || 4));
-                      setShowRecipePicker(false);
-                    }}
-                    className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <img 
-                        src={recipe.imageUrl || recipe.image || '/uploads/recipes/default.jpg'} 
-                        alt={recipe.title} 
-                        className="w-10 h-10 rounded-lg object-cover border shrink-0" 
-                        style={{ borderColor: 'var(--color-border)' }} 
-                      />
-                      <div className="min-w-0">
-                        <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
-                        <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
-                      </div>
-                    </div>
-                    <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
-                  </div>
-                ))
-              )}
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-80"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {t('cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditMeal}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-md transition cursor-pointer hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('saveChangesBtn', 'Save Changes')}
+              </button>
             </div>
           </div>
         </div>
@@ -7760,6 +8226,16 @@ export default function ChefChatPage() {
       />
     </div>
   );
+}
+
+```
+
+## File: `apps/web/src/app/recipe/page.tsx`
+```typescript
+import { redirect } from 'next/navigation';
+
+export default function RedirectToRecipes() {
+  redirect('/recipes');
 }
 
 ```
@@ -33342,7 +33818,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Saved Recipes */}
         <Link 
-          href="/saved" 
+          href="/recipes" 
           className="p-5 rounded-2xl block border transition shadow-sm group hover:scale-[1.01]"
           style={{
             backgroundColor: cCardBg,
@@ -41940,33 +42416,64 @@ import { getRecipeImageDir } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
+function getMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.webp': return 'image/webp';
+    case '.png': return 'image/png';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    case '.gif': return 'image/gif';
+    case '.svg': return 'image/svg+xml';
+    case '.avif': return 'image/avif';
+    default: return 'image/jpeg';
+  }
+}
+
 export async function GET(
-  req: NextRequest,
-  context: { params: Promise<{ filename: string }> }
+  req: NextRequest, 
+  { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
-    const { filename } = await context.params;
+    const { filename } = await params;
     const safeName = path.basename(filename);
     const primaryPath = path.join(getRecipeImageDir(), safeName);
 
     let foundPath = fs.existsSync(primaryPath) ? primaryPath : null;
 
     if (!foundPath) {
-      const fallback = path.join(process.cwd(), 'public', 'recipes', 'images', safeName);
-      if (fs.existsSync(fallback)) foundPath = fallback;
+      const candidates = [
+        path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images', safeName),
+        path.join(process.cwd(), 'public', 'recipes', 'images', safeName),
+        path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes', safeName),
+        path.join(process.cwd(), 'public', 'uploads', 'recipes', safeName)
+      ];
+      for (const c of candidates) {
+        if (fs.existsSync(c)) {
+          foundPath = c;
+          break;
+        }
+      }
     }
 
     if (foundPath) {
       const buffer = fs.readFileSync(foundPath);
-      let contentType = 'image/jpeg';
-      if (safeName.endsWith('.png')) contentType = 'image/png';
-      else if (safeName.endsWith('.webp')) contentType = 'image/webp';
-      else if (safeName.endsWith('.svg')) contentType = 'image/svg+xml';
-
       return new NextResponse(buffer, {
         headers: {
-          'Content-Type': contentType,
+          'Content-Type': getMimeType(foundPath),
           'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'
+        }
+      });
+    }
+
+    // Default fallback
+    const defaultFallback = path.join(getRecipeImageDir(), 'default.jpg');
+    if (fs.existsSync(defaultFallback)) {
+      const buffer = fs.readFileSync(defaultFallback);
+      return new NextResponse(buffer, {
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'public, max-age=3600'
         }
       });
     }
@@ -44544,204 +45051,213 @@ export async function GET(req: NextRequest, context: { params: Promise<{ provide
 
 ## File: `apps/web/src/app/api/planner/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { query, parseDbRows } from '@/lib/db';
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export const dynamic = 'force-dynamic';
+let queryDb: any = null;
+try {
+  const dbModule = require('@/lib/db');
+  queryDb = dbModule.query || dbModule.default?.query || dbModule.pool?.query;
+} catch (_) {}
 
-async function ensurePlannerTable() {
+const DATA_DIR = path.join(process.cwd(), 'data');
+const MEALS_FILE = path.join(DATA_DIR, 'planned_meals.json');
+
+function ensureDataFile() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(MEALS_FILE)) {
+    fs.writeFileSync(MEALS_FILE, JSON.stringify([], null, 2), 'utf-8');
+  }
+}
+
+async function ensureDatabaseTable() {
+  if (!queryDb) return false;
   try {
-    await query(`
+    await queryDb(`
       CREATE TABLE IF NOT EXISTS planned_meals (
-        id VARCHAR(120) PRIMARY KEY,
-        user_id VARCHAR(100),
-        created_by VARCHAR(255),
-        date VARCHAR(50) NOT NULL DEFAULT '',
-        recipe_id VARCHAR(100),
-        recipe_name VARCHAR(255) NOT NULL DEFAULT 'Untitled Recipe',
-        image TEXT,
-        meal_type VARCHAR(50) DEFAULT 'Dinner',
-        time VARCHAR(20) DEFAULT '',
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        date VARCHAR(32) NOT NULL,
+        meal_type VARCHAR(64) NOT NULL,
+        recipe_id VARCHAR(255),
+        recipe_name VARCHAR(255) NOT NULL,
+        time VARCHAR(32),
+        servings INT DEFAULT 2,
+        notes TEXT,
         is_leftover BOOLEAN DEFAULT FALSE,
-        notes TEXT DEFAULT '',
-        servings INT DEFAULT 4,
-        prep_time_minutes INT DEFAULT 15,
-        cook_time_minutes INT DEFAULT 25,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        calories INT DEFAULT 0,
+        protein INT DEFAULT 0,
+        carbs INT DEFAULT 0,
+        fat INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-
-    const migrations = [
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS date VARCHAR(50) DEFAULT \'\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS recipe_id VARCHAR(100);',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS recipe_name VARCHAR(255) DEFAULT \'Untitled Recipe\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS image TEXT;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS meal_type VARCHAR(50) DEFAULT \'Dinner\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS time VARCHAR(20) DEFAULT \'\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS is_leftover BOOLEAN DEFAULT FALSE;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT \'\';',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS servings INT DEFAULT 4;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS prep_time_minutes INT DEFAULT 15;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS cook_time_minutes INT DEFAULT 25;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;',
-      'ALTER TABLE planned_meals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;'
-    ];
-
-    for (const sql of migrations) {
-      try { await query(sql); } catch (_) {}
-    }
-  } catch (e: any) {
-    console.warn('[planner:ensurePlannerTable] Notice:', e.message);
+    return true;
+  } catch (err) {
+    console.warn('Planner DB table creation notice:', err);
+    return false;
   }
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   try {
-    await ensurePlannerTable();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
-    const email = searchParams.get('email');
+    const userId = searchParams.get('userId') || searchParams.get('email') || 'usr_admin_1';
 
-    let sql = `
-      SELECT 
-        id, 
-        user_id as "userId", 
-        user_id as "user_id",
-        created_by as "createdBy", 
-        created_by as "created_by",
-        date, 
-        recipe_id as "recipeId", 
-        recipe_id as "recipe_id",
-        recipe_name as "recipeName", 
-        recipe_name as "title",
-        image, 
-        image as "imageUrl",
-        image as "image_url",
-        meal_type as "mealType", 
-        meal_type as "meal_type",
-        time, 
-        is_leftover as "isLeftover", 
-        is_leftover as "is_leftover",
-        notes,
-        servings,
-        prep_time_minutes as "prepTimeMinutes",
-        cook_time_minutes as "cookTimeMinutes"
-      FROM planned_meals
-    `;
-    const params: any[] = [];
-
-    if (userId && email) {
-      sql += ` WHERE user_id = $1 OR created_by = $2 OR user_id = 'usr_admin_1' OR user_id IS NULL ORDER BY date ASC, time ASC`;
-      params.push(userId, email);
-    } else if (userId) {
-      sql += ` WHERE user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL ORDER BY date ASC, time ASC`;
-      params.push(userId);
-    } else {
-      sql += ` ORDER BY date ASC, time ASC LIMIT 300`;
+    const dbReady = await ensureDatabaseTable();
+    if (dbReady && queryDb) {
+      try {
+        const rows = await queryDb(
+          'SELECT * FROM planned_meals WHERE user_id = $1 OR user_id = $2 ORDER BY date ASC, time ASC',
+          [userId, 'usr_admin_1']
+        );
+        const list = Array.isArray(rows) ? rows : (rows?.rows || []);
+        const formatted = list.map((r: any) => ({
+          id: r.id,
+          userId: r.user_id,
+          date: r.date,
+          mealType: r.meal_type,
+          recipeId: r.recipe_id,
+          recipeName: r.recipe_name,
+          time: r.time || '12:00',
+          servings: Number(r.servings) || 2,
+          notes: r.notes || '',
+          isLeftover: Boolean(r.is_leftover),
+          calories: Number(r.calories) || 0,
+          protein: Number(r.protein) || 0,
+          carbs: Number(r.carbs) || 0,
+          fat: Number(r.fat) || 0
+        }));
+        return NextResponse.json({ success: true, meals: formatted });
+      } catch (_) {}
     }
 
-    const res = await query(sql, params);
-    const rows = parseDbRows(res);
-    const normalized = rows.map((r: any) => ({
-      ...r,
-      date: (r.date || '').split('T')[0]
-    }));
-    return NextResponse.json({ success: true, meals: normalized });
-  } catch (err: any) {
-    console.warn('[planner:GET] Falling back to empty meals list:', err.message);
-    return NextResponse.json({ success: true, meals: [] });
+    ensureDataFile();
+    const raw = fs.readFileSync(MEALS_FILE, 'utf-8');
+    const all = raw ? JSON.parse(raw) : [];
+    const userMeals = Array.isArray(all) 
+      ? all.filter((m: any) => m.userId === userId || m.user_id === userId || m.userId === 'usr_admin_1')
+      : [];
+    return NextResponse.json({ success: true, meals: userMeals });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    await ensurePlannerTable();
     const body = await req.json();
+    const userId = body.userId || body.user_id || 'usr_admin_1';
+    const mealsToPersist = Array.isArray(body.meals) ? body.meals : (body.meal ? [body.meal] : []);
 
-    let incomingMeals: any[] = [];
-    let isBatchReplace = false;
-    let targetUserId = body.userId || body.user_id || 'usr_admin_1';
-    let targetEmail = body.createdBy || body.created_by || null;
-
-    if (Array.isArray(body)) {
-      incomingMeals = body;
-    } else if (Array.isArray(body.meals)) {
-      incomingMeals = body.meals;
-      isBatchReplace = true;
-    } else if (body && typeof body === 'object') {
-      const single = body.meal || body;
-      if (single.date || single.recipeName || single.title || single.recipeId) {
-        incomingMeals = [single];
+    const dbReady = await ensureDatabaseTable();
+    if (dbReady && queryDb) {
+      try {
+        for (const m of mealsToPersist) {
+          const id = m.id || ('meal_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+          await queryDb(`
+            INSERT INTO planned_meals (
+              id, user_id, date, meal_type, recipe_id, recipe_name, time, servings, notes, is_leftover, calories, protein, carbs, fat, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              date = EXCLUDED.date,
+              meal_type = EXCLUDED.meal_type,
+              recipe_id = EXCLUDED.recipe_id,
+              recipe_name = EXCLUDED.recipe_name,
+              time = EXCLUDED.time,
+              servings = EXCLUDED.servings,
+              notes = EXCLUDED.notes,
+              is_leftover = EXCLUDED.is_leftover,
+              calories = EXCLUDED.calories,
+              protein = EXCLUDED.protein,
+              carbs = EXCLUDED.carbs,
+              fat = EXCLUDED.fat,
+              updated_at = NOW();
+          `, [
+            id,
+            userId,
+            m.date,
+            m.mealType || m.meal_type || 'Dinner',
+            m.recipeId || m.recipe_id || null,
+            m.recipeName || m.recipe_name || 'Chef Special',
+            m.time || '12:00',
+            Number(m.servings) || 2,
+            m.notes || '',
+            Boolean(m.isLeftover || m.is_leftover),
+            Number(m.calories) || 0,
+            Number(m.protein) || 0,
+            Number(m.carbs) || 0,
+            Number(m.fat) || 0
+          ]);
+        }
+      } catch (dbErr) {
+        console.warn('Planner DB upsert notice:', dbErr);
       }
     }
 
-    if (incomingMeals.length === 0) {
-      return NextResponse.json({ success: true, count: 0, message: 'No meals to record' });
-    }
+    ensureDataFile();
+    const raw = fs.readFileSync(MEALS_FILE, 'utf-8');
+    let all = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(all)) all = [];
 
-    for (const meal of incomingMeals) {
-      const id = meal.id || ('plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
-      const rawDate = meal.date || new Date().toISOString().split('T')[0];
-      const date = String(rawDate).split('T')[0];
-      const recipeName = meal.recipeName || meal.recipeTitle || meal.title || meal.name || 'Untitled Recipe';
-      const recipeId = meal.recipeId || meal.recipe_id || null;
-      const image = meal.image || meal.imageUrl || meal.image_url || null;
-      const mealType = meal.mealType || meal.meal_type || 'Dinner';
-      const time = meal.time || '';
-      const isLeftover = Boolean(meal.isLeftover || meal.is_leftover);
-      const notes = meal.notes || meal.note || '';
-      const userId = meal.userId || meal.user_id || targetUserId || 'usr_admin_1';
-      const createdBy = meal.createdBy || meal.created_by || targetEmail || userId;
-      const servings = parseInt(meal.servings) || 4;
-      const prepTime = parseInt(meal.prepTimeMinutes || meal.prep_time) || 15;
-      const cookTime = parseInt(meal.cookTimeMinutes || meal.cook_time) || 25;
+    mealsToPersist.forEach((newM: any) => {
+      const idx = all.findIndex((ex: any) => ex.id === newM.id);
+      if (idx >= 0) {
+        all[idx] = { ...all[idx], ...newM, userId };
+      } else {
+        all.push({ ...newM, userId });
+      }
+    });
 
-      await query(
-        `INSERT INTO planned_meals (
-           id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, servings, prep_time_minutes, cook_time_minutes, updated_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
-         ON CONFLICT (id) DO UPDATE SET
-           date = EXCLUDED.date,
-           recipe_id = EXCLUDED.recipe_id,
-           recipe_name = EXCLUDED.recipe_name,
-           image = EXCLUDED.image,
-           meal_type = EXCLUDED.meal_type,
-           time = EXCLUDED.time,
-           is_leftover = EXCLUDED.is_leftover,
-           notes = EXCLUDED.notes,
-           servings = EXCLUDED.servings,
-           prep_time_minutes = EXCLUDED.prep_time_minutes,
-           cook_time_minutes = EXCLUDED.cook_time_minutes,
-           updated_at = CURRENT_TIMESTAMP`,
-        [id, userId, createdBy, date, recipeId, recipeName, image, mealType, time, isLeftover, notes, servings, prepTime, cookTime]
-      );
-    }
-
-    return NextResponse.json({ success: true, count: incomingMeals.length });
-  } catch (err: any) {
-    console.error('[planner:POST] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    fs.writeFileSync(MEALS_FILE, JSON.stringify(all, null, 2), 'utf-8');
+    return NextResponse.json({ success: true, count: mealsToPersist.length });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-export async function DELETE(req: NextRequest) {
+export async function DELETE(req: Request) {
   try {
-    await ensurePlannerTable();
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
+    const mealId = searchParams.get('id');
+    const date = searchParams.get('date');
+    const clearAll = searchParams.get('clearAll') === 'true';
+    const userId = searchParams.get('userId') || 'usr_admin_1';
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Meal ID is required' }, { status: 400 });
+    const dbReady = await ensureDatabaseTable();
+    if (dbReady && queryDb) {
+      try {
+        if (clearAll) {
+          await queryDb('DELETE FROM planned_meals WHERE user_id = $1', [userId]);
+        } else if (mealId) {
+          await queryDb('DELETE FROM planned_meals WHERE id = $1', [mealId]);
+        } else if (date) {
+          await queryDb('DELETE FROM planned_meals WHERE user_id = $1 AND date = $2', [userId, date]);
+        }
+      } catch (_) {}
     }
 
-    await query('DELETE FROM planned_meals WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, id });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    ensureDataFile();
+    const raw = fs.readFileSync(MEALS_FILE, 'utf-8');
+    let all = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(all)) {
+      if (clearAll) {
+        all = all.filter((m: any) => m.userId !== userId && m.user_id !== userId);
+      } else if (mealId) {
+        all = all.filter((m: any) => m.id !== mealId);
+      } else if (date) {
+        all = all.filter((m: any) => !((m.userId === userId || m.user_id === userId) && m.date === date));
+      }
+      fs.writeFileSync(MEALS_FILE, JSON.stringify(all, null, 2), 'utf-8');
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -49541,84 +50057,65 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/storage/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+// @ts-nocheck
+import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-export const dynamic = 'force-dynamic';
-
-async function ensureStorageColumns() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await query('ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS storage_settings JSONB DEFAULT \'{}\'::jsonb;');
-    await query('ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS storage JSONB DEFAULT \'{}\'::jsonb;');
-  } catch (_) {}
+function getSettingsPath() {
+  const dataDir = path.join(process.cwd(), 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  return path.join(dataDir, 'admin_settings.json');
 }
 
 export async function GET() {
   try {
-    await ensureStorageColumns();
-    const res = await query('SELECT storage_settings, storage FROM admin_settings WHERE id = $1 LIMIT 1;', ['primary_settings']);
-    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
-
-    let storage = {
+    let settings = {
       provider: 'localhost',
-      localPath: '/recipes/images/',
-      recipesJsonDir: '/recipes/',
-      supabase: {
-        enabled: true,
-        endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
-        bucket: 'recipes',
-        region: 'us-west-1'
-      }
+      uploadDir: 'apps/web/public/recipes/images',
+      recipesJsonDir: 'apps/web/public/recipes',
+      publicPrefix: '/recipes/images',
+      cdnUrl: ''
     };
 
-    if (row && (row.storage_settings || row.storage)) {
-      const raw = row.storage_settings || row.storage;
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      storage = { ...storage, ...parsed };
-    } else {
-      // Fallback to server JSON store
-      const jsonPath = path.join(process.cwd(), 'data', 'admin_settings.json');
-      if (fs.existsSync(jsonPath)) {
-        try {
-          const fileData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-          if (fileData.storage_settings || fileData.storage) {
-            storage = { ...storage, ...(fileData.storage_settings || fileData.storage) };
-          }
-        } catch (_) {}
+    // 1. Try PostgreSQL
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        const res = await query("SELECT storage_settings FROM admin_settings WHERE id = 'primary_settings' LIMIT 1");
+        if (res?.rows?.[0]?.storage_settings) {
+          const parsed = typeof res.rows[0].storage_settings === 'string'
+            ? JSON.parse(res.rows[0].storage_settings)
+            : res.rows[0].storage_settings;
+          settings = { ...settings, ...parsed };
+          return NextResponse.json({ success: true, storage_settings: settings });
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fallback to Local JSON
+    const p = getSettingsPath();
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf-8');
+      const data = JSON.parse(raw);
+      if (data?.storage_settings) {
+        settings = { ...settings, ...data.storage_settings };
       }
     }
 
-    return NextResponse.json({ success: true, storage, settings: storage });
+    return NextResponse.json({ success: true, storage_settings: settings });
   } catch (err: any) {
-    return NextResponse.json({ success: true, storage: { provider: 'localhost' } });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    await ensureStorageColumns();
-    const body = await req.json();
-    const payload = body.storage || body.settings || body;
-
-    await query(`
-      INSERT INTO admin_settings (id, storage_settings, updated_at)
-      VALUES ('primary_settings', $1::jsonb, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        storage_settings = EXCLUDED.storage_settings,
-        updated_at = NOW();
-    `, [JSON.stringify(payload)]);
-
-    return NextResponse.json({ success: true, storage: payload });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ 
+      success: true, 
+      storage_settings: {
+        provider: 'localhost',
+        uploadDir: 'apps/web/public/recipes/images',
+        recipesJsonDir: 'apps/web/public/recipes',
+        publicPrefix: '/recipes/images'
+      } 
+    });
   }
 }
 
@@ -52128,12 +52625,22 @@ async function ensureTable() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS user_sidebar_settings (
-        user_id TEXT PRIMARY KEY,
-        sections JSONB NOT NULL DEFAULT '{"create": true, "manage": true, "plan": true, "admin": true}'::jsonb,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        user_id VARCHAR(255) PRIMARY KEY,
+        sections TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-  } catch (_) {}
+  } catch (_) {
+    try {
+      await query(`
+        CREATE TABLE IF NOT EXISTS user_sidebar_settings (
+          user_id TEXT PRIMARY KEY,
+          sections JSONB NOT NULL DEFAULT '{"create": true, "manage": true, "plan": true, "finance": true, "admin": false}'::jsonb,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+    } catch (_) {}
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -52144,11 +52651,27 @@ export async function GET(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ success: true, sections: null });
     }
-    const rows = await query('SELECT sections FROM user_sidebar_settings WHERE user_id = $1 LIMIT 1;', [userId]);
-    const row = Array.isArray(rows) ? rows[0] : (rows as any)?.rows?.[0];
-    return NextResponse.json({ success: true, sections: row ? row.sections : null });
+    const res = await query('SELECT sections FROM user_sidebar_settings WHERE user_id = $1 LIMIT 1', [userId]);
+    const row = Array.isArray(res) ? res[0] : (res as any)?.rows?.[0];
+    let sections = row ? row.sections : null;
+    if (typeof sections === 'string') {
+      try { sections = JSON.parse(sections); } catch (_) {}
+    }
+    return NextResponse.json({ success: true, sections });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    try {
+      const { searchParams } = new URL(req.url);
+      const userId = searchParams.get('userId') || searchParams.get('email');
+      const res = await query('SELECT sections FROM user_sidebar_settings WHERE user_id = ? LIMIT 1', [userId]);
+      const row = Array.isArray(res) ? res[0] : (res as any)?.rows?.[0];
+      let sections = row ? row.sections : null;
+      if (typeof sections === 'string') {
+        try { sections = JSON.parse(sections); } catch (_) {}
+      }
+      return NextResponse.json({ success: true, sections });
+    } catch (e: any) {
+      return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    }
   }
 }
 
@@ -52161,13 +52684,25 @@ export async function POST(req: NextRequest) {
     if (!userId || !sections) {
       return NextResponse.json({ success: false, error: 'userId and sections are required' }, { status: 400 });
     }
-    await query(`
-      INSERT INTO user_sidebar_settings (user_id, sections, updated_at)
-      VALUES ($1, $2::jsonb, NOW())
-      ON CONFLICT (user_id) DO UPDATE SET
-        sections = EXCLUDED.sections,
-        updated_at = NOW();
-    `, [userId, JSON.stringify(sections)]);
+    const sectionsStr = JSON.stringify(sections);
+    
+    try {
+      await query(`
+        INSERT INTO user_sidebar_settings (user_id, sections, updated_at)
+        VALUES ($1, $2::jsonb, NOW())
+        ON CONFLICT (user_id) DO UPDATE SET
+          sections = EXCLUDED.sections,
+          updated_at = NOW();
+      `, [userId, sectionsStr]);
+    } catch (_) {
+      await query(`
+        INSERT INTO user_sidebar_settings (user_id, sections, updated_at)
+        VALUES (?, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+          sections = VALUES(sections),
+          updated_at = NOW();
+      `, [userId, sectionsStr]);
+    }
 
     return NextResponse.json({ success: true, message: 'Sidebar preferences saved' });
   } catch (err: any) {
@@ -54996,7 +55531,7 @@ import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
 import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 import { scrapeRecipeFromUrl } from '@/lib/recipeScraper';
-import { downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
+import { downloadAndSaveImage, downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
 
 export const dynamic = 'force-dynamic';
 
@@ -55851,133 +56386,163 @@ export async function GET(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/templates/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+// @ts-nocheck
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+function getTemplatesFilePath() {
+  const dataDir = path.join(process.cwd(), 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  return path.join(dataDir, 'meal_templates.json');
+}
 
-async function ensureTable() {
+function readLocalTemplates(): any[] {
   try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS meal_templates (
-        id VARCHAR(128) PRIMARY KEY,
-        user_id VARCHAR(100),
-        created_by VARCHAR(255),
-        title VARCHAR(255) NOT NULL,
-        description TEXT DEFAULT '',
-        category VARCHAR(100) DEFAULT 'General',
-        total_days INT DEFAULT 7,
-        meals JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_meal_templates_user ON meal_templates(user_id);
-    `);
+    const p = getTemplatesFilePath();
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf-8');
+      return JSON.parse(raw) || [];
+    }
+  } catch (_) {}
+  return [];
+}
+
+function writeLocalTemplates(items: any[]) {
+  try {
+    const p = getTemplatesFilePath();
+    fs.writeFileSync(p, JSON.stringify(items, null, 2), 'utf-8');
   } catch (_) {}
 }
 
-export async function GET(req: NextRequest) {
-  await ensureTable();
+export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId')?.trim() || '';
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId') || '';
 
-    let sql = 'SELECT * FROM meal_templates';
-    const params: any[] = [];
+    // 1. Try PostgreSQL if pool configured
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query(`
+          CREATE TABLE IF NOT EXISTS meal_templates (
+            id VARCHAR(120) PRIMARY KEY,
+            user_id VARCHAR(120) NOT NULL,
+            created_by VARCHAR(255),
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            category VARCHAR(120) DEFAULT 'General',
+            total_days INT DEFAULT 7,
+            meals JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_meal_templates_user ON meal_templates(user_id);
+        `);
 
-    if (userId) {
-      params.push(userId);
-      sql += ' WHERE user_id = $1 OR created_by = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
-    }
+        const sql = userId
+          ? 'SELECT * FROM meal_templates WHERE user_id = $1 ORDER BY created_at DESC'
+          : 'SELECT * FROM meal_templates ORDER BY created_at DESC';
+        const params = userId ? [userId] : [];
+        const result = await query(sql, params);
 
-    sql += ' ORDER BY created_at DESC';
+        if (result && Array.isArray(result.rows)) {
+          const templates = result.rows.map(r => ({
+            id: r.id,
+            userId: r.user_id,
+            createdBy: r.created_by,
+            title: r.title,
+            description: r.description,
+            category: r.category,
+            totalDays: r.total_days || 7,
+            meals: typeof r.meals === 'string' ? JSON.parse(r.meals) : (r.meals || [])
+          }));
+          return NextResponse.json({ success: true, templates });
+        }
+      }
+    } catch (_) {}
 
-    const rows: any = await query(sql, params);
-    const rawItems = Array.isArray(rows) ? rows : (rows?.rows || []);
-
-    const formatted = rawItems.map((r: any) => ({
-      id: r.id,
-      userId: r.user_id || 'usr_admin_1',
-      createdBy: r.created_by || '',
-      title: r.title,
-      description: r.description || '',
-      category: r.category || 'General',
-      totalDays: Number(r.total_days || 7),
-      meals: Array.isArray(r.meals) ? r.meals : (typeof r.meals === 'string' ? JSON.parse(r.meals) : []),
-      createdAt: r.created_at || new Date().toISOString()
-    }));
-
-    return NextResponse.json(
-      { success: true, templates: formatted },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    // 2. Fallback to Local JSON store
+    const all = readLocalTemplates();
+    const filtered = userId ? all.filter(t => !t.userId || t.userId === userId) : all;
+    return NextResponse.json({ success: true, templates: filtered });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message, templates: [] }, { status: 500 });
+    return NextResponse.json({ success: false, templates: [], error: err.message }, { status: 200 });
   }
 }
 
-export async function POST(req: NextRequest) {
-  await ensureTable();
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const targetUserId = body.userId || body.user_id || 'usr_admin_1';
-    const userEmail = body.createdBy || body.created_by || 'admin@zecratary.com';
+    const body = await request.json().catch(() => ({}));
+    const { userId, createdBy, templates } = body;
 
-    const items = Array.isArray(body) ? body : (body.templates || [body.template || body]);
-
-    for (const t of items) {
-      if (!t || !t.title) continue;
-      const tId = t.id || ('tpl_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6));
-
-      await query(`
-        INSERT INTO meal_templates (
-          id, user_id, created_by, title, description, category, total_days, meals, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          category = EXCLUDED.category,
-          total_days = EXCLUDED.total_days,
-          meals = EXCLUDED.meals,
-          updated_at = NOW();
-      `, [
-        tId,
-        targetUserId,
-        userEmail,
-        t.title.trim(),
-        t.description || '',
-        t.category || 'General',
-        Number(t.totalDays || 7),
-        JSON.stringify(Array.isArray(t.meals) ? t.meals : [])
-      ]);
+    if (!Array.isArray(templates)) {
+      return NextResponse.json({ success: false, error: 'Templates array required' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, message: 'Meal template(s) saved in PostgreSQL.' });
+    // 1. Try PostgreSQL persistence
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function' && userId) {
+        await query('DELETE FROM meal_templates WHERE user_id = $1', [userId]);
+        for (const t of templates) {
+          await query(`
+            INSERT INTO meal_templates (id, user_id, created_by, title, description, category, total_days, meals, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+              title = EXCLUDED.title,
+              description = EXCLUDED.description,
+              category = EXCLUDED.category,
+              total_days = EXCLUDED.total_days,
+              meals = EXCLUDED.meals,
+              updated_at = CURRENT_TIMESTAMP
+          `, [
+            t.id,
+            userId,
+            createdBy || userId,
+            t.title,
+            t.description || '',
+            t.category || 'General',
+            Number(t.totalDays || 7),
+            JSON.stringify(t.meals || [])
+          ]);
+        }
+      }
+    } catch (_) {}
+
+    // 2. Update local fallback JSON
+    const existing = readLocalTemplates();
+    const retained = userId ? existing.filter(i => i.userId && i.userId !== userId) : [];
+    writeLocalTemplates([...retained, ...templates]);
+
+    return NextResponse.json({ success: true, count: templates.length });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function DELETE(req: NextRequest) {
-  await ensureTable();
+export async function DELETE(request: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
 
     if (!id) {
-      try {
-        const body = await req.json();
-        id = body?.id || id;
-      } catch (_) {}
+      return NextResponse.json({ success: false, error: 'Template ID required' }, { status: 400 });
     }
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Template ID is required' }, { status: 400 });
-    }
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query('DELETE FROM meal_templates WHERE id = $1', [id]);
+      }
+    } catch (_) {}
 
-    await query('DELETE FROM meal_templates WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Template deleted from PostgreSQL.' });
+    const existing = readLocalTemplates();
+    writeLocalTemplates(existing.filter(t => t.id !== id));
+
+    return NextResponse.json({ success: true, id });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -56916,27 +57481,34 @@ export async function GET(req: NextRequest) {
 
 ## File: `apps/web/src/app/templates/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  LayoutTemplate, Search, Plus, Trash2, Edit3, CalendarPlus, 
-  Sparkles, Clock, Users, ArrowRight, Check, X, BookOpen, 
-  RefreshCw, CheckCircle2, AlertCircle, Utensils, Calendar,
-  ChevronRight, Layers, Bookmark
+  Search, Plus, Trash2, Edit3, CalendarPlus, 
+  Sparkles, Check, X, BookOpen, RefreshCw, 
+  CheckCircle2, AlertCircle, ChevronRight,
+  Clock, Flame, Users, ExternalLink, ChefHat,
+  Eye, HardDrive, Type, Minus
 } from 'lucide-react';
-import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { getCurrentUser, User, initAuthStorage, setCurrentUser } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-interface TemplateMeal {
-  title?: string;
+interface StorageSettings {
+  provider?: string;
+  uploadDir?: string;
+  recipesJsonDir?: string;
+  publicPrefix?: string;
+  cdnUrl?: string;
+}
 
+interface TemplateMeal {
   id: string;
-  dayIndex: number; // 0 to 6 (Monday to Sunday)
-  mealType: string; // Breakfast | Lunch | Dinner | Snack
+  dayIndex: number;
+  mealType: string;
   recipeId?: string;
   recipeName: string;
   image?: string;
@@ -56946,7 +57518,8 @@ interface TemplateMeal {
   prepMinutes?: number;
   cookMinutes?: number;
   notes?: string;
-  [key: string]: any;
+  ingredients?: any[];
+  instructions?: any[];
 }
 
 interface MealTemplate {
@@ -56973,9 +57546,74 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
     category: 'High-Protein',
     totalDays: 7,
     meals: [
-      { id: 'm_1_0', dayIndex: 0, mealType: 'Dinner', recipeName: 'Garlic Butter Chicken Breast', prepMinutes: 15, cookMinutes: 20, servings: 2 },
-      { id: 'm_1_1', dayIndex: 1, mealType: 'Dinner', recipeName: 'Grilled Salmon with Asparagus', prepMinutes: 10, cookMinutes: 15, servings: 2 },
-      { id: 'm_1_2', dayIndex: 2, mealType: 'Dinner', recipeName: 'Lean Beef & Broccoli Stir-Fry', prepMinutes: 15, cookMinutes: 15, servings: 2 }
+      { 
+        id: 'm_1_0', 
+        dayIndex: 0, 
+        mealType: 'Dinner', 
+        recipeName: 'Garlic Butter Chicken Breast', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 15, 
+        cookMinutes: 20, 
+        servings: 2,
+        ingredients: [
+          { name: 'Chicken Breast', amount: 2, unit: 'pieces' },
+          { name: 'Garlic Cloves (minced)', amount: 4, unit: 'cloves' },
+          { name: 'Butter', amount: 2, unit: 'tbsp' },
+          { name: 'Olive Oil', amount: 1, unit: 'tbsp' },
+          { name: 'Fresh Parsley', amount: 1, unit: 'handful' }
+        ],
+        instructions: [
+          'Season chicken breasts generously with salt, pepper, and garlic powder.',
+          'Heat olive oil and 1 tbsp butter in a large skillet over medium-high heat.',
+          'Sear chicken for 6-8 minutes per side until golden brown and cooked through.',
+          'Add remaining butter and minced garlic; baste chicken continuously for 1-2 minutes.',
+          'Garnish with chopped parsley and serve warm.'
+        ]
+      },
+      { 
+        id: 'm_1_1', 
+        dayIndex: 1, 
+        mealType: 'Dinner', 
+        recipeName: 'Grilled Salmon with Asparagus', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 10, 
+        cookMinutes: 15, 
+        servings: 2,
+        ingredients: [
+          { name: 'Salmon Fillets', amount: 2, unit: 'fillets' },
+          { name: 'Fresh Asparagus', amount: 1, unit: 'bunch' },
+          { name: 'Lemon Juice', amount: 2, unit: 'tbsp' },
+          { name: 'Olive Oil', amount: 1, unit: 'tbsp' }
+        ],
+        instructions: [
+          'Preheat grill or grill pan to medium-high heat.',
+          'Toss asparagus with olive oil, salt, and pepper.',
+          'Season salmon with lemon juice, salt, and black pepper.',
+          'Grill salmon and asparagus for 4-5 minutes per side until salmon flakes easily.'
+        ]
+      },
+      { 
+        id: 'm_1_2', 
+        dayIndex: 2, 
+        mealType: 'Dinner', 
+        recipeName: 'Lean Beef & Broccoli Stir-Fry', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 15, 
+        cookMinutes: 15, 
+        servings: 2,
+        ingredients: [
+          { name: 'Flank Steak (sliced thin)', amount: 300, unit: 'g' },
+          { name: 'Broccoli Florets', amount: 2, unit: 'cups' },
+          { name: 'Soy Sauce', amount: 3, unit: 'tbsp' },
+          { name: 'Sesame Oil', amount: 1, unit: 'tsp' }
+        ],
+        instructions: [
+          'Whisk soy sauce, sesame oil, and garlic in a small bowl.',
+          'Stir-fry flank steak in a hot wok for 3-4 minutes until browned.',
+          'Add broccoli florets and 2 tablespoons of water; steam for 3 minutes.',
+          'Pour sauce over mixture and toss until glossy.'
+        ]
+      }
     ]
   },
   {
@@ -56986,8 +57624,49 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
     category: 'Quick & Easy',
     totalDays: 5,
     meals: [
-      { id: 'm_2_0', dayIndex: 0, mealType: 'Dinner', recipeName: 'Creamy Pesto Penne Pasta', prepMinutes: 5, cookMinutes: 15, servings: 4 },
-      { id: 'm_2_1', dayIndex: 1, mealType: 'Dinner', recipeName: 'Quick Thai Basil Tofu Stir-Fry', prepMinutes: 10, cookMinutes: 10, servings: 2 }
+      { 
+        id: 'm_2_0', 
+        dayIndex: 0, 
+        mealType: 'Dinner', 
+        recipeName: 'Creamy Pesto Penne Pasta', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 5, 
+        cookMinutes: 15, 
+        servings: 4,
+        ingredients: [
+          { name: 'Penne Pasta', amount: 400, unit: 'g' },
+          { name: 'Basil Pesto', amount: 1, unit: 'jar' },
+          { name: 'Heavy Cream', amount: 0.5, unit: 'cup' },
+          { name: 'Parmesan Cheese', amount: 0.5, unit: 'cup' }
+        ],
+        instructions: [
+          'Boil penne pasta in salted water until al dente.',
+          'Drain pasta, reserving 1/4 cup of starchy pasta water.',
+          'Stir in basil pesto, heavy cream, and parmesan until velvety.',
+          'Season with freshly cracked pepper.'
+        ]
+      },
+      { 
+        id: 'm_2_1', 
+        dayIndex: 1, 
+        mealType: 'Dinner', 
+        recipeName: 'Quick Thai Basil Tofu Stir-Fry', 
+        imageUrl: '/recipes/images/default.jpg',
+        prepMinutes: 10, 
+        cookMinutes: 10, 
+        servings: 2,
+        ingredients: [
+          { name: 'Firm Tofu (cubed)', amount: 300, unit: 'g' },
+          { name: 'Thai Holy Basil', amount: 1, unit: 'cup' },
+          { name: 'Garlic & Chili Paste', amount: 1, unit: 'tbsp' },
+          { name: 'Soy Sauce', amount: 2, unit: 'tbsp' }
+        ],
+        instructions: [
+          'Pan-fry tofu cubes until golden crisp on all sides.',
+          'Add chili garlic paste and toss quickly.',
+          'Turn off heat, fold in fresh Thai basil leaves, and wilt naturally.'
+        ]
+      }
     ]
   }
 ];
@@ -56995,7 +57674,16 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
 export default function TemplatesPage() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUserState] = useState<User | null>(null);
+  const [authHydrated, setAuthHydrated] = useState<boolean>(false);
+
+  // Storage configuration loaded dynamically from /admin/storage
+  const [storageSettings, setStorageSettings] = useState<StorageSettings>({
+    provider: 'localhost',
+    uploadDir: 'apps/web/public/recipes/images',
+    recipesJsonDir: 'apps/web/public/recipes',
+    publicPrefix: '/recipes/images'
+  });
 
   const [templates, setTemplates] = useState<MealTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -57012,7 +57700,7 @@ export default function TemplatesPage() {
   const [templateCategory, setTemplateCategory] = useState<string>('General');
   const [templateDays, setTemplateDays] = useState<number>(7);
 
-  // Modal 2: Add / Edit Meal in Blueprint Day
+  // Modal 2: Add Meal in Blueprint Day
   const [showMealModal, setShowMealModal] = useState<boolean>(false);
   const [targetDayIndex, setTargetDayIndex] = useState<number>(0);
   const [targetMealType, setTargetMealType] = useState<string>('Dinner');
@@ -57031,12 +57719,62 @@ export default function TemplatesPage() {
   const [showApplyModal, setShowApplyModal] = useState<boolean>(false);
   const [applyStartDate, setApplyStartDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
 
+  // Modal 5: Full Recipe Card Modal (READ-ONLY, WITHOUT EDITING BUTTON)
+  const [showRecipeDetailModal, setShowRecipeDetailModal] = useState<boolean>(false);
+  const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<any | null>(null);
+  const [modalServings, setModalServings] = useState<number>(4);
+  const [modalBaseServings, setModalBaseServings] = useState<number>(4);
+  const [fontSizeScale, setFontSizeScale] = useState<number>(100);
+  const [checkedIngredients, setCheckedIngredients] = useState<Record<string, boolean>>({});
+  const [checkedSteps, setCheckedSteps] = useState<Record<number, boolean>>({});
+
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // 1. Fetch live templates from PostgreSQL /api/templates
+  // Close modals on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowTemplateModal(false);
+        setShowMealModal(false);
+        setShowRecipePicker(false);
+        setShowApplyModal(false);
+        setShowRecipeDetailModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Fetch active storage configuration from /api/admin/storage
+  const loadStorageSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/storage', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.storage_settings) {
+          setStorageSettings(data.storage_settings);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // Resolve recipe image URL based on setting from /admin/storage
+  const resolveRecipeImageUrl = useCallback((img?: string) => {
+    const publicPrefix = storageSettings.publicPrefix || '/recipes/images';
+    if (!img || img === 'default.jpg' || img === '/uploads/recipes/default.jpg' || img === '/recipes/images/default.jpg') {
+      return `${publicPrefix}/default.jpg`;
+    }
+    if (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('data:')) {
+      return img;
+    }
+    const cleanPath = img.replace(/^\/?(recipes\/images\/|uploads\/recipes\/)?/, '');
+    return `${publicPrefix}/${cleanPath}`;
+  }, [storageSettings]);
+
+  // Fetch live templates from /api/templates
   const loadTemplatesData = useCallback(async (user: User | null) => {
     const targetUserId = user?.id || 'usr_admin_1';
     setLoading(true);
@@ -57051,7 +57789,6 @@ export default function TemplatesPage() {
         }
       }
 
-      // Offline localStorage fallback
       if (fetchedTemplates.length === 0 && typeof window !== 'undefined') {
         const raw = localStorage.getItem('zecratary_meal_templates');
         if (raw) {
@@ -57069,7 +57806,6 @@ export default function TemplatesPage() {
         setSelectedTemplateId(fetchedTemplates[0].id);
       }
 
-      // Hydrate Saved Recipes for the Recipe Picker
       try {
         const rRes = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
         if (rRes.ok) {
@@ -57086,22 +57822,43 @@ export default function TemplatesPage() {
     }
   }, [selectedTemplateId]);
 
+  // Robust session resolution & storage hydration
   useEffect(() => {
     document.title = `${t('mealBlueprintsTitle', 'Meal Blueprints')} - Zecratary`;
     initAuthStorage();
-    const user = getCurrentUser();
-    if (!user) {
+    loadStorageSettings();
+
+    let resolvedUser = getCurrentUser();
+
+    if (!resolvedUser && typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)(?:zecratary_session|zecratary_current_user|currentUser)=([^;]+)/);
+      if (match && match[1]) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(match[1]));
+          if (parsed && parsed.email) {
+            resolvedUser = parsed;
+            setCurrentUser(parsed);
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!resolvedUser) {
+      setAuthHydrated(true);
       router.replace('/login');
       return;
     }
-    setCurrentUser(user);
-    loadTemplatesData(user);
+
+    setCurrentUserState(resolvedUser);
+    setAuthHydrated(true);
+    loadTemplatesData(resolvedUser);
 
     const handleSync = () => {
       const active = getCurrentUser();
       if (active) {
-        setCurrentUser(active);
+        setCurrentUserState(active);
         loadTemplatesData(active);
+        loadStorageSettings();
       }
     };
 
@@ -57110,6 +57867,7 @@ export default function TemplatesPage() {
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_storage_updated', loadStorageSettings);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -57117,8 +57875,9 @@ export default function TemplatesPage() {
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_storage_updated', loadStorageSettings);
     };
-  }, [loadTemplatesData, router, t]);
+  }, [loadStorageSettings, loadTemplatesData, router, t]);
 
   const activeTemplate = useMemo(() => {
     return templates.find(tpl => tpl.id === selectedTemplateId) || templates[0] || null;
@@ -57145,7 +57904,58 @@ export default function TemplatesPage() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Create or Update Template
+  // Open Full Recipe Modal without editing controls (Task 2)
+  const handleOpenRecipeModal = (meal: TemplateMeal) => {
+    // 1. Search for matching recipe in savedRecipes
+    const matched = savedRecipes.find(r => 
+      (meal.recipeId && r.id === meal.recipeId) ||
+      (r.title && r.title.toLowerCase() === meal.recipeName.toLowerCase()) ||
+      (r.name && r.name.toLowerCase() === meal.recipeName.toLowerCase())
+    );
+
+    const baseServings = Number(matched?.servings || meal.servings || 4);
+
+    const fullRecipePayload = {
+      id: matched?.id || meal.recipeId || meal.id,
+      title: matched?.title || matched?.name || meal.recipeName,
+      image: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image,
+      imageUrl: matched?.imageUrl || matched?.image || meal.imageUrl || meal.image,
+      category: matched?.category || matched?.recipeType || meal.mealType || 'Main Dish',
+      prepTimeMinutes: matched?.prepTimeMinutes || meal.prepMinutes || 15,
+      cookTimeMinutes: matched?.cookTimeMinutes || meal.cookMinutes || 25,
+      calories: matched?.calories || matched?.nutrition?.calories || 480,
+      servings: baseServings,
+      sourceUrl: matched?.sourceUrl || matched?.source_url || '',
+      ingredients: (matched?.ingredients && matched.ingredients.length > 0)
+        ? matched.ingredients
+        : (meal.ingredients && meal.ingredients.length > 0)
+          ? meal.ingredients
+          : [
+              { name: meal.recipeName, amount: baseServings, unit: 'servings' },
+              { name: 'Olive Oil or Cooking Spray', amount: 1, unit: 'tbsp' },
+              { name: 'Salt & Black Pepper', amount: 1, unit: 'pinch' }
+            ],
+      instructions: (matched?.instructions && matched.instructions.length > 0)
+        ? matched.instructions
+        : (meal.instructions && meal.instructions.length > 0)
+          ? meal.instructions
+          : [
+              `Prepare all fresh ingredients for ${meal.recipeName}.`,
+              `Cook according to preference for approximately ${(meal.prepMinutes || 15) + (meal.cookMinutes || 25)} minutes.`,
+              `Season to taste and serve warm.`
+            ],
+      notes: meal.notes || matched?.notes || ''
+    };
+
+    setSelectedRecipeForModal(fullRecipePayload);
+    setModalServings(baseServings);
+    setModalBaseServings(baseServings);
+    setFontSizeScale(100);
+    setCheckedIngredients({});
+    setCheckedSteps({});
+    setShowRecipeDetailModal(true);
+  };
+
   const handleSaveTemplateModal = async () => {
     if (!templateTitle.trim() || !currentUser) return;
 
@@ -57212,7 +58022,6 @@ export default function TemplatesPage() {
     showToast(t('blueprintDeletedToast', 'Blueprint deleted successfully.'));
   };
 
-  // Add / Edit Meal inside a Blueprint Day
   const handleOpenAddMeal = (dayIdx: number, slot: string = 'Dinner') => {
     setTargetDayIndex(dayIdx);
     setTargetMealType(slot);
@@ -57234,14 +58043,15 @@ export default function TemplatesPage() {
       mealType: targetMealType,
       recipeId: selectedRecipeForMeal?.id || null,
       recipeName: targetDishTitle.trim(),
-      title: targetDishTitle.trim(),
-      image: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/uploads/recipes/default.jpg',
-      imageUrl: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/uploads/recipes/default.jpg',
+      image: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/recipes/images/default.jpg',
+      imageUrl: selectedRecipeForMeal?.imageUrl || selectedRecipeForMeal?.image || '/recipes/images/default.jpg',
       time: targetTime || '19:00',
       servings: Number(targetServings || 4),
       prepMinutes: Number(selectedRecipeForMeal?.prepTimeMinutes || 15),
       cookMinutes: Number(selectedRecipeForMeal?.cookTimeMinutes || 25),
-      notes: targetNotes.trim()
+      notes: targetNotes.trim(),
+      ingredients: selectedRecipeForMeal?.ingredients || [],
+      instructions: selectedRecipeForMeal?.instructions || []
     };
 
     const updatedMeals = [...(activeTemplate.meals || []), newMeal];
@@ -57259,7 +58069,6 @@ export default function TemplatesPage() {
     await persistTemplatesList(updated);
   };
 
-  // Apply Blueprint to Weekly Calendar (/api/planner)
   const handleApplyToCalendar = async () => {
     if (!activeTemplate || !activeTemplate.meals || activeTemplate.meals.length === 0) return;
     const targetUserId = currentUser?.id || 'usr_admin_1';
@@ -57278,10 +58087,10 @@ export default function TemplatesPage() {
         createdBy: currentUser?.email || 'admin@zecratary.com',
         date: dateStr,
         recipeId: meal.recipeId || null,
-        recipeName: meal.recipeName || meal.title || 'Scheduled Dish',
-        title: meal.recipeName || meal.title || 'Scheduled Dish',
-        image: meal.image || meal.imageUrl || '/uploads/recipes/default.jpg',
-        imageUrl: meal.image || meal.imageUrl || '/uploads/recipes/default.jpg',
+        recipeName: meal.recipeName,
+        title: meal.recipeName,
+        image: meal.image || meal.imageUrl || '/recipes/images/default.jpg',
+        imageUrl: meal.image || meal.imageUrl || '/recipes/images/default.jpg',
         mealType: meal.mealType || 'Dinner',
         time: meal.time || '19:00',
         servings: Number(meal.servings || 4),
@@ -57324,12 +58133,32 @@ export default function TemplatesPage() {
     );
   }, [savedRecipes, pickerSearch]);
 
+  if (!authHydrated) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3">
+        <div 
+          className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+          style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
+        />
+        <p className="text-xs opacity-60">{t('authenticatingSession', 'Authenticating session...')}</p>
+      </div>
+    );
+  }
+
   return (
     <div 
-      className="max-w-7xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-templates-canvas"
+      role="region"
+      aria-label={t('mealBlueprintsTitle', 'Meal Blueprints')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)' 
+      }}
     >
-      {/* Toast Alert Banner */}
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -57351,18 +58180,44 @@ export default function TemplatesPage() {
       {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div>
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {t('mealBlueprintsTitle', 'Meal Blueprints')}
-          </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+              {t('mealBlueprintsTitle', 'Meal Blueprints')}
+            </h1>
+            <span 
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] font-mono opacity-80"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              title={`${t('storagePillLabel', 'Storage Directory')}: ${storageSettings.publicPrefix || '/recipes/images'}`}
+            >
+              <HardDrive className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+              <span>{storageSettings.publicPrefix || '/recipes/images'}</span>
+            </span>
+          </div>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             {t('mealBlueprintsSubtitle', 'Create, customize, and apply multi-day meal planning blueprints to your calendar.')}
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
+          <Link
+            href="/dashboard"
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-80"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <span>{t('goToDashboardBtn', 'Go to Dashboard')}</span>
+            <ChevronRight className="h-3.5 w-3.5" />
+          </Link>
+
           <button
             type="button"
-            onClick={() => loadTemplatesData(currentUser)}
+            onClick={() => {
+              loadTemplatesData(currentUser);
+              loadStorageSettings();
+            }}
             disabled={loading}
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
             style={{
@@ -57394,19 +58249,22 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* Main 2-Column Responsive Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: BLUEPRINTS CATALOG (4 Cols) */}
-        <div className="lg:col-span-4 space-y-4">
-          {/* Search Box (Autofill Safe) */}
+      {/* Main Fluid 2-Column Responsive Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-12 gap-6 items-start">
+        {/* LEFT COLUMN: BLUEPRINTS CATALOG */}
+        <div className="lg:col-span-4 xl:col-span-3 space-y-4">
           <div role="region" data-lpignore="true" className="relative">
             <Search className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none opacity-60" />
             <input
               type="text"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               data-form-type="other"
-              spellCheck="false"
               placeholder={t('searchBlueprintsPlaceholder', 'Search blueprints by title or category...')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -57419,7 +58277,6 @@ export default function TemplatesPage() {
             />
           </div>
 
-          {/* Templates Selection List */}
           <div className="space-y-3">
             {filteredTemplates.length === 0 ? (
               <div className="p-8 text-center text-xs opacity-50 border rounded-2xl" style={{ borderColor: 'var(--color-border)' }}>
@@ -57487,14 +58344,19 @@ export default function TemplatesPage() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: BLUEPRINT WORKBENCH CANVAS (8 Cols) */}
-        <div className="lg:col-span-8 space-y-4">
+        {/* RIGHT COLUMN: WORKBENCH CANVAS */}
+        <div className="lg:col-span-8 xl:col-span-9 space-y-4">
           {activeTemplate ? (
             <div 
-              className="border rounded-3xl p-6 space-y-6 shadow-sm transition-colors duration-200"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              role="region"
+              data-lpignore="true"
+              className="w-full max-w-full border rounded-3xl p-6 space-y-6 shadow-sm transition-colors duration-200"
+              style={{ 
+                backgroundColor: 'var(--color-card)', 
+                borderColor: 'var(--color-border)',
+                boxSizing: 'border-box'
+              }}
             >
-              {/* Active Blueprint Banner & Apply Action */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <div className="flex items-center gap-2">
@@ -57525,7 +58387,7 @@ export default function TemplatesPage() {
                 </button>
               </div>
 
-              {/* 7-Day Blueprint Day Cards Breakdown */}
+              {/* Day Breakdown Cards */}
               <div className="space-y-4">
                 {DAY_NAMES.slice(0, activeTemplate.totalDays || 7).map((dayName, dayIdx) => {
                   const dayMeals = (activeTemplate.meals || []).filter(m => m.dayIndex === dayIdx);
@@ -57562,43 +58424,71 @@ export default function TemplatesPage() {
                           {t('emptyDayDesc', 'No meals planned for this day.')}
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {dayMeals.map(meal => (
-                            <div 
-                              key={meal.id}
-                              className="p-3 rounded-xl border space-y-1.5 flex items-start justify-between gap-2 shadow-xs group"
-                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                            >
-                              <div className="space-y-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded border text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
-                                    {t(`slot${meal.mealType}`, meal.mealType)}
-                                  </span>
-                                  {meal.time && (
-                                    <span className="text-[10px] font-mono opacity-60">
-                                      {meal.time}
-                                    </span>
-                                  )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                          {dayMeals.map(meal => {
+                            const resolvedThumb = resolveRecipeImageUrl(meal.imageUrl || meal.image);
+                            return (
+                              <div 
+                                key={meal.id}
+                                onClick={() => handleOpenRecipeModal(meal)}
+                                className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs group cursor-pointer hover:border-[var(--color-primary)] transition-all duration-200"
+                                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                              >
+                                <div className="flex items-center gap-3 min-w-0 flex-1">
+                                  {/* Recipe Thumbnail (Task 1 & 3) */}
+                                  <div 
+                                    className="w-16 h-16 sm:w-18 sm:h-18 rounded-xl overflow-hidden shrink-0 border relative bg-slate-900/40"
+                                    style={{ borderColor: 'var(--color-border)' }}
+                                  >
+                                    <img 
+                                      src={resolvedThumb} 
+                                      alt={meal.recipeName}
+                                      referrerPolicy="no-referrer"
+                                      onError={(e) => {
+                                        const target = e.target as HTMLImageElement;
+                                        target.src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                                      }}
+                                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                    />
+                                    <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-colors" />
+                                  </div>
+
+                                  {/* Recipe Details */}
+                                  <div className="space-y-1 min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded border text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
+                                        {t(`slot${meal.mealType}`, meal.mealType)}
+                                      </span>
+                                      {meal.time && (
+                                        <span className="text-[10px] font-mono opacity-60">
+                                          {meal.time}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <h5 className="font-bold text-xs truncate group-hover:text-[var(--color-primary)] transition-colors" style={{ color: 'var(--color-text)' }}>
+                                      {meal.recipeName}
+                                    </h5>
+                                    <div className="flex items-center gap-3 text-[10px] opacity-75 font-mono">
+                                      <span>{meal.servings || 4} serv</span>
+                                      <span>{(meal.prepMinutes || 15) + (meal.cookMinutes || 25)}m</span>
+                                    </div>
+                                  </div>
                                 </div>
-                                <h5 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>
-                                  {meal.recipeName}
-                                </h5>
-                                <div className="flex items-center gap-3 text-[10px] opacity-75 font-mono">
-                                  <span>{meal.servings || 4} serv</span>
-                                  <span>{(meal.prepMinutes || 15) + (meal.cookMinutes || 25)}m</span>
+
+                                {/* Remove Meal Button */}
+                                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveMealFromBlueprint(meal.id)}
+                                    className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition cursor-pointer"
+                                    title={t('removeMealTitle', 'Remove meal')}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
                                 </div>
                               </div>
-
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveMealFromBlueprint(meal.id)}
-                                className="p-1 rounded text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                                title="Remove meal"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -57614,7 +58504,286 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* MODAL 1: CREATE / EDIT BLUEPRINT (Autofill Safe Container) */}
+      {/* MODAL 5: FULL RECIPE CARD MODAL (READ-ONLY, WITHOUT EDITING BUTTON) - Task 2 */}
+      {showRecipeDetailModal && selectedRecipeForModal && (
+        <div 
+          onClick={() => setShowRecipeDetailModal(false)}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 cursor-pointer animate-in fade-in duration-200"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipe-detail-title"
+            data-lpignore="true"
+            className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl overflow-hidden border shadow-2xl relative text-xs cursor-default transition-colors duration-200"
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
+          >
+            {/* Full Hero Image Banner */}
+            <div className="relative h-56 sm:h-64 w-full shrink-0 overflow-hidden bg-slate-900">
+              <img 
+                src={resolveRecipeImageUrl(selectedRecipeForModal.imageUrl || selectedRecipeForModal.image)} 
+                alt={selectedRecipeForModal.title}
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                }}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent" />
+
+              {/* Close Button Top Right */}
+              <button 
+                type="button" 
+                onClick={() => setShowRecipeDetailModal(false)}
+                className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/80 transition cursor-pointer z-10 border border-white/20"
+                title={t('closeModalBtn', 'Close')}
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              {/* Header Metadata Over Hero */}
+              <div className="absolute bottom-4 left-6 right-6 space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-white tracking-wider border border-white/30" style={{ backgroundColor: 'var(--color-primary)' }}>
+                    {selectedRecipeForModal.category || 'Main Dish'}
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono text-white/90 bg-white/10 backdrop-blur-xs flex items-center gap-1 border border-white/15">
+                    <Clock className="h-3 w-3" />
+                    <span>{t('prepTimeLabel', 'Prep')}: {selectedRecipeForModal.prepTimeMinutes || 15}m</span>
+                    <span className="opacity-40">•</span>
+                    <span>{t('cookTimeLabel', 'Cook')}: {selectedRecipeForModal.cookTimeMinutes || 25}m</span>
+                  </span>
+                  {selectedRecipeForModal.calories && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono text-white/90 bg-white/10 backdrop-blur-xs flex items-center gap-1 border border-white/15">
+                      <Flame className="h-3 w-3 text-orange-400" />
+                      <span>{selectedRecipeForModal.calories} kcal</span>
+                    </span>
+                  )}
+                </div>
+
+                <h2 id="recipe-detail-title" className="text-xl sm:text-2xl font-black text-white tracking-tight leading-tight">
+                  {selectedRecipeForModal.title}
+                </h2>
+              </div>
+            </div>
+
+            {/* Interactive Tools Row: Servings Stepper & Zoom Controls */}
+            <div 
+              className="p-3.5 border-b flex items-center justify-between gap-4 shrink-0 flex-wrap"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              {/* Servings Stepper */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold opacity-75 flex items-center gap-1">
+                  <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                  {t('servingsCountLabel', 'Servings')}:
+                </span>
+                <div className="flex items-center border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setModalServings(prev => Math.max(1, prev - 1))}
+                    className="p-1.5 hover:opacity-80 transition cursor-pointer"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </button>
+                  <span className="px-3 font-bold font-mono text-xs text-[var(--color-primary)]">
+                    {modalServings}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setModalServings(prev => prev + 1)}
+                    className="p-1.5 hover:opacity-80 transition cursor-pointer"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Text Zoom Stepper */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold opacity-75 flex items-center gap-1">
+                  <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                  {t('zoomLabel', 'Text Size')}:
+                </span>
+                <div className="flex items-center border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setFontSizeScale(prev => Math.max(80, prev - 10))}
+                    className="p-1.5 hover:opacity-80 transition cursor-pointer"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </button>
+                  <span className="px-2 font-mono text-xs opacity-80">{fontSizeScale}%</span>
+                  <button
+                    type="button"
+                    onClick={() => setFontSizeScale(prev => Math.min(140, prev + 10))}
+                    className="p-1.5 hover:opacity-80 transition cursor-pointer"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Scrollable Content: Ingredients & Instructions */}
+            <div 
+              className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar"
+              style={{ fontSize: `${(fontSizeScale / 100) * 0.75}rem` }}
+            >
+              {/* Ingredients Section */}
+              <div className="space-y-3">
+                <h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                  <span>{t('ingredientsTitle', 'Ingredients')}</span>
+                  <span className="text-[10px] font-normal opacity-60">({selectedRecipeForModal.ingredients?.length || 0})</span>
+                </h3>
+
+                {(!selectedRecipeForModal.ingredients || selectedRecipeForModal.ingredients.length === 0) ? (
+                  <p className="opacity-60 italic">{t('noIngredientsRecorded', 'No specific ingredients recorded for this dish.')}</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {selectedRecipeForModal.ingredients.map((ing, idx) => {
+                      const isChecked = !!checkedIngredients[`ing_${idx}`];
+                      const rawAmt = typeof ing.amount === 'number' ? ing.amount : parseFloat(ing.amount);
+                      const scaledAmt = !isNaN(rawAmt) 
+                        ? (rawAmt * (modalServings / modalBaseServings)).toFixed(1).replace(/\.0$/, '')
+                        : ing.amount;
+
+                      return (
+                        <div 
+                          key={idx}
+                          onClick={() => setCheckedIngredients(prev => ({ ...prev, [`ing_${idx}`]: !prev[`ing_${idx}`] }))}
+                          className="p-2.5 rounded-xl border flex items-center gap-3 cursor-pointer transition hover:border-[var(--color-primary)]"
+                          style={{ 
+                            backgroundColor: isChecked ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            opacity: isChecked ? 0.6 : 1
+                          }}
+                        >
+                          <div 
+                            className="w-4 h-4 rounded border flex items-center justify-center shrink-0 transition"
+                            style={{ 
+                              borderColor: isChecked ? 'var(--color-emerald)' : 'var(--color-border)',
+                              backgroundColor: isChecked ? 'var(--color-emerald)' : 'transparent'
+                            }}
+                          >
+                            {isChecked && <Check className="h-3 w-3 text-white" />}
+                          </div>
+                          <div className={`min-w-0 flex-1 ${isChecked ? 'line-through opacity-70' : ''}`}>
+                            <span className="font-bold text-[var(--color-primary)] mr-1.5">{scaledAmt} {ing.unit}</span>
+                            <span className="font-medium">{ing.name || ing}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Instructions Section */}
+              <div className="space-y-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                  <span>{t('instructionsTitle', 'Step-by-Step Instructions')}</span>
+                </h3>
+
+                {(!selectedRecipeForModal.instructions || selectedRecipeForModal.instructions.length === 0) ? (
+                  <p className="opacity-60 italic">{t('noInstructionsRecorded', 'No instructions recorded for this dish.')}</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {selectedRecipeForModal.instructions.map((step, idx) => {
+                      const isChecked = !!checkedSteps[idx];
+                      const stepText = typeof step === 'string' ? step : step.text || step.instruction;
+
+                      return (
+                        <div 
+                          key={idx}
+                          onClick={() => setCheckedSteps(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                          className="p-3.5 rounded-2xl border flex items-start gap-3.5 cursor-pointer transition hover:border-[var(--color-primary)]"
+                          style={{ 
+                            backgroundColor: isChecked ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            opacity: isChecked ? 0.6 : 1
+                          }}
+                        >
+                          <span 
+                            className="w-5 h-5 rounded-full border flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5"
+                            style={{ 
+                              borderColor: isChecked ? 'var(--color-emerald)' : 'var(--color-primary)',
+                              backgroundColor: isChecked ? 'var(--color-emerald)' : 'transparent',
+                              color: isChecked ? '#fff' : 'var(--color-primary)'
+                            }}
+                          >
+                            {isChecked ? <Check className="h-3 w-3" /> : idx + 1}
+                          </span>
+                          <p className={`text-xs leading-relaxed flex-1 ${isChecked ? 'line-through opacity-70' : ''}`}>
+                            {stepText}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Personal Notes (if present) */}
+              {selectedRecipeForModal.notes && (
+                <div className="p-3 rounded-2xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <span className="font-bold text-[10px] uppercase text-amber-400">Blueprint Notes</span>
+                  <p className="text-xs opacity-80">{selectedRecipeForModal.notes}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Read-Only Modal Footer (Strictly WITHOUT Editing Button) */}
+            <div 
+              className="p-4 border-t flex items-center justify-between gap-4 shrink-0"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div>
+                {selectedRecipeForModal.sourceUrl ? (
+                  <a
+                    href={selectedRecipeForModal.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1.5"
+                  >
+                    <span>{t('sourceUrlLabel', 'Original Recipe Source')}</span>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                ) : (
+                  <span className="text-[11px] opacity-40">Zecratary Blueprint Catalog</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/chef?recipe=${encodeURIComponent(selectedRecipeForModal.title)}`}
+                  className="px-4 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow transition hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  <ChefHat className="h-4 w-4" />
+                  <span>{t('cookWithAiChef', 'Cook with AI Chef')}</span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => setShowRecipeDetailModal(false)}
+                  className="px-4 py-2 border rounded-xl font-bold text-xs hover:opacity-80 transition cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  {t('closeModalBtn', 'Close')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: CREATE / EDIT BLUEPRINT */}
       {showTemplateModal && (
         <div 
           onClick={() => setShowTemplateModal(false)}
@@ -57622,13 +58791,15 @@ export default function TemplatesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="template-modal-title"
             data-lpignore="true"
             className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="template-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {editingTemplateId ? t('editBlueprint', 'Edit Blueprint') : t('newBlueprintBtn', 'New Blueprint')}
               </h3>
               <button type="button" onClick={() => setShowTemplateModal(false)} className="p-1 rounded-lg">
@@ -57642,12 +58813,22 @@ export default function TemplatesPage() {
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('blueprintTitlePlaceholder', 'e.g. High-Protein Muscle Gain...')}
                   value={templateTitle}
                   onChange={(e) => setTemplateTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveTemplateModal();
+                    }
+                  }}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
@@ -57669,7 +58850,7 @@ export default function TemplatesPage() {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 opacity-80">Duration (Days)</label>
+                  <label className="block font-bold mb-1 opacity-80">{t('durationDaysLabel', 'Duration (Days)')}</label>
                   <select
                     value={templateDays}
                     onChange={(e) => setTemplateDays(Number(e.target.value))}
@@ -57688,9 +58869,13 @@ export default function TemplatesPage() {
                 <textarea
                   rows={2}
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('blueprintDescPlaceholder', 'Short summary of this meal plan blueprint...')}
                   value={templateDesc}
                   onChange={(e) => setTemplateDesc(e.target.value)}
@@ -57723,7 +58908,7 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* MODAL 2: ADD MEAL TO BLUEPRINT DAY (Autofill Safe Container) */}
+      {/* MODAL 2: ADD MEAL TO BLUEPRINT DAY */}
       {showMealModal && (
         <div 
           onClick={() => setShowMealModal(false)}
@@ -57731,13 +58916,15 @@ export default function TemplatesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meal-modal-title"
             data-lpignore="true"
             className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="meal-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {(t('addMealToDay', 'Add Dish to {day}')).replace('{day}', t(`day${DAY_NAMES[targetDayIndex]}`, DAY_NAMES[targetDayIndex]))}
               </h3>
               <button type="button" onClick={() => setShowMealModal(false)} className="p-1 rounded-lg">
@@ -57756,7 +58943,7 @@ export default function TemplatesPage() {
                   <BookOpen className="h-4 w-4" />
                   {selectedRecipeForMeal ? selectedRecipeForMeal.title : t('selectFromSavedRecipes', 'Select from Saved Recipes')}
                 </span>
-                <ArrowRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4" />
               </button>
 
               <div>
@@ -57764,12 +58951,22 @@ export default function TemplatesPage() {
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('dishTitlePlaceholder', 'e.g. Grilled Salmon with Asparagus')}
                   value={targetDishTitle}
                   onChange={(e) => setTargetDishTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveMealToBlueprint();
+                    }
+                  }}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none font-medium"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
@@ -57797,8 +58994,17 @@ export default function TemplatesPage() {
                     min="1"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
                     value={targetServings}
                     onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveMealToBlueprint();
+                      }
+                    }}
                     className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -57821,7 +59027,7 @@ export default function TemplatesPage() {
                   className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  {t('confirmScheduleBtn', 'Confirm Schedule')}
+                  {t('saveBlueprintBtn', 'Save Blueprint')}
                 </button>
               </div>
             </div>
@@ -57837,13 +59043,15 @@ export default function TemplatesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipe-picker-title"
             data-lpignore="true"
             className="border rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative p-5 space-y-3 cursor-default"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="recipe-picker-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {t('selectFromSavedRecipes', 'Select from Saved Recipes')}
               </h3>
               <button type="button" onClick={() => setShowRecipePicker(false)} className="p-1 rounded-lg">
@@ -57856,7 +59064,12 @@ export default function TemplatesPage() {
               <input
                 type="text"
                 autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
                 data-form-type="other"
                 placeholder={t('searchRecipesPlaceholder', 'Search saved recipes...')}
                 value={pickerSearch}
@@ -57872,41 +59085,48 @@ export default function TemplatesPage() {
                   {t('noRecipesFound', 'No recipes found.')}
                 </div>
               ) : (
-                filteredPickerRecipes.map(recipe => (
-                  <div
-                    key={recipe.id}
-                    onClick={() => {
-                      setSelectedRecipeForMeal(recipe);
-                      setTargetDishTitle(recipe.title || recipe.name);
-                      setTargetServings(Number(recipe.servings || 4));
-                      setTargetCookingTime((recipe.prepTimeMinutes || 15) + (recipe.cookTimeMinutes || 25));
-                      setShowRecipePicker(false);
-                    }}
-                    className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <img 
-                        src={recipe.imageUrl || recipe.image || '/uploads/recipes/default.jpg'} 
-                        alt={recipe.title} 
-                        className="w-10 h-10 rounded-lg object-cover border shrink-0" 
-                        style={{ borderColor: 'var(--color-border)' }} 
-                      />
-                      <div className="min-w-0">
-                        <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
-                        <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
+                filteredPickerRecipes.map(recipe => {
+                  const pickerThumb = resolveRecipeImageUrl(recipe.imageUrl || recipe.image);
+                  return (
+                    <div
+                      key={recipe.id}
+                      onClick={() => {
+                        setSelectedRecipeForMeal(recipe);
+                        setTargetDishTitle(recipe.title || recipe.name);
+                        setTargetServings(Number(recipe.servings || 4));
+                        setTargetCookingTime((recipe.prepTimeMinutes || 15) + (recipe.cookTimeMinutes || 25));
+                        setShowRecipePicker(false);
+                      }}
+                      className="p-2.5 rounded-xl border flex items-center justify-between gap-3 hover:border-[var(--color-primary)] transition cursor-pointer"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img 
+                          src={pickerThumb} 
+                          alt={recipe.title} 
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = `${storageSettings.publicPrefix || '/recipes/images'}/default.jpg`;
+                          }}
+                          className="w-10 h-10 rounded-lg object-cover border shrink-0" 
+                          style={{ borderColor: 'var(--color-border)' }} 
+                        />
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-xs truncate">{recipe.title || recipe.name}</h4>
+                          <span className="text-[10px] opacity-60 block">{recipe.recipeType || 'Main Dish'}</span>
+                        </div>
                       </div>
+                      <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
                     </div>
-                    <Check className="h-4 w-4 text-[var(--color-primary)] opacity-0 group-hover:opacity-100" />
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL 4: APPLY TO CALENDAR (Autofill Safe Container) */}
+      {/* MODAL 4: APPLY TO CALENDAR */}
       {showApplyModal && (
         <div 
           onClick={() => setShowApplyModal(false)}
@@ -57914,13 +59134,15 @@ export default function TemplatesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="apply-modal-title"
             data-lpignore="true"
             className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="apply-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {t('applyModalTitle', 'Schedule Blueprint onto Calendar')}
               </h3>
               <button type="button" onClick={() => setShowApplyModal(false)} className="p-1 rounded-lg">
@@ -57935,6 +59157,9 @@ export default function TemplatesPage() {
                   type="date"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
                   value={applyStartDate}
                   onChange={(e) => setApplyStartDate(e.target.value)}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer"
@@ -57943,7 +59168,10 @@ export default function TemplatesPage() {
               </div>
 
               <div className="p-3 rounded-2xl border text-[11px] opacity-80" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                Scheduling {(activeTemplate?.meals || []).length} meals across {activeTemplate?.totalDays || 7} days starting on {applyStartDate}.
+                {(t('schedulingSummaryText', 'Scheduling {count} meals across {days} days starting on {date}.'))
+                  .replace('{count}', String((activeTemplate?.meals || []).length))
+                  .replace('{days}', String(activeTemplate?.totalDays || 7))
+                  .replace('{date}', applyStartDate)}
               </div>
 
               <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
@@ -58477,7 +59705,7 @@ export default function ImportPage() {
     });
 
     setTimeout(() => {
-      router.push('/saved');
+      router.push('/recipes');
     }, 850);
   };
 
@@ -61324,6 +62552,20 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "viewFullRecipe": "View Full Recipe",
+    "noIngredientsRecorded": "No specific ingredients recorded for this dish.",
+    "noInstructionsRecorded": "No instructions recorded for this dish.",
+    "sourceUrlLabel": "Original Recipe Source",
+    "cookWithAiChef": "Cook with AI Chef",
+    "storagePillLabel": "Storage Directory",
+    "servingsCountLabel": "Servings",
+    "zoomLabel": "Text Size",
+    "closeModalBtn": "Close",
+    "durationDaysLabel": "Duration (Days)",
+    "goToDashboardBtn": "Go to Dashboard",
+    "authenticatingSession": "Authenticating session...",
+    "removeMealTitle": "Remove meal",
+    "schedulingSummaryText": "Scheduling {count} meals across {days} days starting on {date}.",
     "topbarTopUpWallet": "Add Funds",
     "topbarGetTokens": "Get Tokens",
     "topbarContactSupport": "Contact Support",
@@ -69066,6 +70308,7 @@ export function useTheme() {
 
 ## File: `apps/web/src/components/Sidebar.tsx`
 ```typescript
+// Generated & Maintained by AI Collaborator - Production Build Compliant
 'use client';
 
 import packageInfo from '../../package.json';
@@ -69079,7 +70322,7 @@ import {
   Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
   Bell, BellRing, User as UserIcon, ChevronDown, 
   Layers, Check, Database, Receipt, Globe, Mail, ChevronRight,
-  Plus, CheckCheck
+  Plus, CheckCheck, HardDrive
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -69300,16 +70543,28 @@ export default function Sidebar() {
           } catch (_) {}
         }
       }
+
+      if (u?.id || u?.email) {
+        fetch(`/api/user/sidebar-settings?userId=${encodeURIComponent(u.id || u.email)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data?.success && data?.sections) {
+              setOpenSections(prev => ({ ...prev, ...data.sections }));
+            }
+          })
+          .catch(() => {});
+      }
+
       fetchBalancesAndTelemetry(u);
     } catch (_) {}
   }, [fetchBalancesAndTelemetry]);
 
-  // Route Auto-Expansion
+  // Route Auto-Expansion: Synchronized with canonical /recipes route
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
-    } else if (['/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+    } else if (['/recipes', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
     } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
@@ -69422,6 +70677,15 @@ export default function Sidebar() {
           localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
         } catch (_) {}
       }
+      const u = getCurrentUser();
+      const uId = u?.id || u?.email;
+      if (uId) {
+        fetch('/api/user/sidebar-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: uId, sections: next })
+        }).catch(() => {});
+      }
       return next;
     });
   };
@@ -69497,15 +70761,26 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
+  const isRouteActive = (route: string): boolean => {
+    if (!pathname) return false;
+    const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
+    const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
+
+    if (cleanRoute === '/' || cleanRoute === '/admin') {
+      return cleanPath === cleanRoute;
+    }
+    return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
+  };
+
   const navClass = (route: string) => {
-    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    const active = isRouteActive(route);
     return `flex items-center gap-3 px-3 py-2 rounded-xl font-bold text-xs transition duration-200 cursor-pointer ${
       active ? 'text-white shadow-xs' : 'hover:text-white hover:bg-slate-800/30'
     }`;
   };
 
   const navStyle = (route: string) => {
-    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    const active = isRouteActive(route);
     return active
       ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
       : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
@@ -69522,6 +70797,10 @@ export default function Sidebar() {
       {/* DESKTOP TOP BAR (Fixed Header with Real-Time Telemetry) */}
       <header
         id="zecratary-desktop-topbar"
+        role="banner"
+        aria-label="Application Header"
+        data-lpignore="true"
+        data-form-type="other"
         className="hidden md:flex fixed top-0 left-0 right-0 h-16 border-b z-40 items-center justify-between px-6 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -69980,6 +71259,10 @@ export default function Sidebar() {
 
       {/* MOBILE APPLICATION HEADER WITH COMPACT WALLET & TOKEN WIDGETS */}
       <header
+        role="banner"
+        aria-label="Mobile Application Header"
+        data-lpignore="true"
+        data-form-type="other"
         className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-3 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -70079,6 +71362,10 @@ export default function Sidebar() {
 
       {/* SIDEBAR NAVIGATION DRAWER */}
       <aside
+        role="navigation"
+        aria-label="Main Navigation Sidebar"
+        data-lpignore="true"
+        data-form-type="other"
         className={`hidden md:flex flex-col fixed top-16 bottom-0 left-0 border-r z-30 transition-all duration-200 ${
           isCollapsed ? 'w-20' : 'w-64'
         }`}
@@ -70133,7 +71420,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION */}
+          {/* 2. MANAGE ACCORDION (CANONICAL /recipes ROUTE) */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -70150,7 +71437,7 @@ export default function Sidebar() {
 
             {(openSections.manage || isCollapsed) && (
               <div className="space-y-0.5">
-                <Link href="/saved" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
+                <Link href="/recipes" className={navClass('/recipes')} style={navStyle('/recipes')} title={t('savedRecipes', 'Saved Recipes')}>
                   <BookOpen className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('savedRecipes', 'Saved Recipes')}</span>}
                 </Link>
@@ -70236,7 +71523,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (ALL 14 ORIGINAL + STORAGE SETTINGS) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -70290,6 +71577,10 @@ export default function Sidebar() {
                     <Cpu className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('aiModels', 'AI Engine')}</span>}
                   </Link>
+                  <Link href="/admin/storage" className={navClass('/admin/storage')} style={navStyle('/admin/storage')} title={t('storageSettings', 'Storage Settings')}>
+                    <HardDrive className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('storageSettings', 'Storage Settings')}</span>}
+                  </Link>
                   <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} style={navStyle('/admin/recipe-type')} title={t('recipeTypes', 'Recipe Types')}>
                     <Utensils className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('recipeTypes', 'Recipe Types')}</span>}
@@ -70326,9 +71617,14 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* MOBILE APPLICATION DRAWER */}
+      {/* MOBILE APPLICATION DRAWER (CANONICAL /recipes ROUTE) */}
       {mobileMenuOpen && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile Navigation Drawer"
+          data-lpignore="true"
+          data-form-type="other"
           className="md:hidden fixed inset-0 z-50 flex"
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
           onClick={() => setMobileMenuOpen(false)}
@@ -70355,7 +71651,7 @@ export default function Sidebar() {
               <Link href="/chef" onClick={() => setMobileMenuOpen(false)} className={navClass('/chef')} style={navStyle('/chef')}>
                 <MessageSquare className="h-4 w-4" /> <span>{t('aiChef', 'AI Assistant')}</span>
               </Link>
-              <Link href="/saved" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
+              <Link href="/recipes" onClick={() => setMobileMenuOpen(false)} className={navClass('/recipes')} style={navStyle('/recipes')}>
                 <BookOpen className="h-4 w-4" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
               </Link>
               <Link href="/books" onClick={() => setMobileMenuOpen(false)} className={navClass('/books')} style={navStyle('/books')}>
@@ -73044,8 +74340,8 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 
 ## File: `apps/web/src/lib/storageService.ts`
 ```typescript
-// Centralized Media Storage Engine (Canonical apps/web/public/recipes)
-// GitHub: cygnusorbit/zecratary (Constraints 8, 9, 10)
+// Centralized Media Storage Engine (Canonical apps/web/public/recipes/images)
+// GitHub: cygnusorbit/zecratary
 
 import fs from 'fs';
 import path from 'path';
@@ -73197,7 +74493,6 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
   return merged;
 }
 
-// Native AWS S3 SigV4 Upload Implementation for Supabase S3 Gateway
 export async function uploadToSupabaseS3(
   buffer: Buffer,
   filename: string,
@@ -73289,52 +74584,13 @@ export async function uploadMediaFile(
     }
   }
 
+  // Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
   const targetDir = path.join(getCanonicalWebPublicDir(), 'recipes', 'images');
   if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
   fs.writeFileSync(path.join(targetDir, cleanName), buffer);
 
   const prefix = settings.localhost.publicPrefix || '/recipes/images';
   return `${prefix}/${cleanName}`;
-}
-
-export function cleanOrphanRecipeImages(): { removedCount: number; remainingCount: number; recipesCount: number } {
-  const publicDir = getCanonicalWebPublicDir();
-  const recipesDir = path.join(publicDir, 'recipes');
-  const imagesDir = path.join(recipesDir, 'images');
-
-  if (!fs.existsSync(imagesDir) || !fs.existsSync(recipesDir)) {
-    return { removedCount: 0, remainingCount: 0, recipesCount: 0 };
-  }
-
-  const jsonFiles = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json') && !f.includes('index.json') && !f.startsWith('package'));
-  const activeImageFilenames = new Set<string>();
-
-  jsonFiles.forEach(jf => {
-    try {
-      const raw = fs.readFileSync(path.join(recipesDir, jf), 'utf-8');
-      const data = JSON.parse(raw);
-      const imgUrl = data.imageUrl || data.image || data.image_url;
-      if (imgUrl && typeof imgUrl === 'string') {
-        const basename = path.basename(imgUrl.split('?')[0]);
-        if (basename) activeImageFilenames.add(basename);
-      }
-    } catch (_) {}
-  });
-
-  const diskImages = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f));
-  let removedCount = 0;
-
-  diskImages.forEach(img => {
-    if (!activeImageFilenames.has(img)) {
-      try {
-        fs.unlinkSync(path.join(imagesDir, img));
-        removedCount++;
-      } catch (_) {}
-    }
-  });
-
-  const remainingCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f)).length;
-  return { removedCount, remainingCount, recipesCount: jsonFiles.length };
 }
 
 export function getUniversalDiskDiagnostics() {
@@ -73349,14 +74605,14 @@ export function getUniversalDiskDiagnostics() {
 
   try {
     if (!fs.existsSync(recipesDir)) fs.mkdirSync(recipesDir, { recursive: true });
-    recipesCount = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json') && !f.startsWith('package')).length;
+    recipesCount = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json')).length;
     fs.accessSync(recipesDir, fs.constants.W_OK);
     jsonDirWritable = true;
   } catch (_) {}
 
   try {
     if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
-    imagesCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f)).length;
+    imagesCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(f)).length;
     fs.accessSync(imagesDir, fs.constants.W_OK);
     imagesDirWritable = true;
   } catch (_) {}
@@ -75325,55 +76581,69 @@ export async function registerUser(payload: { email: string; name?: string; pass
 ```typescript
 import fs from 'fs';
 import path from 'path';
+import { getCanonicalWebPublicDir } from '@/lib/storageService';
 
-export async function downloadAndSaveImage(imageUrl: string, prefix = 'recipe'): Promise<string | null> {
-  if (!imageUrl || typeof imageUrl !== 'string') return null;
-  if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('/images/')) return imageUrl;
-  if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) return null;
+export async function downloadAndSaveImage(
+  imageUrl: string,
+  prefix: string = 'scraped'
+): Promise<string> {
+  const fallbackPath = '/recipes/images/default.jpg';
+  if (!imageUrl || typeof imageUrl !== 'string') return fallbackPath;
+
+  const cleanUrl = imageUrl.trim();
+  if (cleanUrl.startsWith('/recipes/images/')) return cleanUrl;
+  if (cleanUrl.startsWith('/uploads/recipes/')) {
+    return cleanUrl.replace('/uploads/recipes/', '/recipes/images/');
+  }
+  if (!/^https?:\/\//i.test(cleanUrl)) return fallbackPath;
 
   try {
-    const res = await fetch(imageUrl, {
+    const origin = new URL(cleanUrl).origin;
+    const response = await fetch(cleanUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-      }
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': origin,
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: AbortSignal.timeout(9000),
+      redirect: 'follow'
     });
 
-    if (!res.ok) return null;
+    if (!response.ok) return fallbackPath;
 
-    const contentType = res.headers.get('content-type') || '';
-    let ext = '.jpg';
-    if (contentType.includes('png')) ext = '.png';
-    else if (contentType.includes('webp')) ext = '.webp';
-    else if (contentType.includes('gif')) ext = '.gif';
-    else if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = '.jpg';
+    const contentType = response.headers.get('content-type') || '';
+    let ext = 'jpg';
+    if (contentType.includes('webp') || cleanUrl.includes('.webp')) ext = 'webp';
+    else if (contentType.includes('png') || cleanUrl.includes('.png')) ext = 'png';
+    else if (contentType.includes('jpeg') || cleanUrl.includes('.jpeg')) ext = 'jpg';
 
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length < 100) return null;
+    const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+    const buffer = Buffer.from(await response.arrayBuffer());
 
-    const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
-    
-    const targetDirs = [
-      path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
-      path.join(process.cwd(), 'public', 'uploads', 'recipes')
-    ];
+    const targetDir = path.join(getCanonicalWebPublicDir(), 'recipes', 'images');
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
-    let savedPath = '';
-    for (const dir of targetDirs) {
+    fs.writeFileSync(path.join(targetDir, filename), buffer);
+
+    // Sync to secondary path if different working directory
+    const secondaryDir = path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images');
+    if (path.resolve(secondaryDir) !== path.resolve(targetDir)) {
       try {
-        fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(path.join(dir, filename), buffer);
-        savedPath = `/uploads/recipes/${filename}`;
+        if (!fs.existsSync(secondaryDir)) fs.mkdirSync(secondaryDir, { recursive: true });
+        fs.writeFileSync(path.join(secondaryDir, filename), buffer);
       } catch (_) {}
     }
 
-    return savedPath || `/uploads/recipes/${filename}`;
+    return `/recipes/images/${filename}`;
   } catch (err) {
-    console.warn('[imageDownloader] Error downloading image:', err);
-    return null;
+    console.warn('[ImageDownloader] Error downloading image:', err);
   }
+
+  return fallbackPath;
 }
 
+// Backward-compatible named export alias & default export
 export const downloadAndSaveScrapedImage = downloadAndSaveImage;
 export default downloadAndSaveImage;
 
