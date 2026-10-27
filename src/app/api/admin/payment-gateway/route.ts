@@ -1,207 +1,305 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
+import { Pool } from 'pg';
 
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
+let pgPool: Pool | null = null;
+function getPgPool(): Pool | null {
+  if (pgPool) return pgPool;
+  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) return null;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  const cleanConn = connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '');
+  pgPool = new Pool({ connectionString: cleanConn, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5000 });
+  return pgPool;
 }
 
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
+const DEFAULT_GATEWAY_CONFIG = {
+  currency: 'USD',
+  testMode: true,
+  stripeConnected: true,
+  stripeKeysVerified: true,
+  stripeWebhookVerified: false,
+  stripe: {
+    enabled: true,
+    publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
+    secretKey: process.env.STRIPE_SECRET_KEY || '',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || ''
+  },
+  paypal: {
+    enabled: true,
+    clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '',
+    clientSecret: process.env.PAYPAL_CLIENT_SECRET || '',
+    webhookId: process.env.PAYPAL_WEBHOOK_ID || '',
+    environment: 'sandbox'
+  },
+  manualSettlement: {
+    enabled: true,
+    bankName: 'Bangkok Bank / Kasikornbank',
+    accountName: 'Zecratary Platform Co., Ltd.',
+    accountNumber: '123-4-56789-0',
+    routingNumber: '002',
+    swiftBic: 'BKKBTHBK',
+    instructions: 'Please transfer via PromptPay or Bank Wire. Include Reference ID in transfer note.',
+    requireApproval: true
+  }
+};
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-function readServerSettingsFallback(): any {
-  const candidatePaths = [
-    path.join(process.cwd(), 'apps/web/data/admin_settings.json'),
-    path.join(process.cwd(), 'data/admin_settings.json')
+function readFallbackSettings(): any {
+  const paths = [
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'data', 'admin_settings.json')
   ];
-  for (const p of candidatePaths) {
+  for (const p of paths) {
     if (fs.existsSync(p)) {
       try {
         const raw = fs.readFileSync(p, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (parsed?.paymentSettings || parsed?.gatewayConfig) {
-          return parsed.paymentSettings || parsed.gatewayConfig;
-        }
-      } catch (_) {}
+        return JSON.parse(raw);
+      } catch (e) {}
     }
   }
-  return null;
+  return {};
+}
+
+function writeFallbackSettings(updated: any): void {
+  const paths = [
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'data', 'admin_settings.json')
+  ];
+  for (const p of paths) {
+    try {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(updated, null, 2), 'utf8');
+    } catch (e) {}
+  }
 }
 
 export async function GET() {
-  let settings: any = readServerSettingsFallback();
-  let manualTransactions: any[] = [];
-
   try {
-    // 1. Safe, non-blocking PostgreSQL settings query with 3s timeout
-    const sRes: any = await Promise.race([
-      query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text = 'primary_settings' OR id::text = '1' LIMIT 1`),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
-    ]).catch(() => null);
+    let currentConfig = { ...DEFAULT_GATEWAY_CONFIG };
+    let settlements: any[] = [];
+    const pool = getPgPool();
 
-    const sRow = parseDbRow(sRes);
-    if (sRow?.payment_settings) {
-      const ps = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
-      if (ps && typeof ps === 'object') {
-        settings = { ...(settings || {}), ...ps };
-        if (sRow.currency) settings.currency = sRow.currency;
+    if (pool) {
+      try {
+        const res = await pool.query(
+          "SELECT payment_settings FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;"
+        );
+        if (res.rows?.[0]?.payment_settings) {
+          const raw = typeof res.rows[0].payment_settings === 'string'
+            ? JSON.parse(res.rows[0].payment_settings)
+            : res.rows[0].payment_settings;
+          currentConfig = {
+            ...currentConfig,
+            ...raw,
+            stripe: { ...currentConfig.stripe, ...(raw.stripe || {}) },
+            paypal: { ...currentConfig.paypal, ...(raw.paypal || {}) },
+            manualSettlement: { ...currentConfig.manualSettlement, ...(raw.manualSettlement || {}) }
+          };
+        }
+
+        const settleRes = await pool.query(`
+          SELECT 
+            id, customer_name, customer_email, plan_name, plan_slug, 
+            amount, currency, gateway, status, created_at, transfer_reference, notes
+          FROM payment_transactions
+          WHERE gateway ILIKE '%manual%' OR gateway ILIKE '%promptpay%' OR gateway ILIKE '%wire%' OR transfer_reference IS NOT NULL
+          ORDER BY created_at DESC LIMIT 100;
+        `);
+        settlements = settleRes.rows || [];
+      } catch (err: any) {
+        console.warn('GET /api/admin/payment-gateway pg notice:', err.message);
       }
     }
 
-    // 2. Fetch manual transactions safely
-    const txRes: any = await Promise.race([
-      query(`SELECT * FROM payment_transactions WHERE gateway = 'manual' OR transfer_reference IS NOT NULL ORDER BY created_at DESC LIMIT 100`),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
-    ]).catch(() => null);
-
-    if (txRes) {
-      manualTransactions = parseDbRows(txRes);
+    if (settlements.length === 0) {
+      const fileSettings = readFallbackSettings();
+      if (fileSettings.payment_settings) {
+        currentConfig = {
+          ...currentConfig,
+          ...fileSettings.payment_settings,
+          stripe: { ...currentConfig.stripe, ...(fileSettings.payment_settings.stripe || {}) },
+          paypal: { ...currentConfig.paypal, ...(fileSettings.payment_settings.paypal || {}) },
+          manualSettlement: { ...currentConfig.manualSettlement, ...(fileSettings.payment_settings.manualSettlement || {}) }
+        };
+      }
+      if (Array.isArray(fileSettings.manual_settlements)) {
+        settlements = fileSettings.manual_settlements;
+      }
     }
+
+    return NextResponse.json({
+      success: true,
+      gatewayConfig: currentConfig,
+      settlements
+    });
   } catch (err: any) {
-    console.warn('[Payment Gateway API] Fallback to server JSON store:', err?.message || err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
-
-  // Guaranteed default configuration if both DB and JSON are empty
-  const defaultSettings = {
-    activeGateway: 'stripe',
-    currency: 'USD',
-    testMode: true,
-    stripeConnected: true,
-    stripeKeysVerified: false,
-    stripeWebhookVerified: false,
-    stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
-    paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
-    manualSettlement: {
-      enabled: false,
-      bankName: 'Bangkok Bank / Kasikornbank',
-      accountHolder: 'Zecratary Innovations Co., Ltd.',
-      accountNumber: '123-4-56789-0',
-      routingNumber: '002',
-      swiftBic: 'BKKBTHBK',
-      branchName: 'Main Corporate Branch',
-      instructions: 'Please transfer the exact amount and include your reference number for instant verification.',
-      requireReference: true
-    }
-  };
-
-  const finalConfig = settings ? { ...defaultSettings, ...settings } : defaultSettings;
-
-  return NextResponse.json({
-    success: true,
-    gatewayConfig: finalConfig,
-    settings: finalConfig,
-    transactions: manualTransactions
-  }, {
-    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
-  });
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    const { action, gatewayConfig, secretKey, id } = body;
+    const pool = getPgPool();
 
-    // Verification of Stripe keys live
-    if (body.action === 'verify_stripe_keys') {
-      const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
-      const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
-      const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
-      const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
-
-      if (!pKey || !sKey || !wSecret) {
-        return NextResponse.json({
-          success: false,
-          error: 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'
-        }, { status: 400 });
+    // 1. Verify Stripe credentials
+    if (action === 'verify_stripe') {
+      const testKey = secretKey || gatewayConfig?.stripe?.secretKey || process.env.STRIPE_SECRET_KEY;
+      if (!testKey) {
+        return NextResponse.json({ success: false, verified: false, error: 'No Stripe Secret Key provided.' }, { status: 400 });
       }
-
-      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Sandbox Test Mode: Publishable Key must start with "pk_test_" and Secret Key with "sk_test_".'
-        }, { status: 400 });
+      try {
+        const verifyRes = await fetch('https://api.stripe.com/v1/balance', {
+          headers: { 'Authorization': `Bearer ${testKey.trim()}` }
+        });
+        const verifyData = await verifyRes.json();
+        if (verifyRes.ok && !verifyData.error) {
+          return NextResponse.json({ success: true, verified: true });
+        }
+        return NextResponse.json({ success: false, verified: false, error: verifyData.error?.message || 'Invalid Stripe Secret Key' }, { status: 400 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, verified: false, error: err.message }, { status: 500 });
       }
-
-      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Live Production Mode: Publishable Key must start with "pk_live_" and Secret Key with "sk_live_".'
-        }, { status: 400 });
-      }
-
-      if (!wSecret.startsWith('whsec_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Webhook Secret must start with "whsec_".'
-        }, { status: 400 });
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
-      });
     }
 
-    // Verify webhook secret HMAC format
-    if (body.action === 'verify_webhook_secret') {
-      const secret = (body.webhookSecret || '').trim();
-      if (!secret.startsWith('whsec_') || secret.length < 15) {
-        return NextResponse.json({
-          success: false,
-          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.'
-        }, { status: 400 });
-      }
-      return NextResponse.json({
-        success: true,
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!'
-      });
+    // 2. Sync credentials from .env
+    if (action === 'sync_env') {
+      const synced = {
+        stripe: {
+          publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
+          secretKey: process.env.STRIPE_SECRET_KEY || '',
+          webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || ''
+        },
+        paypal: {
+          clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '',
+          clientSecret: process.env.PAYPAL_CLIENT_SECRET || '',
+          webhookId: process.env.PAYPAL_WEBHOOK_ID || ''
+        }
+      };
+      return NextResponse.json({ success: true, gatewayConfig: synced });
     }
 
-    // Save gateway settings
-    const gatewayConfig = body.gatewayConfig || body.paymentSettings || body;
-    const currency = gatewayConfig.currency || body.currency || 'USD';
-
-    // Persist to PostgreSQL if available
-    try {
-      await query(
-        `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
-         VALUES ('primary_settings', $1::jsonb, $2, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           payment_settings = EXCLUDED.payment_settings,
-           currency = EXCLUDED.currency,
-           updated_at = NOW()`,
-        [JSON.stringify(gatewayConfig), currency]
-      );
-    } catch (_) {}
-
-    // Persist to JSON store mirror
-    try {
-      const dataDir = path.join(process.cwd(), 'data');
-      const filePath = path.join(dataDir, 'admin_settings.json');
-      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-      let existing: any = {};
-      if (fs.existsSync(filePath)) {
-        try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+    // 3. Save gateway configuration
+    if (action === 'save_config') {
+      if (!gatewayConfig) {
+        return NextResponse.json({ success: false, error: 'Missing gatewayConfig' }, { status: 400 });
       }
-      existing.paymentSettings = gatewayConfig;
-      existing.currency = currency;
-      existing.updatedAt = new Date().toISOString();
-      fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
-    } catch (_) {}
 
-    return NextResponse.json({
-      success: true,
-      message: 'Payment gateway settings and currency saved successfully to server!',
-      settings: gatewayConfig
-    });
+      const allowedGateways: string[] = [];
+      if (gatewayConfig.stripe?.enabled) allowedGateways.push('stripe');
+      if (gatewayConfig.paypal?.enabled) allowedGateways.push('paypal');
+      if (gatewayConfig.manualSettlement?.enabled) allowedGateways.push('manual');
+
+      if (pool) {
+        try {
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_settings (
+              id VARCHAR(50) PRIMARY KEY DEFAULT 'primary_settings',
+              payment_settings JSONB DEFAULT '{}'::jsonb,
+              translations JSONB DEFAULT '{}'::jsonb,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+          `);
+
+          await pool.query(`
+            INSERT INTO admin_settings (id, payment_settings, updated_at)
+            VALUES ('primary_settings', $1::jsonb, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              payment_settings = EXCLUDED.payment_settings,
+              updated_at = NOW();
+          `, [JSON.stringify(gatewayConfig)]);
+
+          // Also synchronize wallet_settings.allowed_gateways for /wallet
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS wallet_settings (
+              id VARCHAR(50) PRIMARY KEY DEFAULT 'primary',
+              allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]'::jsonb,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+          `);
+
+          await pool.query(`
+            INSERT INTO wallet_settings (id, allowed_gateways, updated_at)
+            VALUES ('primary', $1::jsonb, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              allowed_gateways = EXCLUDED.allowed_gateways,
+              updated_at = NOW();
+          `, [JSON.stringify(allowedGateways)]);
+        } catch (err: any) {
+          console.warn('POST save_config pg notice:', err.message);
+        }
+      }
+
+      // Sync local JSON
+      const fileSettings = readFallbackSettings();
+      fileSettings.payment_settings = gatewayConfig;
+      fileSettings.allowed_gateways = allowedGateways;
+      writeFallbackSettings(fileSettings);
+
+      return NextResponse.json({ success: true });
+    }
+
+    // 4. Approve manual bank settlement (with automatic balance/plan credit)
+    if (action === 'approve_settlement' && id) {
+      if (pool) {
+        try {
+          const itemRes = await pool.query(
+            "SELECT * FROM payment_transactions WHERE id::text = $1 LIMIT 1;",
+            [String(id)]
+          );
+          const item = itemRes.rows?.[0];
+          const email = item?.customer_email;
+          const amt = Number(item?.amount || 0);
+          const planSlug = item?.plan_slug || '';
+
+          await pool.query(
+            "UPDATE payment_transactions SET status = 'succeeded', confirmed_at = NOW() WHERE id::text = $1;",
+            [String(id)]
+          );
+
+          if (email && amt > 0) {
+            if (planSlug === 'wallet_topup') {
+              await pool.query(
+                "UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 WHERE email = $2;",
+                [amt, email]
+              );
+              await pool.query(`
+                INSERT INTO wallet_transactions (id, email, type, amount, status, description, created_at)
+                VALUES ($1, $2, 'topup', $3, 'succeeded', 'Manual Bank Settlement Approved', NOW())
+                ON CONFLICT (id) DO NOTHING;
+              `, [`tx_${Date.now()}`, email, amt]);
+            } else if (planSlug) {
+              await pool.query(
+                "UPDATE users SET plan_slug = $1, plan_status = 'active', updated_at = NOW() WHERE email = $2;",
+                [planSlug, email]
+              );
+            }
+          }
+        } catch (err: any) {
+          console.warn('POST approve_settlement pg notice:', err.message);
+        }
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    // 5. Reject manual bank settlement
+    if (action === 'reject_settlement' && id) {
+      if (pool) {
+        try {
+          await pool.query(
+            "UPDATE payment_transactions SET status = 'failed' WHERE id::text = $1;",
+            [String(id)]
+          );
+        } catch (err: any) {
+          console.warn('POST reject_settlement pg notice:', err.message);
+        }
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
