@@ -48,6 +48,10 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "selectEnginePrompt": "Select Database Dialect",
+    "showPassword": "Show Password",
+    "hidePassword": "Hide Password",
+    "optimizeTablesDesc": "Analyzes planner meals, grocery items, user profiles, and updates query planner selectivity heuristics.",
     "envProduction": "Production",
     "envSandbox": "Sandbox / Testing",
     "appleClientIdPlaceholder": "e.g. com.zecratary.service",
