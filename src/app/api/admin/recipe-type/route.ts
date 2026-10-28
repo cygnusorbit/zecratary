@@ -20,16 +20,50 @@ const DEFAULT_TYPES = [
   { id: 'rt_11', name: 'Beverages', slug: 'beverages', icon: '🍹', description: 'Cocktails, mocktails, juices, teas, and specialty drinks', isActive: true, order: 11 }
 ];
 
-function getPgPool(): Pool | null {
+async function executeQuery(queryText: string, params: any[] = []): Promise<any> {
   const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!connStr || connStr.includes('[YOUR-PASSWORD]')) return null;
+
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   const cleanConn = connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '');
-  return new Pool({
-    connectionString: cleanConn,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000
-  });
+
+  // Attempt 1: SSL mode
+  try {
+    const poolSsl = new Pool({
+      connectionString: cleanConn,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 4000
+    });
+    const client = await poolSsl.connect();
+    try {
+      return await client.query(queryText, params);
+    } finally {
+      client.release();
+      await poolSsl.end();
+    }
+  } catch (err: any) {
+    if (err.message && (err.message.includes('does not support SSL') || err.message.includes('SSL connection'))) {
+      // Attempt 2: Non-SSL fallback for local instances
+      try {
+        const poolNoSsl = new Pool({
+          connectionString: cleanConn,
+          ssl: false,
+          connectionTimeoutMillis: 4000
+        });
+        const client = await poolNoSsl.connect();
+        try {
+          return await client.query(queryText, params);
+        } finally {
+          client.release();
+          await poolNoSsl.end();
+        }
+      } catch (e: any) {
+        console.warn('PostgreSQL non-ssl retry note:', e.message);
+      }
+    }
+    console.warn('PostgreSQL query note:', err.message);
+    return null;
+  }
 }
 
 function getLocalFallback(): any[] {
@@ -50,7 +84,8 @@ function saveLocalFallback(items: any[]) {
   for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
     const full = path.join(process.cwd(), rel);
     try {
-      os_ensure_dir(path.dirname(full));
+      const dir = path.dirname(full);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       let current: any = {};
       if (fs.existsSync(full)) {
         try { current = JSON.parse(fs.readFileSync(full, 'utf8')); } catch (_) {}
@@ -62,32 +97,18 @@ function saveLocalFallback(items: any[]) {
   }
 }
 
-function os_ensure_dir(dir: string) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
 export async function GET() {
-  const pool = getPgPool();
-  if (pool) {
-    try {
-      const client = await pool.connect();
-      try {
-        const res = await client.query(`
-          SELECT recipe_types FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;
-        `);
-        let raw = res.rows?.[0]?.recipe_types;
-        if (typeof raw === 'string') {
-          try { raw = JSON.parse(raw); } catch (_) {}
-        }
-        if (Array.isArray(raw) && raw.length > 0) {
-          return NextResponse.json({ success: true, types: raw, recipeTypes: raw });
-        }
-      } finally {
-        client.release();
-        await pool.end();
-      }
-    } catch (err: any) {
-      console.warn('PostgreSQL recipe-types fetch note:', err.message);
+  const res = await executeQuery(`
+    SELECT recipe_types FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;
+  `);
+
+  if (res && res.rows?.[0]?.recipe_types) {
+    let raw = res.rows[0].recipe_types;
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch (_) {}
+    }
+    if (Array.isArray(raw) && raw.length > 0) {
+      return NextResponse.json({ success: true, types: raw, recipeTypes: raw });
     }
   }
 
@@ -122,26 +143,20 @@ export async function POST(req: Request) {
 
     saveLocalFallback(updated);
 
-    const pool = getPgPool();
-    if (pool) {
-      try {
-        const client = await pool.connect();
-        try {
-          await client.query(`
-            INSERT INTO admin_settings (id, recipe_types, updated_at)
-            VALUES ('primary_settings', $1::jsonb, NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              recipe_types = EXCLUDED.recipe_types,
-              updated_at = NOW();
-          `, [JSON.stringify(updated)]);
-        } finally {
-          client.release();
-          await pool.end();
-        }
-      } catch (err: any) {
-        console.warn('PostgreSQL recipe-types save note:', err.message);
-      }
-    }
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY,
+        recipe_types JSONB,
+        translations JSONB,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS recipe_types JSONB;
+      INSERT INTO admin_settings (id, recipe_types, updated_at)
+      VALUES ('primary_settings', $1::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        recipe_types = EXCLUDED.recipe_types,
+        updated_at = NOW();
+    `, [JSON.stringify(updated)]);
 
     return NextResponse.json({ success: true, types: updated, recipeTypes: updated });
   } catch (err: any) {
@@ -168,22 +183,11 @@ export async function DELETE(req: Request) {
 
     saveLocalFallback(filtered);
 
-    const pool = getPgPool();
-    if (pool) {
-      try {
-        const client = await pool.connect();
-        try {
-          await client.query(`
-            UPDATE admin_settings
-            SET recipe_types = $1::jsonb, updated_at = NOW()
-            WHERE id = 'primary_settings';
-          `, [JSON.stringify(filtered)]);
-        } finally {
-          client.release();
-          await pool.end();
-        }
-      } catch (_) {}
-    }
+    await executeQuery(`
+      UPDATE admin_settings
+      SET recipe_types = $1::jsonb, updated_at = NOW()
+      WHERE id = 'primary_settings';
+    `, [JSON.stringify(filtered)]);
 
     return NextResponse.json({ success: true, types: filtered, recipeTypes: filtered });
   } catch (err: any) {

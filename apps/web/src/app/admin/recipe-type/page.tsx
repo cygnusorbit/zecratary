@@ -1,10 +1,11 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   UtensilsCrossed, Plus, Search, GripVertical, Pencil, Trash2, 
-  CheckCircle2, AlertCircle, RefreshCw, X, ArrowUpDown, ChevronUp, ChevronDown
+  CheckCircle2, AlertCircle, RefreshCw, X, ArrowUpDown, ChevronUp, ChevronDown,
+  Filter
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -39,6 +40,8 @@ export default function AdminRecipeTypePage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [sortOption, setSortOption] = useState<'order' | 'name' | 'slug'>('order');
   const [reorderMode, setReorderMode] = useState<boolean>(false);
   const [hasReordered, setHasReordered] = useState<boolean>(false);
 
@@ -63,7 +66,6 @@ export default function AdminRecipeTypePage() {
   const [itemToDelete, setItemToDelete] = useState<RecipeTypeItem | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Self-update guard to prevent race conditions from own window events
   const isSelfUpdatingRef = useRef<boolean>(false);
   const draggedIndexRef = useRef<number | null>(null);
 
@@ -129,15 +131,40 @@ export default function AdminRecipeTypePage() {
     };
   }, [fetchRecipeTypes, t]);
 
+  // Combined Search, Status Filter & Sorting
   const filteredTypes = useMemo(() => {
+    let list = [...recipeTypes];
+
+    // Status filter
+    if (statusFilter === 'active') {
+      list = list.filter(item => item.isActive);
+    } else if (statusFilter === 'inactive') {
+      list = list.filter(item => !item.isActive);
+    }
+
+    // Query filter
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return recipeTypes;
-    return recipeTypes.filter(item => 
-      item.name.toLowerCase().includes(q) || 
-      item.slug.toLowerCase().includes(q) ||
-      (item.description && item.description.toLowerCase().includes(q))
-    );
-  }, [recipeTypes, searchQuery]);
+    if (q) {
+      list = list.filter(item => 
+        item.name.toLowerCase().includes(q) || 
+        item.slug.toLowerCase().includes(q) ||
+        (item.description && item.description.toLowerCase().includes(q))
+      );
+    }
+
+    // Sorting (when not in reorder mode)
+    if (!reorderMode) {
+      if (sortOption === 'name') {
+        list.sort((a, b) => a.name.localeCompare(b.name));
+      } else if (sortOption === 'slug') {
+        list.sort((a, b) => a.slug.localeCompare(b.slug));
+      } else {
+        list.sort((a, b) => (a.order || 0) - (b.order || 0));
+      }
+    }
+
+    return list;
+  }, [recipeTypes, searchQuery, statusFilter, sortOption, reorderMode]);
 
   const stats = useMemo(() => {
     const total = recipeTypes.length;
@@ -277,7 +304,7 @@ export default function AdminRecipeTypePage() {
     }
   };
 
-  // Accessible Touch-Friendly Reordering Controls
+  // Reorder Touch & Mouse Controls
   const moveItem = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= recipeTypes.length) return;
@@ -291,7 +318,6 @@ export default function AdminRecipeTypePage() {
     setHasReordered(true);
   };
 
-  // Drag and Drop Handlers
   const handleDragStart = (index: number) => {
     draggedIndexRef.current = index;
   };
@@ -343,8 +369,12 @@ export default function AdminRecipeTypePage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-recipe-types-canvas"
+      role="region"
+      aria-label={t('recipeTypesTitle', 'Recipe Types')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ boxSizing: 'border-box', color: 'var(--color-text)' }}
     >
       {/* Toast Alert Banner */}
       {toast && (
@@ -365,8 +395,8 @@ export default function AdminRecipeTypePage() {
         </div>
       )}
 
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div>
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2.5" style={{ color: 'var(--color-primary)' }}>
             <UtensilsCrossed className="h-6 w-6" />
@@ -403,16 +433,19 @@ export default function AdminRecipeTypePage() {
         </div>
       </div>
 
-      {/* Action Bar (Search, Reorder Toggle, and Add Type) */}
-      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+      {/* Action Bar (Search, Harmonized Dropdowns, Reorder & Add Type) */}
+      <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+        {/* Search Input */}
         <div className="relative flex-1">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} />
           <input
             type="text"
             data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
             data-form-type="other"
             autoComplete="off"
-            spellCheck="false"
+            spellCheck={false}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('searchRecipeTypesPlaceholder', 'Search recipe types by name or slug...')}
@@ -429,17 +462,75 @@ export default function AdminRecipeTypePage() {
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100 cursor-pointer"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Harmonized Dropdown Controls & Action Buttons */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status Filter Dropdown */}
+          <div className="relative">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              aria-label={t('filterByStatus', 'Filter by Status')}
+              className="appearance-none pl-3.5 pr-8 py-2.5 text-xs font-bold rounded-xl border outline-none cursor-pointer transition-colors duration-200"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('filterStatusAll', 'All Statuses')}
+              </option>
+              <option value="active" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('filterStatusActive', 'Active Only')}
+              </option>
+              <option value="inactive" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('filterStatusInactive', 'Inactive Only')}
+              </option>
+            </select>
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+          </div>
+
+          {/* Sort Dropdown (Disabled in Reorder Mode) */}
+          <div className="relative">
+            <select
+              value={sortOption}
+              disabled={reorderMode}
+              onChange={(e) => setSortOption(e.target.value as any)}
+              aria-label={t('sortBy', 'Sort by')}
+              className="appearance-none pl-3.5 pr-8 py-2.5 text-xs font-bold rounded-xl border outline-none cursor-pointer transition-colors duration-200 disabled:opacity-40"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <option value="order" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('sortByOrder', 'Custom Order')}
+              </option>
+              <option value="name" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('sortByName', 'Name (A-Z)')}
+              </option>
+              <option value="slug" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('sortBySlug', 'Slug (A-Z)')}
+              </option>
+            </select>
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+          </div>
+
+          {/* Reorder Mode Button */}
           <button
             type="button"
-            onClick={() => setReorderMode(!reorderMode)}
+            onClick={() => {
+              if (!reorderMode) setSortOption('order');
+              setReorderMode(!reorderMode);
+            }}
             className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
             style={reorderMode ? {
               backgroundColor: 'var(--color-primary)',
@@ -455,6 +546,7 @@ export default function AdminRecipeTypePage() {
             <span>{t('reorderModeBtn', 'Reorder Mode')}</span>
           </button>
 
+          {/* Save Order Action */}
           {hasReordered && (
             <button
               type="button"
@@ -468,6 +560,7 @@ export default function AdminRecipeTypePage() {
             </button>
           )}
 
+          {/* Add Recipe Type */}
           <button
             type="button"
             onClick={handleOpenAddModal}
@@ -480,11 +573,11 @@ export default function AdminRecipeTypePage() {
         </div>
       </div>
 
-      {/* Main Table / Card View (Autofill Safe Container) */}
+      {/* Main Table Container (Autofill Safe <div> Container) */}
       <div 
         role="region"
         data-lpignore="true"
-        className="rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
+        className="w-full rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
@@ -501,21 +594,24 @@ export default function AdminRecipeTypePage() {
           <div className="py-16 text-center space-y-3 px-4">
             <UtensilsCrossed className="h-10 w-10 mx-auto stroke-1" style={{ color: 'var(--color-text-secondary)' }} />
             <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('noRecipeTypesFound', 'No recipe types found matching your search.')}
+              {t('noRecipeTypesFound', 'No recipe types found matching your criteria.')}
             </p>
-            {searchQuery && (
+            {(searchQuery || statusFilter !== 'all') && (
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90"
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter('all');
+                }}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90 cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {t('clearSearchBtn', 'Clear Search')}
+                {t('clearSearchBtn', 'Clear Filters')}
               </button>
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto w-full">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr 
@@ -526,7 +622,7 @@ export default function AdminRecipeTypePage() {
                     color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {reorderMode && <th className="p-3.5 w-12 text-center">#</th>}
+                  {reorderMode && <th className="p-3.5 w-14 text-center">#</th>}
                   <th className="p-3.5 font-bold">{t('typeNameColumn', 'Type Name')}</th>
                   <th className="p-3.5 font-bold">{t('slugColumn', 'Slug / Identifier')}</th>
                   <th className="p-3.5 font-bold hidden md:table-cell">{t('descriptionColumn', 'Description')}</th>
@@ -577,7 +673,8 @@ export default function AdminRecipeTypePage() {
                     {/* Name & Icon */}
                     <td className="p-3.5 font-semibold">
                       <div className="flex items-center gap-3">
-                        <span className="w-8 h-8 rounded-xl border flex items-center justify-center text-sm shadow-xs shrink-0"
+                        <span 
+                          className="w-8 h-8 rounded-xl border flex items-center justify-center text-sm shadow-xs shrink-0"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
                             borderColor: 'var(--color-border)'
@@ -672,6 +769,8 @@ export default function AdminRecipeTypePage() {
           <div 
             role="region"
             data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
             data-form-type="other"
             className="w-full max-w-lg rounded-3xl border shadow-2xl p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -688,7 +787,7 @@ export default function AdminRecipeTypePage() {
               <button 
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -702,8 +801,10 @@ export default function AdminRecipeTypePage() {
                   type="text"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={formData.name}
                   onChange={(e) => handleNameChange(e.target.value)}
                   placeholder={t('typeNamePlaceholder', 'e.g., Breakfast, Main Dish, Dessert')}
@@ -726,8 +827,10 @@ export default function AdminRecipeTypePage() {
                     type="text"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    spellCheck={false}
                     value={formData.slug}
                     onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
                     placeholder={t('typeSlugPlaceholder', 'e.g., breakfast, main-dish, dessert')}
@@ -747,8 +850,10 @@ export default function AdminRecipeTypePage() {
                     type="text"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    spellCheck={false}
                     value={formData.icon}
                     onChange={(e) => setFormData(prev => ({ ...prev, icon: e.target.value }))}
                     placeholder={t('typeIconPlaceholder', 'e.g., 🍳, 🥗, 🍰')}
@@ -771,8 +876,10 @@ export default function AdminRecipeTypePage() {
                   rows={2}
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   placeholder={t('typeDescriptionPlaceholder', 'Brief summary of this recipe type...')}
@@ -807,7 +914,7 @@ export default function AdminRecipeTypePage() {
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -820,7 +927,7 @@ export default function AdminRecipeTypePage() {
                 type="button"
                 disabled={saving || !formData.name.trim()}
                 onClick={handleSaveModal}
-                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95"
+                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95 cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {saving ? '...' : t('saveBtn', 'Save Recipe Type')}
@@ -875,7 +982,7 @@ export default function AdminRecipeTypePage() {
                   setIsDeleteModalOpen(false);
                   setItemToDelete(null);
                 }}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -888,7 +995,7 @@ export default function AdminRecipeTypePage() {
                 type="button"
                 disabled={saving}
                 onClick={handleConfirmDelete}
-                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50 cursor-pointer"
               >
                 {saving ? '...' : t('confirmDeleteBtn', 'Confirm Delete')}
               </button>

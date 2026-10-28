@@ -48,6 +48,14 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "filterStatusAll": "All Statuses",
+    "filterStatusActive": "Active Only",
+    "filterStatusInactive": "Inactive Only",
+    "filterByStatus": "Filter by Status",
+    "sortBy": "Sort by",
+    "sortByOrder": "Custom Order",
+    "sortByName": "Name (A-Z)",
+    "sortBySlug": "Slug (A-Z)",
     "storageProviderSelect": "Select Active Provider",
     "storageRegionSelect": "Select Cloud Region",
     "storageCustomRegion": "Custom / Other Region",
