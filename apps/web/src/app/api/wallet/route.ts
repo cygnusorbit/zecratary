@@ -12,6 +12,7 @@ async function ensureWalletSchema() {
         currency VARCHAR(10) DEFAULT 'USD',
         site_name TEXT,
         theme_colors JSONB,
+        value JSONB,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -60,27 +61,15 @@ async function ensureWalletSchema() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-
-    await query(`
-      DO $$
-      BEGIN
-        BEGIN ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS transfer_reference TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS notes TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-      END $$;
-    `);
   } catch (err) {
-    console.warn('[Wallet API] Schema check notice:', err);
+    console.warn('[Wallet API] Schema initialization notice:', err);
   }
 }
 
-async function getSynchronizedGatewayConfig() {
+async function getMasterGatewaySettings() {
   await ensureWalletSchema();
 
-  let config: any = {
-    activeGateway: 'stripe',
+  let settings: any = {
     currency: 'USD',
     testMode: true,
     stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
@@ -94,26 +83,43 @@ async function getSynchronizedGatewayConfig() {
       swiftBic: '',
       branchName: '',
       instructions: '',
-      requireReference: true
+      requireReference: true,
     }
   };
 
-  // 1. PostgreSQL/MySQL admin_settings check
+  // 1. Strictly target id = 1 in admin_settings to prevent stale multi-row merges
   try {
-    const sRes = await query(`SELECT * FROM admin_settings ORDER BY id ASC LIMIT 5`);
-    const rows = Array.isArray(sRes) ? sRes : (sRes?.rows || []);
-    for (const row of rows) {
+    const sRes = await query(`SELECT payment_settings, currency, value FROM admin_settings WHERE id = 1 LIMIT 1`);
+    const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    if (row) {
       if (row.payment_settings) {
         const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-        if (ps && typeof ps === 'object') config = { ...config, ...ps };
-      }
-      if (row.value) {
+        if (ps && typeof ps === 'object') settings = { ...settings, ...ps };
+      } else if (row.value) {
         const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-        if (val && typeof val === 'object') config = { ...config, ...val };
+        if (val && typeof val === 'object') {
+          if (val.paymentSettings) settings = { ...settings, ...val.paymentSettings };
+          else settings = { ...settings, ...val };
+        }
       }
-      if (row.currency) config.currency = row.currency;
+      if (row.currency) settings.currency = row.currency;
     }
   } catch (_) {}
+
+  // 1.1 Fallback to first available row if id = 1 does not exist
+  if (!settings.stripe?.secretKey && !settings.stripe?.publishableKey) {
+    try {
+      const fbRes = await query(`SELECT payment_settings, currency, value FROM admin_settings ORDER BY id ASC LIMIT 1`);
+      const fbRow = Array.isArray(fbRes) ? fbRes[0] : fbRes?.rows?.[0];
+      if (fbRow) {
+        if (fbRow.payment_settings) {
+          const ps = typeof fbRow.payment_settings === 'string' ? JSON.parse(fbRow.payment_settings) : fbRow.payment_settings;
+          if (ps && typeof ps === 'object') settings = { ...settings, ...ps };
+        }
+        if (fbRow.currency) settings.currency = fbRow.currency;
+      }
+    } catch (_) {}
+  }
 
   // 2. Local filesystem mirror check
   try {
@@ -125,34 +131,40 @@ async function getSynchronizedGatewayConfig() {
     for (const fp of candidatePaths) {
       if (fs.existsSync(fp)) {
         const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
-        if (fd.paymentSettings) config = { ...config, ...fd.paymentSettings };
-        if (fd.currency) config.currency = fd.currency;
+        if (fd.paymentSettings && typeof fd.paymentSettings === 'object') {
+          if (!settings.stripe?.publishableKey && !settings.stripe?.secretKey) {
+            settings = { ...settings, ...fd.paymentSettings };
+          }
+        }
+        if (fd.currency && !settings.currency) settings.currency = fd.currency;
         break;
       }
     }
   } catch (_) {}
 
-  // 3. Fallback credentials from environment variables
-  if (!config.stripe.publishableKey) {
-    config.stripe.publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
+  // 3. Fallback to server environment variables
+  if (!settings.stripe.publishableKey) {
+    settings.stripe.publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
   }
-  if (!config.stripe.secretKey) {
-    config.stripe.secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+  if (!settings.stripe.secretKey) {
+    settings.stripe.secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
   }
-  if (!config.stripe.webhookSecret) {
-    config.stripe.webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+  if (!settings.stripe.webhookSecret) {
+    settings.stripe.webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
   }
-  if (!config.paypal.clientId) {
-    config.paypal.clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
+  if (!settings.paypal.clientId) {
+    settings.paypal.clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
   }
-  if (!config.paypal.clientSecret) {
-    config.paypal.clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
+  if (!settings.paypal.clientSecret) {
+    settings.paypal.clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
   }
 
-  const activeMode = (config.activeGateway || 'stripe').toLowerCase();
-  const stripeEnabled = config.stripe?.enabled !== false && (activeMode === 'stripe' || activeMode === 'both' || !config.activeGateway);
-  const paypalEnabled = config.paypal?.enabled === true && (activeMode === 'paypal' || activeMode === 'both');
-  const manualEnabled = Boolean(config.manualSettlement?.enabled ?? config.manual?.enabled ?? false);
+  // Determine allowed gateways strictly by their enabled status in /admin/payment-gateway
+  const stripeEnabled = settings.stripe?.enabled !== undefined ? Boolean(settings.stripe.enabled) : true;
+  const paypalEnabled = settings.paypal?.enabled !== undefined ? Boolean(settings.paypal.enabled) : false;
+  const manualEnabled = settings.manualSettlement?.enabled !== undefined 
+    ? Boolean(settings.manualSettlement.enabled) 
+    : (settings.manual?.enabled !== undefined ? Boolean(settings.manual.enabled) : false);
 
   const allowedGateways: string[] = [];
   if (stripeEnabled) allowedGateways.push('stripe');
@@ -160,19 +172,19 @@ async function getSynchronizedGatewayConfig() {
   if (manualEnabled) allowedGateways.push('manual');
 
   return {
-    rawConfig: config,
+    rawSettings: settings,
     allowedGateways,
     stripeEnabled,
     paypalEnabled,
     manualEnabled,
-    currency: config.currency || 'USD',
-    testMode: Boolean(config.testMode)
+    currency: settings.currency || 'USD',
+    testMode: Boolean(settings.testMode),
   };
 }
 
 export async function GET(req: Request) {
   try {
-    const gwData = await getSynchronizedGatewayConfig();
+    const gwData = await getMasterGatewaySettings();
     const url = new URL(req.url);
     const userId = url.searchParams.get('userId') || '';
     const userEmail = (url.searchParams.get('email') || '').toLowerCase().trim();
@@ -236,7 +248,7 @@ export async function GET(req: Request) {
         totalDeposited = Number(statsRow?.total_dep || 0);
         totalSpent = Number(statsRow?.total_sp || 0);
       } catch (dbErr) {
-        console.warn('[Wallet API] Ledger fetch warning:', dbErr);
+        console.warn('[Wallet API] Data query notice:', dbErr);
       }
     }
 
@@ -269,14 +281,14 @@ export async function GET(req: Request) {
 
     const manualDetails = {
       enabled: gwData.manualEnabled,
-      bankName: gwData.rawConfig.manualSettlement?.bankName || gwData.rawConfig.manual?.bankName || '',
-      accountHolder: gwData.rawConfig.manualSettlement?.accountHolder || gwData.rawConfig.manual?.accountHolder || '',
-      accountNumber: gwData.rawConfig.manualSettlement?.accountNumber || gwData.rawConfig.manual?.accountNumber || '',
-      routingNumber: gwData.rawConfig.manualSettlement?.routingNumber || gwData.rawConfig.manual?.routingNumber || '',
-      swiftBic: gwData.rawConfig.manualSettlement?.swiftBic || gwData.rawConfig.manual?.swiftBic || '',
-      branchName: gwData.rawConfig.manualSettlement?.branchName || gwData.rawConfig.manual?.branchName || '',
-      instructions: gwData.rawConfig.manualSettlement?.instructions || gwData.rawConfig.manual?.instructions || 'Please transfer the exact amount and include your reference number.',
-      requireReference: gwData.rawConfig.manualSettlement?.requireReference ?? true
+      bankName: gwData.rawSettings.manualSettlement?.bankName || gwData.rawSettings.manual?.bankName || '',
+      accountHolder: gwData.rawSettings.manualSettlement?.accountHolder || gwData.rawSettings.manual?.accountHolder || '',
+      accountNumber: gwData.rawSettings.manualSettlement?.accountNumber || gwData.rawSettings.manual?.accountNumber || '',
+      routingNumber: gwData.rawSettings.manualSettlement?.routingNumber || gwData.rawSettings.manual?.routingNumber || '',
+      swiftBic: gwData.rawSettings.manualSettlement?.swiftBic || gwData.rawSettings.manual?.swiftBic || '',
+      branchName: gwData.rawSettings.manualSettlement?.branchName || gwData.rawSettings.manual?.branchName || '',
+      instructions: gwData.rawSettings.manualSettlement?.instructions || gwData.rawSettings.manual?.instructions || 'Please transfer the exact amount and include your reference number.',
+      requireReference: gwData.rawSettings.manualSettlement?.requireReference ?? true,
     };
 
     const structuredSettings = {
@@ -289,8 +301,8 @@ export async function GET(req: Request) {
       allowed_gateways: gwData.allowedGateways,
       active_gateway: gwData.allowedGateways[0] || null,
       allow_site_purchases: walletRules.allow_site_purchases !== false,
-      stripe_configured: Boolean(gwData.rawConfig.stripe?.secretKey || process.env.STRIPE_SECRET_KEY),
-      paypal_configured: Boolean(gwData.rawConfig.paypal?.clientId || process.env.PAYPAL_CLIENT_ID),
+      stripe_configured: Boolean(gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY),
+      paypal_configured: Boolean(gwData.rawSettings.paypal?.clientId || process.env.PAYPAL_CLIENT_ID),
       test_mode: gwData.testMode,
       manual_details: manualDetails,
     };
@@ -309,12 +321,12 @@ export async function GET(req: Request) {
         testMode: gwData.testMode,
         stripe: {
           enabled: gwData.stripeEnabled,
-          publishableKey: gwData.rawConfig.stripe?.publishableKey || ''
+          publishableKey: gwData.rawSettings.stripe?.publishableKey || ''
         },
         paypal: {
           enabled: gwData.paypalEnabled,
-          clientId: gwData.rawConfig.paypal?.clientId || '',
-          environment: gwData.rawConfig.paypal?.environment || 'sandbox'
+          clientId: gwData.rawSettings.paypal?.clientId || '',
+          environment: gwData.rawSettings.paypal?.environment || 'sandbox'
         },
         manualSettlement: manualDetails,
       },
@@ -336,7 +348,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await ensureWalletSchema();
-    const gwData = await getSynchronizedGatewayConfig();
+    const gwData = await getMasterGatewaySettings();
     const body = await req.json();
     const action = body.action || 'topup';
     const gateway = (body.gateway || '').toLowerCase();
@@ -368,14 +380,13 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2. VERIFY STRIPE CHECKOUT SESSION CALLBACK
+    // 2. VERIFY STRIPE SESSION
     if (action === 'verify_stripe_session') {
       const sessionId = body.sessionId;
       if (!sessionId) {
         return NextResponse.json({ success: false, error: 'Session ID is required.' }, { status: 400 });
       }
 
-      // Check idempotency: already credited?
       const existTx = await query(
         `SELECT id, balance_after FROM wallet_transactions WHERE gateway_tx_id = $1 LIMIT 1`,
         [sessionId]
@@ -395,7 +406,7 @@ export async function POST(req: Request) {
       }
 
       let verifiedAmount = 50.00;
-      const secretKey = gwData.rawConfig.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
+      const secretKey = gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
 
       if (secretKey && !sessionId.startsWith('cs_test_mock_')) {
         try {
@@ -453,7 +464,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. ENFORCE GATEWAY PERMISSION FROM /admin/payment-gateway
+    // 3. ENFORCE AUTHORITATIVE GATEWAY AVAILABILITY
     if (gateway === 'stripe' && !gwData.stripeEnabled) {
       return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
     }
@@ -464,9 +475,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Manual Settlement is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
     }
 
-    // 4. STRIPE CHECKOUT SESSION INITIALIZATION
+    // 4. STRIPE CHECKOUT INITIATION
     if (gateway === 'stripe') {
-      const secretKey = gwData.rawConfig.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
+      const secretKey = gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
       const origin = body.origin || (typeof process.env.NEXTAUTH_URL === 'string' ? process.env.NEXTAUTH_URL : 'http://localhost:3000');
 
       if (secretKey && secretKey.startsWith('sk_')) {
@@ -513,7 +524,7 @@ export async function POST(req: Request) {
         }
       }
 
-      // Sandbox Fallback
+      // Sandbox Mock Fallback
       if (gwData.testMode) {
         const mockSessionId = `cs_test_mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         return NextResponse.json({
@@ -525,7 +536,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Stripe keys are not configured in Payment Gateway settings.' }, { status: 400 });
     }
 
-    // 5. PAYPAL CHECKOUT INITIALIZATION
+    // 5. PAYPAL CHECKOUT INITIATION
     if (gateway === 'paypal') {
       const origin = body.origin || (typeof process.env.NEXTAUTH_URL === 'string' ? process.env.NEXTAUTH_URL : 'http://localhost:3000');
       if (gwData.testMode) {

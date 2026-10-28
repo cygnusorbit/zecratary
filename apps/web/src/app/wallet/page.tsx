@@ -63,6 +63,7 @@ function WalletContent() {
   const { t } = useTranslation();
 
   const [loading, setLoading] = useState(false);
+  const [gatewaysLoaded, setGatewaysLoaded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -71,7 +72,7 @@ function WalletContent() {
   const [user, setUser] = useState<User | null>(null);
   const [balance, setBalance] = useState<number>(0);
 
-  // Settings
+  // Settings: allowed_gateways starts strictly empty so disabled gateways never render
   const [settings, setSettings] = useState<WalletSettings>({
     is_enabled: true,
     currency: 'USD',
@@ -79,14 +80,14 @@ function WalletContent() {
     max_topup: 1000,
     preset_amounts: [10, 25, 50, 100, 250],
     bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
-    allowed_gateways: ['stripe', 'paypal', 'manual'],
+    allowed_gateways: [],
     allow_site_purchases: true,
   });
 
-  // Top-Up Form States (Autofill Safe)
+  // Top-Up Form States
   const [selectedAmount, setSelectedAmount] = useState<number>(50);
   const [customAmount, setCustomAmount] = useState<string>('');
-  const [selectedGateway, setSelectedGateway] = useState<string>('stripe');
+  const [selectedGateway, setSelectedGateway] = useState<string>('');
   const [manualReference, setManualReference] = useState<string>('');
 
   // Ledger States
@@ -97,7 +98,7 @@ function WalletContent() {
   const [totalPages, setTotalPages] = useState(1);
   const [stats, setStats] = useState({ totalDeposited: 0, totalSpent: 0, totalEvents: 0 });
 
-  // Concurrency & Debounce locks to prevent runaway request loops
+  // Concurrency & Debounce locks
   const isFetchingRef = useRef(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const verifyingIdRef = useRef<string | null>(null);
@@ -144,7 +145,7 @@ function WalletContent() {
     }
   }, [syncLocalBalanceQuietly]);
 
-  // Fetch Wallet Data, Settings & Audit Ledger with Resilient Text-First Parsing
+  // Fetch Wallet Data, Settings & Audit Ledger
   const fetchWalletData = useCallback(async (
     activeUser: User | null, 
     targetPage = 1, 
@@ -187,6 +188,7 @@ function WalletContent() {
           
           syncLocalBalanceQuietly(wBal);
 
+          // Authoritative allowed gateways array dynamically resolved from /admin/payment-gateway
           const loadedAllowed: string[] = Array.isArray(data.settings?.allowed_gateways)
             ? data.settings.allowed_gateways
             : Array.isArray(data.allowed_gateways)
@@ -208,7 +210,7 @@ function WalletContent() {
               allowed_gateways: loadedAllowed,
               allow_site_purchases: data.settings.allow_site_purchases !== false,
               test_mode: Boolean(data.settings.test_mode),
-              active_gateway: data.settings.active_gateway || 'stripe',
+              active_gateway: data.settings.active_gateway || (loadedAllowed[0] || null),
               stripe_configured: Boolean(data.settings.stripe_configured),
               paypal_configured: Boolean(data.settings.paypal_configured),
               manual_details: data.settings.manual_details || data.gatewaySettings?.manualSettlement || {}
@@ -222,12 +224,13 @@ function WalletContent() {
             }));
           }
 
-          // Dynamic sync: ensure selectedGateway is currently active in /admin/payment-gateway
-          if (loadedAllowed.length > 0) {
-            setSelectedGateway((prev) => loadedAllowed.includes(prev) ? prev : loadedAllowed[0]);
-          } else {
-            setSelectedGateway('');
-          }
+          setGatewaysLoaded(true);
+
+          // Dynamic sync: ensure selectedGateway is currently an active, enabled gateway
+          setSelectedGateway((prev) => {
+            if (prev && loadedAllowed.includes(prev)) return prev;
+            return loadedAllowed[0] || '';
+          });
 
           if (Array.isArray(data.transactions)) {
             setTransactions(data.transactions);
@@ -284,7 +287,7 @@ function WalletContent() {
     }
   };
 
-  // Mount & Debounced Cross-Tab Synchronization
+  // Mount & Real-Time Cross-Tab / Cross-Module Synchronization
   useEffect(() => {
     initAuthStorage();
     const u = getCurrentUser();
@@ -303,7 +306,6 @@ function WalletContent() {
       }
     }
 
-    // Stripe checkout return verification workflow
     const sessionId = searchParams?.get('session_id');
     const isSuccess = searchParams?.get('status') === 'success' || searchParams?.get('success') === 'true';
 
@@ -344,7 +346,6 @@ function WalletContent() {
       };
       verifyCheckoutSession();
     } else {
-      // Initial mount query
       fetchWalletData(u, 1, '', 'all', true);
     }
 
@@ -356,7 +357,7 @@ function WalletContent() {
           setUser(active);
           fetchWalletData(active, page, searchQuery, typeFilter, true);
         }
-      }, 250);
+      }, 200);
     };
 
     window.addEventListener('storage', debouncedSync);
@@ -402,14 +403,12 @@ function WalletContent() {
     };
   }, []);
 
-  // Trigger search and filter changes cleanly
   useEffect(() => {
     if (user) {
       fetchWalletData(user, page, searchQuery, typeFilter, true);
     }
   }, [page, searchQuery, typeFilter]);
 
-  // Compute Active Deposit Amount and Bonus
   const finalDepositAmount = useMemo(() => {
     if (customAmount.trim()) {
       const val = parseFloat(customAmount);
@@ -433,6 +432,10 @@ function WalletContent() {
   const handleDeposit = async () => {
     if (settings.allowed_gateways.length === 0) {
       showToast(t('noGatewaysEnabledNotice', 'No payment gateways are currently enabled in Payment Gateway settings.'), 'error');
+      return;
+    }
+    if (!selectedGateway || !settings.allowed_gateways.includes(selectedGateway)) {
+      showToast(t('pleaseSelectValidGateway', 'Please select an available payment gateway.'), 'error');
       return;
     }
     if (finalDepositAmount < settings.min_topup) {
@@ -621,7 +624,7 @@ function WalletContent() {
           </div>
         </div>
 
-        {/* Top-Up Control Center (8 Cols) - FORM-FREE ACCESSIBLE CONTAINER */}
+        {/* Top-Up Control Center (8 Cols) */}
         <div 
           role="region"
           aria-label={t('depositFunds', 'Deposit Funds')}
@@ -671,7 +674,7 @@ function WalletContent() {
             </div>
           </div>
 
-          {/* Custom Amount Input with Safe Handling */}
+          {/* Custom Amount Input */}
           <div>
             <label className="block text-xs font-bold mb-1 opacity-80">{t('orCustomAmount', 'Or enter custom amount')}</label>
             <div className="relative">
@@ -700,20 +703,33 @@ function WalletContent() {
             </div>
           </div>
 
-          {/* Payment Gateway Options - Synchronized with /admin/payment-gateway */}
+          {/* Payment Gateway Options - Dynamically Excludes Any Disabled Gateway */}
           <div className="space-y-2">
-            <label className="block text-xs font-bold opacity-80">{t('paymentGateway', 'Payment Gateway')}</label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold opacity-80">{t('paymentGateway', 'Payment Gateway')}</label>
+              {gatewaysLoaded && settings.allowed_gateways.length > 0 && (
+                <span className="text-[10px] opacity-60 font-medium">
+                  {settings.allowed_gateways.length} {t('gatewaysAvailable', 'channel(s) active')}
+                </span>
+              )}
+            </div>
 
-            {settings.allowed_gateways.length === 0 ? (
+            {!gatewaysLoaded ? (
+              /* Skeleton Loader to prevent disabled gateways from flashing */
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="p-3.5 rounded-xl border animate-pulse opacity-40 h-12" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }} />
+                <div className="p-3.5 rounded-xl border animate-pulse opacity-40 h-12" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }} />
+              </div>
+            ) : settings.allowed_gateways.length === 0 ? (
               <div 
-                className="p-3.5 rounded-xl border text-xs flex items-center gap-2.5 opacity-90 transition"
+                className="p-3.5 rounded-xl border text-xs flex items-center gap-2.5 opacity-90 transition animate-in fade-in"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
                 <AlertCircle className="h-4 w-4 text-amber-400 flex-shrink-0" />
                 <span>{t('noGatewaysEnabledNotice', 'No payment gateways are currently enabled in Payment Gateway settings. Please contact the administrator.')}</span>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className={`grid gap-2.5 ${settings.allowed_gateways.length === 1 ? 'grid-cols-1' : settings.allowed_gateways.length === 2 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
                 {settings.allowed_gateways.includes('stripe') && (
                   <button
                     type="button"
@@ -768,7 +784,7 @@ function WalletContent() {
             )}
           </div>
 
-          {/* Bank Wire Details (When Manual Settlement is active) */}
+          {/* Bank Wire Details (Only Rendered if Manual Settlement is Enabled & Selected) */}
           {selectedGateway === 'manual' && settings.allowed_gateways.includes('manual') && (
             <div 
               className="p-3.5 rounded-xl border text-xs space-y-2 transition animate-in fade-in"
@@ -811,7 +827,7 @@ function WalletContent() {
           <button
             type="button"
             onClick={handleDeposit}
-            disabled={submitting || finalDepositAmount < settings.min_topup || settings.allowed_gateways.length === 0}
+            disabled={submitting || finalDepositAmount < settings.min_topup || settings.allowed_gateways.length === 0 || !selectedGateway}
             className="w-full py-3 rounded-xl text-white font-bold text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-40"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >

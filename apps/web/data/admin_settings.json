@@ -10806,26 +10806,317 @@
   },
   "paymentSettings": {
     "paypal": {
-      "enabled": false,
+      "enabled": true,
+      "testMode": true,
       "clientId": "",
-      "testMode": false,
+      "clientSecret": "",
       "webhookId": "",
-      "environment": "live",
-      "clientSecret": ""
+      "environment": "sandbox"
     },
     "stripe": {
-      "enabled": false,
-      "testMode": false,
+      "enabled": true,
+      "testMode": true,
+      "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
       "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-      "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-      "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
     },
     "currency": "USD",
-    "testMode": false,
-    "activeGateway": "stripe",
-    "stripeConnected": true,
+    "testMode": true,
+    "activeGateway": "both",
+    "stripeConnected": false,
     "manualSettlement": {
-      "enabled": false,
+      "enabled": true,
+      "bankName": "OCBC",
+      "accountHolder": "ABC",
+      "accountNumber": "11232312312",
+      "routingNumber": "1212",
+      "swiftBic": "123213",
+      "branchName": "New York",
+      "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+      "requireReference": true,
+      "requireApproval": true
+    },
+    "paypalKeysVerified": false,
+    "stripeKeysVerified": true,
+    "paypalWebhookVerified": false,
+    "stripeWebhookVerified": true,
+    "aiModel": "gemini-3.5-flash",
+    "chefAiSettings": {
+      "model": "gemini-3.5-flash",
+      "apiKey": "AQ.Ab8RN6Il3zdVMdc644f9mWwYqVsOG6-gUUXV70Tep713lW5uOg",
+      "provider": "gemini",
+      "availableGeminiModels": [
+        {
+          "id": "gemini-2.5-flash",
+          "name": "Gemini 2.5 Flash",
+          "label": "Gemini 2.5 Flash (gemini-2.5-flash)",
+          "description": "Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025."
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "name": "Gemini 2.5 Pro",
+          "label": "Gemini 2.5 Pro (gemini-2.5-pro)",
+          "description": "Stable release (June 17th, 2025) of Gemini 2.5 Pro"
+        },
+        {
+          "id": "gemini-2.5-flash-preview-tts",
+          "name": "Gemini 2.5 Flash Preview TTS",
+          "label": "Gemini 2.5 Flash Preview TTS (gemini-2.5-flash-preview-tts)",
+          "description": "Gemini 2.5 Flash Preview TTS"
+        },
+        {
+          "id": "gemini-2.5-pro-preview-tts",
+          "name": "Gemini 2.5 Pro Preview TTS",
+          "label": "Gemini 2.5 Pro Preview TTS (gemini-2.5-pro-preview-tts)",
+          "description": "Gemini 2.5 Pro Preview TTS"
+        },
+        {
+          "id": "gemma-4-26b-a4b-it",
+          "name": "Gemma 4 26B A4B IT",
+          "label": "Gemma 4 26B A4B IT (gemma-4-26b-a4b-it)",
+          "description": "Gemma 4 26B A4B IT"
+        },
+        {
+          "id": "gemma-4-31b-it",
+          "name": "Gemma 4 31B IT",
+          "label": "Gemma 4 31B IT (gemma-4-31b-it)",
+          "description": "Gemma 4 31B IT"
+        },
+        {
+          "id": "gemini-flash-latest",
+          "name": "Gemini Flash Latest",
+          "label": "Gemini Flash Latest (gemini-flash-latest)",
+          "description": "Latest release of Gemini Flash"
+        },
+        {
+          "id": "gemini-flash-lite-latest",
+          "name": "Gemini Flash-Lite Latest",
+          "label": "Gemini Flash-Lite Latest (gemini-flash-lite-latest)",
+          "description": "Latest release of Gemini Flash-Lite"
+        },
+        {
+          "id": "gemini-pro-latest",
+          "name": "Gemini Pro Latest",
+          "label": "Gemini Pro Latest (gemini-pro-latest)",
+          "description": "Latest release of Gemini Pro"
+        },
+        {
+          "id": "gemini-2.5-flash-lite",
+          "name": "Gemini 2.5 Flash-Lite",
+          "label": "Gemini 2.5 Flash-Lite (gemini-2.5-flash-lite)",
+          "description": "Stable version of Gemini 2.5 Flash-Lite, released in July of 2025"
+        },
+        {
+          "id": "gemini-2.5-flash-image",
+          "name": "Nano Banana",
+          "label": "Nano Banana (gemini-2.5-flash-image)",
+          "description": "Gemini 2.5 Flash Preview Image"
+        },
+        {
+          "id": "gemini-3-flash-preview",
+          "name": "Gemini 3 Flash Preview",
+          "label": "Gemini 3 Flash Preview (gemini-3-flash-preview)",
+          "description": "Gemini 3 Flash Preview"
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "label": "Gemini 3.1 Pro Preview (gemini-3.1-pro-preview)",
+          "description": "Gemini 3.1 Pro Preview"
+        },
+        {
+          "id": "gemini-3.1-pro-preview-customtools",
+          "name": "Gemini 3.1 Pro Preview Custom Tools",
+          "label": "Gemini 3.1 Pro Preview Custom Tools (gemini-3.1-pro-preview-customtools)",
+          "description": "Gemini 3.1 Pro Preview optimized for custom tool usage"
+        },
+        {
+          "id": "gemini-3.1-flash-lite-preview",
+          "name": "Gemini 3.1 Flash Lite Preview",
+          "label": "Gemini 3.1 Flash Lite Preview (gemini-3.1-flash-lite-preview)",
+          "description": "Gemini 3.1 Flash Lite Preview"
+        },
+        {
+          "id": "gemini-3.1-flash-lite",
+          "name": "Gemini 3.1 Flash Lite",
+          "label": "Gemini 3.1 Flash Lite (gemini-3.1-flash-lite)",
+          "description": "Gemini 3.1 Flash Lite"
+        },
+        {
+          "id": "gemini-3-pro-image-preview",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (gemini-3-pro-image-preview)",
+          "description": "Gemini 3 Pro Image Preview"
+        },
+        {
+          "id": "gemini-3-pro-image",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (gemini-3-pro-image)",
+          "description": "Gemini 3 Pro Image"
+        },
+        {
+          "id": "nano-banana-pro-preview",
+          "name": "Nano Banana Pro",
+          "label": "Nano Banana Pro (nano-banana-pro-preview)",
+          "description": "Gemini 3 Pro Image Preview"
+        },
+        {
+          "id": "gemini-3.1-flash-image-preview",
+          "name": "Nano Banana 2",
+          "label": "Nano Banana 2 (gemini-3.1-flash-image-preview)",
+          "description": "Gemini 3.1 Flash Image Preview."
+        },
+        {
+          "id": "gemini-3.1-flash-image",
+          "name": "Nano Banana 2",
+          "label": "Nano Banana 2 (gemini-3.1-flash-image)",
+          "description": "Gemini 3.1 Flash Image."
+        },
+        {
+          "id": "gemini-3.1-flash-lite-image",
+          "name": "Nano Banana 2 Lite",
+          "label": "Nano Banana 2 Lite (gemini-3.1-flash-lite-image)",
+          "description": "Gemini 3.1 Flash Lite Image."
+        },
+        {
+          "id": "gemini-3.5-flash",
+          "name": "Gemini 3.5 Flash",
+          "label": "Gemini 3.5 Flash (gemini-3.5-flash)",
+          "description": "Gemini 3.5 Flash"
+        },
+        {
+          "id": "gemini-3.5-flash-lite",
+          "name": "Gemini 3.5 Flash Lite",
+          "label": "Gemini 3.5 Flash Lite (gemini-3.5-flash-lite)",
+          "description": "Gemini 3.5 Flash Lite"
+        },
+        {
+          "id": "gemini-omni-flash-preview",
+          "name": "Gemini Omni Flash Preview",
+          "label": "Gemini Omni Flash Preview (gemini-omni-flash-preview)",
+          "description": "Gemini Omni Flash Preview"
+        },
+        {
+          "id": "gemini-omni-1.1-flash",
+          "name": "Gemini Omni 1.1 Flash",
+          "label": "Gemini Omni 1.1 Flash (gemini-omni-1.1-flash)",
+          "description": "Gemini Omni 1.1 Flash "
+        },
+        {
+          "id": "gemini-3.5-transcribe",
+          "name": "Gemini 3.5 Transcribe",
+          "label": "Gemini 3.5 Transcribe (gemini-3.5-transcribe)",
+          "description": "Gemini 3.5 Transcribe"
+        },
+        {
+          "id": "gemini-3.6-flash",
+          "name": "Gemini 3.6 Flash",
+          "label": "Gemini 3.6 Flash (gemini-3.6-flash)",
+          "description": "Gemini 3.6 Flash"
+        },
+        {
+          "id": "gemini-3.7-flash",
+          "name": "Gemini 3.7 Flash",
+          "label": "Gemini 3.7 Flash (gemini-3.7-flash)",
+          "description": "Gemini 3.7 Flash"
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "label": "Gemini 3.8 Flash (gemini-3.8-flash)",
+          "description": "Gemini 3.8 Flash"
+        },
+        {
+          "id": "lyria-3-clip-preview",
+          "name": "Lyria 3 Clip Preview",
+          "label": "Lyria 3 Clip Preview (lyria-3-clip-preview)",
+          "description": "Lyria 3 30s model Preview"
+        },
+        {
+          "id": "lyria-3-pro-preview",
+          "name": "Lyria 3 Pro Preview",
+          "label": "Lyria 3 Pro Preview (lyria-3-pro-preview)",
+          "description": "Lyria 3 Pro Preview"
+        },
+        {
+          "id": "lyria-3.5",
+          "name": "Lyria 3.5",
+          "label": "Lyria 3.5 (lyria-3.5)",
+          "description": "Music Generation model"
+        },
+        {
+          "id": "gemini-3.1-flash-tts-preview",
+          "name": "Gemini 3.1 Flash TTS Preview",
+          "label": "Gemini 3.1 Flash TTS Preview (gemini-3.1-flash-tts-preview)",
+          "description": "Gemini 3.1 Flash TTS Preview"
+        },
+        {
+          "id": "gemini-3.8-flash-tts",
+          "name": "Gemini 3.8 Flash TTS",
+          "label": "Gemini 3.8 Flash TTS (gemini-3.8-flash-tts)",
+          "description": "Gemini 3.8 Flash TTS"
+        },
+        {
+          "id": "gemini-3.8-flash-lite-tts",
+          "name": "Gemini 3.8 Flash Lite TTS",
+          "label": "Gemini 3.8 Flash Lite TTS (gemini-3.8-flash-lite-tts)",
+          "description": "Gemini 3.8 Flash Lite TTS"
+        },
+        {
+          "id": "gemini-robotics-er-2-preview",
+          "name": "Gemini Robotics-ER 2 Preview",
+          "label": "Gemini Robotics-ER 2 Preview (gemini-robotics-er-2-preview)",
+          "description": "Gemini Robotics-ER 2 Preview"
+        },
+        {
+          "id": "gemini-2.5-computer-use-preview-10-2025",
+          "name": "Gemini 2.5 Computer Use Preview 10-2025",
+          "label": "Gemini 2.5 Computer Use Preview 10-2025 (gemini-2.5-computer-use-preview-10-2025)",
+          "description": "Gemini 2.5 Computer Use Preview 10-2025"
+        },
+        {
+          "id": "antigravity-preview-05-2026",
+          "name": "Antigravity Agent Preview",
+          "label": "Antigravity Agent Preview (antigravity-preview-05-2026)",
+          "description": "Preview release of Antigravity Agent (05-2026)"
+        },
+        {
+          "id": "antigravity-preview-09-2026",
+          "name": "Antigravity Agent Preview",
+          "label": "Antigravity Agent Preview (antigravity-preview-09-2026)",
+          "description": "Preview release of Antigravity Agent (09-2026)"
+        },
+        {
+          "id": "antigravity-preview-latest",
+          "name": "Antigravity Agent Preview Latest",
+          "label": "Antigravity Agent Preview Latest (antigravity-preview-latest)",
+          "description": "Latest preview release of Antigravity Agent"
+        },
+        {
+          "id": "deep-research-max-preview-04-2026",
+          "name": "Deep Research Max Preview (Apr-21-2026)",
+          "label": "Deep Research Max Preview (Apr-21-2026) (deep-research-max-preview-04-2026)",
+          "description": "Preview release (April 21st, 2026) of Deep Research Max"
+        },
+        {
+          "id": "deep-research-preview-04-2026",
+          "name": "Deep Research Preview (Apr-21-2026)",
+          "label": "Deep Research Preview (Apr-21-2026) (deep-research-preview-04-2026)",
+          "description": "Preview release (April 21th, 2026) of Deep Research"
+        },
+        {
+          "id": "deep-research-pro-preview-12-2025",
+          "name": "Deep Research Pro Preview (Dec-12-2025)",
+          "label": "Deep Research Pro Preview (Dec-12-2025) (deep-research-pro-preview-12-2025)",
+          "description": "Preview release (December 12th, 2025) of Deep Research Pro"
+        }
+      ]
+    },
+    "id": "ptx_1790962799750_uvtta",
+    "notes": "",
+    "amount": 50,
+    "manual": {
+      "enabled": true,
       "bankName": "OCBC",
       "swiftBic": "123213",
       "branchName": "New York",
@@ -10833,14 +11124,14 @@
       "accountHolder": "ABC",
       "accountNumber": "11232312312",
       "routingNumber": "1212",
-      "requireApproval": true,
-      "requireReference": true,
-      "requireAdminApproval": true
+      "requireReference": true
     },
-    "paypalKeysVerified": false,
-    "stripeKeysVerified": true,
-    "paypalWebhookVerified": false,
-    "stripeWebhookVerified": true
+    "status": "pending",
+    "plan_name": "Store Wallet Top-Up",
+    "customer_name": "System Administrator",
+    "customer_email": "admin@zecratary.com",
+    "failure_reason": "",
+    "transfer_reference": ""
   },
   "subscriptionPlans": [
     {
