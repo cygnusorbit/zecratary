@@ -4,8 +4,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   UtensilsCrossed, Plus, Search, GripVertical, Pencil, Trash2, 
-  CheckCircle2, AlertCircle, RefreshCw, X, ArrowUpDown, ChevronUp, ChevronDown,
-  Filter
+  CheckCircle2, AlertCircle, RefreshCw, X, ArrowUpDown, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -45,7 +44,7 @@ export default function AdminRecipeTypePage() {
   const [reorderMode, setReorderMode] = useState<boolean>(false);
   const [hasReordered, setHasReordered] = useState<boolean>(false);
 
-  // Modal Dialog States (Autofill Safe Accessible <div> Containers)
+  // Modal Dialog States (Accessible <div> Containers with Zero <form> Tags)
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<RecipeTypeItem | null>(null);
   const [formData, setFormData] = useState<{
@@ -131,18 +130,15 @@ export default function AdminRecipeTypePage() {
     };
   }, [fetchRecipeTypes, t]);
 
-  // Combined Search, Status Filter & Sorting
   const filteredTypes = useMemo(() => {
     let list = [...recipeTypes];
 
-    // Status filter
     if (statusFilter === 'active') {
       list = list.filter(item => item.isActive);
     } else if (statusFilter === 'inactive') {
       list = list.filter(item => !item.isActive);
     }
 
-    // Query filter
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       list = list.filter(item => 
@@ -152,7 +148,6 @@ export default function AdminRecipeTypePage() {
       );
     }
 
-    // Sorting (when not in reorder mode)
     if (!reorderMode) {
       if (sortOption === 'name') {
         list.sort((a, b) => a.name.localeCompare(b.name));
@@ -304,7 +299,6 @@ export default function AdminRecipeTypePage() {
     }
   };
 
-  // Reorder Touch & Mouse Controls
   const moveItem = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= recipeTypes.length) return;
@@ -433,7 +427,7 @@ export default function AdminRecipeTypePage() {
         </div>
       </div>
 
-      {/* Action Bar (Search, Harmonized Dropdowns, Reorder & Add Type) */}
+      {/* Action Bar (Search, Harmonized Select Controls & Add Type) */}
       <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
         {/* Search Input */}
         <div className="relative flex-1">
@@ -469,7 +463,7 @@ export default function AdminRecipeTypePage() {
           )}
         </div>
 
-        {/* Harmonized Dropdown Controls & Action Buttons */}
+        {/* Harmonized Controls & Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
           {/* Status Filter Dropdown */}
           <div className="relative">
@@ -497,7 +491,7 @@ export default function AdminRecipeTypePage() {
             <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
           </div>
 
-          {/* Sort Dropdown (Disabled in Reorder Mode) */}
+          {/* Sort Dropdown */}
           <div className="relative">
             <select
               value={sortOption}
@@ -573,7 +567,7 @@ export default function AdminRecipeTypePage() {
         </div>
       </div>
 
-      {/* Main Table Container (Autofill Safe <div> Container) */}
+      {/* Main Table Container */}
       <div 
         role="region"
         data-lpignore="true"
@@ -756,7 +750,7 @@ export default function AdminRecipeTypePage() {
         )}
       </div>
 
-      {/* Add / Edit Recipe Type Modal (Accessible <div> Container) */}
+      {/* Add / Edit Recipe Type Modal (Zero <form> Accessible <div> Container) */}
       {isModalOpen && (
         <div 
           role="dialog"
@@ -857,7 +851,7 @@ export default function AdminRecipeTypePage() {
                     value={formData.icon}
                     onChange={(e) => setFormData(prev => ({ ...prev, icon: e.target.value }))}
                     placeholder={t('typeIconPlaceholder', 'e.g., 🍳, 🥗, 🍰')}
-                    className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-center font-emoji"
+                    className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-center"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -937,7 +931,7 @@ export default function AdminRecipeTypePage() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal (Accessible <div> Container) */}
+      {/* Delete Confirmation Modal (Zero <form> Accessible <div> Container) */}
       {isDeleteModalOpen && itemToDelete && (
         <div 
           role="dialog"

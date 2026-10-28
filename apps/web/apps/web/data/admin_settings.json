@@ -156,45 +156,42 @@
     "Baking"
   ],
   "paymentSettings": {
-    "id": "ptx_1790962799750_uvtta",
-    "notes": "",
-    "amount": 50,
     "paypal": {
       "enabled": false,
       "clientId": "",
-      "clientSecret": "",
+      "testMode": false,
       "webhookId": "",
-      "environment": "sandbox"
+      "environment": "live",
+      "clientSecret": ""
     },
-    "status": "pending",
     "stripe": {
-      "enabled": true,
-      "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
+      "enabled": false,
+      "testMode": false,
       "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-      "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
+      "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+      "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
     },
     "currency": "USD",
-    "testMode": true,
-    "plan_name": "Store Wallet Top-Up",
+    "testMode": false,
     "activeGateway": "stripe",
-    "customer_name": "System Administrator",
-    "customer_email": "admin@zecratary.com",
-    "failure_reason": "",
-    "stripeConnected": false,
+    "stripeConnected": true,
     "manualSettlement": {
-      "enabled": true,
+      "enabled": false,
       "bankName": "OCBC",
-      "accountHolder": "ABC",
-      "accountNumber": "11232312312",
-      "routingNumber": "1212",
       "swiftBic": "123213",
       "branchName": "New York",
       "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
-      "requireReference": true
+      "accountHolder": "ABC",
+      "accountNumber": "11232312312",
+      "routingNumber": "1212",
+      "requireApproval": true,
+      "requireReference": true,
+      "requireAdminApproval": true
     },
-    "stripeKeysVerified": false,
-    "transfer_reference": "",
-    "stripeWebhookVerified": false
+    "paypalKeysVerified": false,
+    "stripeKeysVerified": true,
+    "paypalWebhookVerified": false,
+    "stripeWebhookVerified": true
   },
   "storage_settings": {
     "provider": "localhost",

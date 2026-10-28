@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
+import { query, isPostgres } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
@@ -20,49 +20,62 @@ const DEFAULT_TYPES = [
   { id: 'rt_11', name: 'Beverages', slug: 'beverages', icon: '🍹', description: 'Cocktails, mocktails, juices, teas, and specialty drinks', isActive: true, order: 11 }
 ];
 
-async function executeQuery(queryText: string, params: any[] = []): Promise<any> {
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) return null;
-
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  const cleanConn = connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '');
-
-  // Attempt 1: SSL mode
+let schemaEnsured = false;
+async function ensureSchema() {
+  if (schemaEnsured) return;
   try {
-    const poolSsl = new Pool({
-      connectionString: cleanConn,
-      ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 4000
-    });
-    const client = await poolSsl.connect();
-    try {
-      return await client.query(queryText, params);
-    } finally {
-      client.release();
-      await poolSsl.end();
+    if (isPostgres()) {
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id VARCHAR(64) PRIMARY KEY,
+          recipe_types JSONB DEFAULT '[]'::jsonb,
+          translations JSONB DEFAULT '{}'::jsonb,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS recipe_types JSONB DEFAULT '[]'::jsonb;`);
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;`);
+      await query(`
+        CREATE TABLE IF NOT EXISTS recipe_types (
+          id VARCHAR(64) PRIMARY KEY,
+          name VARCHAR(255) NOT NULL UNIQUE,
+          slug VARCHAR(255) NOT NULL UNIQUE,
+          icon VARCHAR(64) DEFAULT '🍽️',
+          description TEXT DEFAULT '',
+          sort_order INT DEFAULT 0,
+          is_active BOOLEAN DEFAULT TRUE,
+          is_default BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+    } else {
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id VARCHAR(64) PRIMARY KEY,
+          recipe_types JSON,
+          translations JSON,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        );
+      `);
+      await query(`
+        CREATE TABLE IF NOT EXISTS recipe_types (
+          id VARCHAR(64) PRIMARY KEY,
+          name VARCHAR(255) NOT NULL UNIQUE,
+          slug VARCHAR(255) NOT NULL UNIQUE,
+          icon VARCHAR(64) DEFAULT '🍽️',
+          description TEXT DEFAULT '',
+          sort_order INT DEFAULT 0,
+          is_active BOOLEAN DEFAULT TRUE,
+          is_default BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
     }
-  } catch (err: any) {
-    if (err.message && (err.message.includes('does not support SSL') || err.message.includes('SSL connection'))) {
-      // Attempt 2: Non-SSL fallback for local instances
-      try {
-        const poolNoSsl = new Pool({
-          connectionString: cleanConn,
-          ssl: false,
-          connectionTimeoutMillis: 4000
-        });
-        const client = await poolNoSsl.connect();
-        try {
-          return await client.query(queryText, params);
-        } finally {
-          client.release();
-          await poolNoSsl.end();
-        }
-      } catch (e: any) {
-        console.warn('PostgreSQL non-ssl retry note:', e.message);
-      }
-    }
-    console.warn('PostgreSQL query note:', err.message);
-    return null;
+    schemaEnsured = true;
+  } catch (err) {
+    // Non-blocking schema note
   }
 }
 
@@ -98,18 +111,41 @@ function saveLocalFallback(items: any[]) {
 }
 
 export async function GET() {
-  const res = await executeQuery(`
-    SELECT recipe_types FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;
-  `);
+  await ensureSchema();
 
-  if (res && res.rows?.[0]?.recipe_types) {
-    let raw = res.rows[0].recipe_types;
-    if (typeof raw === 'string') {
-      try { raw = JSON.parse(raw); } catch (_) {}
+  try {
+    // Defensive SELECT * prevents "column recipe_types does not exist" errors
+    const rows = await query(`SELECT * FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;`);
+    if (rows && rows.length > 0) {
+      const row = rows[0];
+      let raw = row.recipe_types || row.recipeTypes;
+      if (!raw && row.value && typeof row.value === 'object') {
+        raw = row.value.recipe_types || row.value.recipeTypes;
+      }
+      if (typeof raw === 'string') {
+        try { raw = JSON.parse(raw); } catch (_) {}
+      }
+      if (Array.isArray(raw) && raw.length > 0) {
+        return NextResponse.json({ success: true, types: raw, recipeTypes: raw });
+      }
     }
-    if (Array.isArray(raw) && raw.length > 0) {
-      return NextResponse.json({ success: true, types: raw, recipeTypes: raw });
+
+    // Try standalone recipe_types table
+    const tableRows = await query(`SELECT * FROM recipe_types ORDER BY sort_order ASC, created_at ASC;`);
+    if (Array.isArray(tableRows) && tableRows.length > 0) {
+      const normalized = tableRows.map((r: any, idx: number) => ({
+        id: String(r.id),
+        name: String(r.name),
+        slug: String(r.slug),
+        icon: r.icon || '🍽️',
+        description: r.description || '',
+        order: Number(r.sort_order ?? idx + 1),
+        isActive: Boolean(r.is_active !== false && r.is_active !== 0)
+      }));
+      return NextResponse.json({ success: true, types: normalized, recipeTypes: normalized });
     }
+  } catch (err: any) {
+    // Fallback to disk on database read error
   }
 
   const fallback = getLocalFallback();
@@ -117,10 +153,13 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  await ensureSchema();
+
   try {
     const body = await req.json();
-    const current = (await (await GET()).json())?.types || DEFAULT_TYPES;
-    
+    const currentRes = await GET();
+    const current = (await currentRes.json())?.types || DEFAULT_TYPES;
+
     let updated: any[] = [];
     if (Array.isArray(body)) {
       updated = body;
@@ -141,22 +180,29 @@ export async function POST(req: Request) {
       updated = [...current, newItem];
     }
 
+    // Persist to local JSON fallback
     saveLocalFallback(updated);
 
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(64) PRIMARY KEY,
-        recipe_types JSONB,
-        translations JSONB,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS recipe_types JSONB;
-      INSERT INTO admin_settings (id, recipe_types, updated_at)
-      VALUES ('primary_settings', $1::jsonb, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        recipe_types = EXCLUDED.recipe_types,
-        updated_at = NOW();
-    `, [JSON.stringify(updated)]);
+    // Persist to admin_settings
+    try {
+      if (isPostgres()) {
+        await query(`
+          INSERT INTO admin_settings (id, recipe_types, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            recipe_types = EXCLUDED.recipe_types,
+            updated_at = NOW();
+        `, [JSON.stringify(updated)]);
+      } else {
+        await query(`
+          INSERT INTO admin_settings (id, recipe_types, updated_at)
+          VALUES ('primary_settings', ?, NOW())
+          ON DUPLICATE KEY UPDATE
+            recipe_types = VALUES(recipe_types),
+            updated_at = NOW();
+        `, [JSON.stringify(updated)]);
+      }
+    } catch (_) {}
 
     return NextResponse.json({ success: true, types: updated, recipeTypes: updated });
   } catch (err: any) {
@@ -169,12 +215,15 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  await ensureSchema();
+
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     const slug = searchParams.get('slug');
 
-    const current = (await (await GET()).json())?.types || DEFAULT_TYPES;
+    const currentRes = await GET();
+    const current = (await currentRes.json())?.types || DEFAULT_TYPES;
     const filtered = current.filter((item: any) => {
       if (id && item.id === id) return false;
       if (slug && item.slug === slug) return false;
@@ -183,11 +232,23 @@ export async function DELETE(req: Request) {
 
     saveLocalFallback(filtered);
 
-    await executeQuery(`
-      UPDATE admin_settings
-      SET recipe_types = $1::jsonb, updated_at = NOW()
-      WHERE id = 'primary_settings';
-    `, [JSON.stringify(filtered)]);
+    try {
+      if (isPostgres()) {
+        await query(`
+          UPDATE admin_settings
+          SET recipe_types = $1::jsonb, updated_at = NOW()
+          WHERE id = 'primary_settings';
+        `, [JSON.stringify(filtered)]);
+        if (id) await query(`DELETE FROM recipe_types WHERE id = $1;`, [id]);
+      } else {
+        await query(`
+          UPDATE admin_settings
+          SET recipe_types = ?, updated_at = NOW()
+          WHERE id = 'primary_settings';
+        `, [JSON.stringify(filtered)]);
+        if (id) await query(`DELETE FROM recipe_types WHERE id = ?;`, [id]);
+      }
+    } catch (_) {}
 
     return NextResponse.json({ success: true, types: filtered, recipeTypes: filtered });
   } catch (err: any) {
