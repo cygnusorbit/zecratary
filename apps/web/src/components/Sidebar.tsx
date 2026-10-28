@@ -1190,7 +1190,7 @@ export default function Sidebar() {
             </Link>
           </div>
 
-          {/* 1. CREATE ACCORDION (Task 1: Same Primary Accent Color as Admin Access) */}
+          {/* 1. CREATE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1223,7 +1223,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION (Task 1: Same Primary Accent Color as Admin Access) */}
+          {/* 2. MANAGE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1256,7 +1256,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 3. PLAN ACCORDION (Task 1: Same Primary Accent Color as Admin Access) */}
+          {/* 3. PLAN ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1289,7 +1289,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY ACCORDION (Task 1: Same Primary Accent Color as Admin Access) */}
+          {/* 4. FINANCIAL & UTILITY ACCORDION (Finance Hub: Clean 'Wallet' Link) */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1306,12 +1306,11 @@ export default function Sidebar() {
 
             {(openSections.finance || isCollapsed) && (
               <div className="space-y-0.5">
-                {/* Task 2: Token */}
                 <Link href="/token" className={navClass('/token')} style={navStyle('/token')} title={t('token', 'Token')}>
                   <Coins className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('token', 'Token')}</span>}
                 </Link>
-                {/* Task 3: Wallet */}
+                {/* Finance Hub: Text changed to 'Wallet' */}
                 <Link href="/wallet" className={navClass('/wallet')} style={navStyle('/wallet')} title={t('wallet', 'Wallet')}>
                   <Wallet className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('wallet', 'Wallet')}</span>}
@@ -1328,7 +1327,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION (ALL MODULES PRESERVED) */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (Wallet Settings properly namespaced) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -1346,7 +1345,6 @@ export default function Sidebar() {
 
               {(openSections.admin || isCollapsed) && (
                 <div className="space-y-0.5">
-                  {/* Task 4: General Settings */}
                   <Link href="/admin" className={navClass('/admin')} style={navStyle('/admin')} title={t('generalSettings', 'General Settings')}>
                     <Settings className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('generalSettings', 'General Settings')}</span>}
@@ -1367,14 +1365,14 @@ export default function Sidebar() {
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
                   </Link>
-                  {/* Task 5: Token Settings */}
                   <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} style={navStyle('/admin/token-setting')} title={t('tokenSettings', 'Token Settings')}>
                     <Coins className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('tokenSettings', 'Token Settings')}</span>}
                   </Link>
-                  <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} style={navStyle('/admin/wallet-settings')} title={t('wallet', 'Wallet')}>
+                  {/* Distinct localization key for admin settings */}
+                  <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} style={navStyle('/admin/wallet-settings')} title={t('walletSettings', 'Wallet Settings')}>
                     <Wallet className="h-4 w-4 shrink-0" />
-                    {!isCollapsed && <span>{t('wallet', 'Wallet Settings')}</span>}
+                    {!isCollapsed && <span>{t('walletSettings', 'Wallet Settings')}</span>}
                   </Link>
                   <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Alerts')}>
                     <BellRing className="h-4 w-4 shrink-0" />
@@ -1400,7 +1398,6 @@ export default function Sidebar() {
                     <Key className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('socialLogin', 'Social Login')}</span>}
                   </Link>
-                  {/* Task 6: Database Settings */}
                   <Link href="/admin/database" className={navClass('/admin/database')} style={navStyle('/admin/database')} title={t('databaseSettings', 'Database Settings')}>
                     <Database className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('databaseSettings', 'Database Settings')}</span>}
@@ -1474,11 +1471,9 @@ export default function Sidebar() {
               <Link href="/shopping" onClick={() => setMobileMenuOpen(false)} className={navClass('/shopping')} style={navStyle('/shopping')}>
                 <ShoppingCart className="h-4 w-4 shrink-0" /> <span>{t('shoppingList', 'Shopping List')}</span>
               </Link>
-              {/* Task 2: Token */}
               <Link href="/token" onClick={() => setMobileMenuOpen(false)} className={navClass('/token')} style={navStyle('/token')}>
                 <Coins className="h-4 w-4 shrink-0" /> <span>{t('token', 'Token')}</span>
               </Link>
-              {/* Task 3: Wallet */}
               <Link href="/wallet" onClick={() => setMobileMenuOpen(false)} className={navClass('/wallet')} style={navStyle('/wallet')}>
                 <Wallet className="h-4 w-4 shrink-0" /> <span>{t('wallet', 'Wallet')}</span>
               </Link>
