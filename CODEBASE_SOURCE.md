@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.79",
+  "version": "8.1.80",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.79",
+  "version": "8.1.80",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -29470,13 +29470,14 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Key, Check, Copy, Eye, EyeOff, RotateCcw, 
-  ArrowLeft, CheckCircle2, AlertCircle, RefreshCw, Sparkles
+  ArrowLeft, CheckCircle2, AlertCircle, RefreshCw, Sparkles,
+  ChevronDown, Settings2, Sliders
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
-import FontAwesomeIcon from '@/components/FontAwesomeIcon';
 
 interface ProviderConfig {
   enabled: boolean;
+  environment: 'production' | 'sandbox';
   clientId?: string;
   clientSecret?: string;
   appId?: string;
@@ -29496,18 +29497,21 @@ interface SocialLoginSettings {
 const DEFAULT_SETTINGS: SocialLoginSettings = {
   google: {
     enabled: true,
+    environment: 'production',
     clientId: '',
     clientSecret: '',
     callbackUrl: '/api/auth/callback/google'
   },
   facebook: {
     enabled: true,
+    environment: 'production',
     appId: '',
     appSecret: '',
     callbackUrl: '/api/auth/callback/facebook'
   },
   apple: {
     enabled: true,
+    environment: 'production',
     clientId: '',
     teamId: '',
     keyId: '',
@@ -29525,7 +29529,7 @@ export default function SocialLoginSettingPage() {
   const [saving, setSaving] = useState<boolean>(false);
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
 
-  // Field visibility toggles (secret eye / eye-off)
+  // Field visibility toggles
   const [showGoogleSecret, setShowGoogleSecret] = useState<boolean>(false);
   const [showFacebookSecret, setShowFacebookSecret] = useState<boolean>(false);
   const [showApplePrivateKey, setShowApplePrivateKey] = useState<boolean>(false);
@@ -29584,11 +29588,17 @@ export default function SocialLoginSettingPage() {
 
     window.addEventListener('zecratary_social_login_updated', handleExternalUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_theme_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_theme_mode_changed', handleExternalUpdates);
+    window.addEventListener('zecratary_theme_changed', handleExternalUpdates);
     window.addEventListener('storage', handleExternalUpdates);
 
     return () => {
       window.removeEventListener('zecratary_social_login_updated', handleExternalUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_theme_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_theme_mode_changed', handleExternalUpdates);
+      window.removeEventListener('zecratary_theme_changed', handleExternalUpdates);
       window.removeEventListener('storage', handleExternalUpdates);
     };
   }, [fetchSettings, t]);
@@ -29676,8 +29686,12 @@ export default function SocialLoginSettingPage() {
 
   return (
     <div 
-      className="max-w-5xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-social-login-canvas"
+      role="region"
+      aria-label={t('socialLoginTitle', 'Social Login Settings')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)', boxSizing: 'border-box' }}
     >
       {/* Toast Alert Banner */}
       {toast && (
@@ -29753,14 +29767,15 @@ export default function SocialLoginSettingPage() {
         <div className="py-24 flex flex-col items-center justify-center gap-3">
           <RefreshCw className="h-7 w-7 animate-spin" style={{ color: 'var(--color-primary)' }} />
           <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            Loading configuration...
+            {t('loadingConfig', 'Loading configuration...')}
           </p>
         </div>
       ) : (
         <div className="space-y-6">
-          {/* PROVIDER 1: GOOGLE (Font Awesome: f1a0) */}
+          {/* PROVIDER 1: GOOGLE */}
           <div 
             role="region"
+            aria-label={t('googleProviderTitle', 'Google Identity Services')}
             data-lpignore="true"
             className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -29777,12 +29792,12 @@ export default function SocialLoginSettingPage() {
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  <FontAwesomeIcon
-                    name="f1a0"
-                    unicode="f1a0"
-                    size={20}
-                    className="shrink-0 text-[#EA4335]"
-                  />
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
                 </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
@@ -29794,7 +29809,32 @@ export default function SocialLoginSettingPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Harmonized Dropdown: Environment Mode */}
+                <div className="relative">
+                  <select
+                    value={settings.google.environment || 'production'}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      google: { ...prev.google, environment: e.target.value as any }
+                    }))}
+                    className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer transition-colors duration-200"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <option value="production" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envProduction', 'Production')}
+                    </option>
+                    <option value="sandbox" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envSandbox', 'Sandbox / Testing')}
+                    </option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+                </div>
+
                 <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('google').color}`}>
                   {getProviderStatus('google').label}
                 </span>
@@ -29823,7 +29863,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.google.clientId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -29849,7 +29889,7 @@ export default function SocialLoginSettingPage() {
                     autoComplete="off"
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    spellCheck={false}
                     value={settings.google.clientSecret || ''}
                     onChange={(e) => setSettings(prev => ({
                       ...prev,
@@ -29869,6 +29909,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     onClick={() => setShowGoogleSecret(!showGoogleSecret)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition cursor-pointer"
+                    aria-label={showGoogleSecret ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}
                   >
                     {showGoogleSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -29878,7 +29919,7 @@ export default function SocialLoginSettingPage() {
               {/* Callback URL & Test Connection */}
               <div className="md:col-span-2 space-y-1.5 pt-2">
                 <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     type="text"
                     readOnly
@@ -29893,7 +29934,7 @@ export default function SocialLoginSettingPage() {
                   <button
                     type="button"
                     onClick={() => handleCopyUrl(settings.google.callbackUrl)}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -29907,7 +29948,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     disabled={testingProvider === 'google'}
                     onClick={() => handleTestConnection('google')}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -29922,9 +29963,10 @@ export default function SocialLoginSettingPage() {
             </div>
           </div>
 
-          {/* PROVIDER 2: FACEBOOK (Font Awesome: f09a) */}
+          {/* PROVIDER 2: FACEBOOK */}
           <div 
             role="region"
+            aria-label={t('facebookProviderTitle', 'Facebook Login (Meta Graph)')}
             data-lpignore="true"
             className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -29941,12 +29983,9 @@ export default function SocialLoginSettingPage() {
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  <FontAwesomeIcon
-                    name="f09a"
-                    unicode="f09a"
-                    size={20}
-                    className="shrink-0 text-[#1877F2]"
-                  />
+                  <svg className="w-5 h-5 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                  </svg>
                 </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
@@ -29958,7 +29997,32 @@ export default function SocialLoginSettingPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Harmonized Dropdown: Environment Mode */}
+                <div className="relative">
+                  <select
+                    value={settings.facebook.environment || 'production'}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      facebook: { ...prev.facebook, environment: e.target.value as any }
+                    }))}
+                    className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer transition-colors duration-200"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <option value="production" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envProduction', 'Production')}
+                    </option>
+                    <option value="sandbox" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envSandbox', 'Sandbox / Testing')}
+                    </option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+                </div>
+
                 <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('facebook').color}`}>
                   {getProviderStatus('facebook').label}
                 </span>
@@ -29987,7 +30051,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.facebook.appId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -30013,7 +30077,7 @@ export default function SocialLoginSettingPage() {
                     autoComplete="off"
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    spellCheck={false}
                     value={settings.facebook.appSecret || ''}
                     onChange={(e) => setSettings(prev => ({
                       ...prev,
@@ -30033,6 +30097,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     onClick={() => setShowFacebookSecret(!showFacebookSecret)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition cursor-pointer"
+                    aria-label={showFacebookSecret ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}
                   >
                     {showFacebookSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -30042,7 +30107,7 @@ export default function SocialLoginSettingPage() {
               {/* Callback URL & Test Connection */}
               <div className="md:col-span-2 space-y-1.5 pt-2">
                 <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     type="text"
                     readOnly
@@ -30057,7 +30122,7 @@ export default function SocialLoginSettingPage() {
                   <button
                     type="button"
                     onClick={() => handleCopyUrl(settings.facebook.callbackUrl)}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -30071,7 +30136,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     disabled={testingProvider === 'facebook'}
                     onClick={() => handleTestConnection('facebook')}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -30086,9 +30151,10 @@ export default function SocialLoginSettingPage() {
             </div>
           </div>
 
-          {/* PROVIDER 3: APPLE (Font Awesome: f179) */}
+          {/* PROVIDER 3: APPLE */}
           <div 
             role="region"
+            aria-label={t('appleProviderTitle', 'Sign in with Apple')}
             data-lpignore="true"
             className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -30105,13 +30171,9 @@ export default function SocialLoginSettingPage() {
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  <FontAwesomeIcon
-                    name="f179"
-                    unicode="f179"
-                    size={20}
-                    className="shrink-0"
-                    style={{ color: 'var(--color-text)' }}
-                  />
+                  <svg className="w-5 h-5" fill="currentColor" style={{ color: 'var(--color-text)' }} viewBox="0 0 170 170">
+                    <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.69-3.04-7.6-7.77-11.74-14.19-6.3-9.78-11.4-20.91-15.3-33.39-3.9-12.48-5.85-23.95-5.85-34.41 0-14.19 3.69-25.79 11.08-34.79 7.39-9 16.6-13.62 27.64-13.84 4.58 0 9.87 1.15 15.86 3.47 5.99 2.32 10.02 3.54 12.09 3.66 1.84 0 6.04-1.34 12.61-4.02 6.57-2.68 12.09-3.82 16.56-3.41 12.44.8 22.42 5.37 29.93 13.7-10.86 6.53-16.18 15.53-15.96 27.01.22 8.97 3.63 16.48 10.23 22.52 6.6 6.04 14.45 9.49 23.54 10.35-2.23 6.94-5.06 14.07-8.49 21.39zM119.22 31.85c0-7.23 2.61-14.03 7.83-20.41 5.22-6.38 11.66-10.42 19.32-12.12.7 3.58 1.05 6.94 1.05 10.09 0 7.33-2.65 14.18-7.95 20.55-5.3 6.37-11.83 10.42-19.6 12.15-.22-3.47-.65-6.89-.65-10.26z" />
+                  </svg>
                 </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
@@ -30123,7 +30185,32 @@ export default function SocialLoginSettingPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Harmonized Dropdown: Environment Mode */}
+                <div className="relative">
+                  <select
+                    value={settings.apple.environment || 'production'}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      apple: { ...prev.apple, environment: e.target.value as any }
+                    }))}
+                    className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer transition-colors duration-200"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <option value="production" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envProduction', 'Production')}
+                    </option>
+                    <option value="sandbox" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envSandbox', 'Sandbox / Testing')}
+                    </option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+                </div>
+
                 <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('apple').color}`}>
                   {getProviderStatus('apple').label}
                 </span>
@@ -30152,13 +30239,13 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.apple.clientId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
                     apple: { ...prev.apple, clientId: e.target.value }
                   }))}
-                  placeholder="e.g. com.zecratary.service"
+                  placeholder={t('appleClientIdPlaceholder', 'e.g. com.zecratary.service')}
                   className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -30177,7 +30264,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.apple.teamId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -30202,7 +30289,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.apple.keyId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -30228,6 +30315,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     onClick={() => setShowApplePrivateKey(!showApplePrivateKey)}
                     className="text-[11px] font-bold opacity-60 hover:opacity-100 flex items-center gap-1 cursor-pointer"
+                    aria-label={showApplePrivateKey ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}
                   >
                     {showApplePrivateKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                     <span>{showApplePrivateKey ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}</span>
@@ -30238,7 +30326,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.apple.privateKey || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -30259,7 +30347,7 @@ export default function SocialLoginSettingPage() {
               {/* Callback URL & Test Connection */}
               <div className="md:col-span-3 space-y-1.5 pt-2">
                 <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     type="text"
                     readOnly
@@ -30274,7 +30362,7 @@ export default function SocialLoginSettingPage() {
                   <button
                     type="button"
                     onClick={() => handleCopyUrl(settings.apple.callbackUrl)}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -30288,7 +30376,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     disabled={testingProvider === 'apple'}
                     onClick={() => handleTestConnection('apple')}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -30312,8 +30400,8 @@ export default function SocialLoginSettingPage() {
 
 ## File: `apps/web/src/app/admin/ingredient-categories/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
@@ -30456,14 +30544,33 @@ export default function AdminIngredientCategoriesPage() {
 
     window.addEventListener('zecratary_ingredient_categories_updated', handleExternalUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_languages_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_dictionary_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_locale_changed', handleExternalUpdates);
     window.addEventListener('storage', handleExternalUpdates);
 
     return () => {
       window.removeEventListener('zecratary_ingredient_categories_updated', handleExternalUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_languages_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_dictionary_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_locale_changed', handleExternalUpdates);
       window.removeEventListener('storage', handleExternalUpdates);
     };
   }, [fetchCategories, t]);
+
+  // Global Escape Key Listener for Modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isModalOpen) setIsModalOpen(false);
+        if (isDeleteModalOpen) setIsDeleteModalOpen(false);
+        if (inlineEditingId) setInlineEditingId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isModalOpen, isDeleteModalOpen, inlineEditingId]);
 
   const filteredCategories = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -30579,17 +30686,17 @@ export default function AdminIngredientCategoriesPage() {
         body: JSON.stringify({ categories: updatedList, ingredientCategories: updatedList })
       });
 
-      if (!res.ok) throw new Error('Failed to update category');
+      if (!res.ok) throw new Error(t('categorySaveError', 'Failed to update category'));
 
       setCategories(updatedList);
       setInlineEditingId(null);
-      showToast(t('categorySavedSuccess', 'Ingredient category saved successfully!'), 'success');
+      showToast(t('categoryUpdatedSuccess', 'Ingredient category updated successfully!'), 'success');
 
       window.dispatchEvent(new Event('zecratary_ingredient_categories_updated'));
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      showToast(err.message || 'Failed to update category', 'error');
+      showToast(err.message || t('categorySaveError', 'Failed to update category'), 'error');
     } finally {
       setSaving(false);
       setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
@@ -30660,7 +30767,7 @@ export default function AdminIngredientCategoriesPage() {
         method: 'DELETE'
       });
 
-      if (!res.ok) throw new Error('Failed to delete ingredient category');
+      if (!res.ok) throw new Error(t('categoryDeleteError', 'Failed to delete ingredient category'));
 
       setCategories(updatedList);
       setIsDeleteModalOpen(false);
@@ -30671,7 +30778,7 @@ export default function AdminIngredientCategoriesPage() {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      showToast(err.message || 'Failed to delete category', 'error');
+      showToast(err.message || t('categoryDeleteError', 'Failed to delete category'), 'error');
     } finally {
       setSaving(false);
       setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
@@ -30710,7 +30817,7 @@ export default function AdminIngredientCategoriesPage() {
         body: JSON.stringify({ action: 'reset' })
       });
 
-      if (!res.ok) throw new Error('Failed to reset categories');
+      if (!res.ok) throw new Error(t('categorySaveError', 'Failed to reset categories'));
 
       setCategories(DEFAULT_CATEGORIES);
       setHasReordered(false);
@@ -30720,7 +30827,7 @@ export default function AdminIngredientCategoriesPage() {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      showToast(err.message || 'Failed to reset categories', 'error');
+      showToast(err.message || t('categorySaveError', 'Failed to reset categories'), 'error');
     } finally {
       setSaving(false);
       setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
@@ -30774,7 +30881,7 @@ export default function AdminIngredientCategoriesPage() {
         body: JSON.stringify({ categories, ingredientCategories: categories })
       });
 
-      if (!res.ok) throw new Error('Failed to save order');
+      if (!res.ok) throw new Error(t('categorySaveError', 'Failed to save order'));
 
       setHasReordered(false);
       showToast(t('categoryOrderSuccess', 'Display order updated successfully!'), 'success');
@@ -30783,7 +30890,7 @@ export default function AdminIngredientCategoriesPage() {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      showToast(err.message || 'Failed to save order', 'error');
+      showToast(err.message || t('categorySaveError', 'Failed to save order'), 'error');
     } finally {
       setSaving(false);
       setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
@@ -30792,8 +30899,17 @@ export default function AdminIngredientCategoriesPage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-ingredient-categories-canvas"
+      role="region"
+      aria-label={t('ingredientCategoriesTitle', 'Ingredient Categories')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)' 
+      }}
     >
       {/* Toast Alert Banner */}
       {toast && (
@@ -30849,10 +30965,11 @@ export default function AdminIngredientCategoriesPage() {
       <div 
         role="region"
         data-lpignore="true"
-        className="p-4 rounded-3xl border shadow-sm space-y-3.5 transition-colors duration-200"
+        className="w-full max-w-full p-4 rounded-3xl border shadow-sm space-y-3.5 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
+          borderColor: 'var(--color-border)',
+          boxSizing: 'border-box'
         }}
       >
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
@@ -30861,9 +30978,13 @@ export default function AdminIngredientCategoriesPage() {
             <input
               type="text"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               data-form-type="other"
-              spellCheck="false"
               value={quickAddName}
               onChange={(e) => setQuickAddName(e.target.value)}
               onKeyDown={(e) => {
@@ -30916,9 +31037,13 @@ export default function AdminIngredientCategoriesPage() {
             <input
               type="text"
               data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               data-form-type="other"
               autoComplete="off"
-              spellCheck="false"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('searchIngredientCategoriesPlaceholder', 'Search ingredient categories...')}
@@ -30935,7 +31060,7 @@ export default function AdminIngredientCategoriesPage() {
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100 cursor-pointer"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -30992,21 +31117,22 @@ export default function AdminIngredientCategoriesPage() {
         </div>
       </div>
 
-      {/* Main Table / Grid View (Autofill Safe Container) */}
+      {/* Main Table View (Autofill Safe Accessible Container) */}
       <div 
         role="region"
         data-lpignore="true"
-        className="rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
+        className="w-full max-w-full rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
+          borderColor: 'var(--color-border)',
+          boxSizing: 'border-box'
         }}
       >
         {loading ? (
           <div className="py-20 flex flex-col items-center justify-center gap-3">
             <RefreshCw className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
             <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-              Loading ingredient categories...
+              {t('loadingIngredientCategories', 'Loading ingredient categories...')}
             </p>
           </div>
         ) : filteredCategories.length === 0 ? (
@@ -31019,7 +31145,7 @@ export default function AdminIngredientCategoriesPage() {
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90"
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90 cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {t('clearSearchBtn', 'Clear Search')}
@@ -31038,10 +31164,10 @@ export default function AdminIngredientCategoriesPage() {
                     color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {reorderMode && <th className="p-3.5 w-12 text-center">#</th>}
+                  {reorderMode && <th className="p-3.5 w-12 text-center">{t('categoryOrderColumn', '#')}</th>}
                   <th className="p-3.5 font-bold">{t('categoryNameColumn', 'Category Name')}</th>
                   <th className="p-3.5 font-bold">{t('categorySlugColumn', 'Slug / Identifier')}</th>
-                  <th className="p-3.5 font-bold text-center w-28">{t('categoryStatusActive', 'Status')}</th>
+                  <th className="p-3.5 font-bold text-center w-28">{t('categoryStatusColumn', 'Status')}</th>
                   <th className="p-3.5 font-bold text-right pr-6 w-32">{t('actionsColumn', 'Actions')}</th>
                 </tr>
               </thead>
@@ -31106,7 +31232,12 @@ export default function AdminIngredientCategoriesPage() {
                                 type="text"
                                 autoFocus
                                 autoComplete="off"
+                                autoCorrect="off"
+                                autoCapitalize="off"
+                                spellCheck={false}
                                 data-lpignore="true"
+                                data-1p-ignore="true"
+                                data-bwignore="true"
                                 data-form-type="other"
                                 value={inlineEditingName}
                                 onChange={(e) => setInlineEditingName(e.target.value)}
@@ -31125,7 +31256,7 @@ export default function AdminIngredientCategoriesPage() {
                                 type="button"
                                 onClick={() => handleSaveInlineEdit(item)}
                                 className="p-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
-                                title="Save"
+                                title={t('saveTooltip', 'Save')}
                               >
                                 <Check className="h-3.5 w-3.5" />
                               </button>
@@ -31133,7 +31264,7 @@ export default function AdminIngredientCategoriesPage() {
                                 type="button"
                                 onClick={() => setInlineEditingId(null)}
                                 className="p-1 rounded-lg border text-gray-400 hover:text-white cursor-pointer"
-                                title="Cancel"
+                                title={t('cancelTooltip', 'Cancel')}
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -31177,7 +31308,7 @@ export default function AdminIngredientCategoriesPage() {
                           }}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${item.isActive ? 'bg-emerald-500' : 'bg-red-400'}`} />
-                          <span>{item.isActive ? t('activeCategoriesBadge', 'Active') : 'Inactive'}</span>
+                          <span>{item.isActive ? t('activeCategoriesBadge', 'Active') : t('inactiveCategoriesBadge', 'Inactive')}</span>
                         </button>
                       </td>
 
@@ -31196,7 +31327,7 @@ export default function AdminIngredientCategoriesPage() {
                               borderColor: 'var(--color-border)',
                               color: 'var(--color-text)'
                             }}
-                            title="Quick Edit"
+                            title={t('quickEditTooltip', 'Quick Edit')}
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
@@ -31241,13 +31372,12 @@ export default function AdminIngredientCategoriesPage() {
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setIsModalOpen(false);
-          }}
         >
           <div 
             role="region"
             data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
             data-form-type="other"
             className="w-full max-w-lg rounded-3xl border shadow-2xl p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -31264,7 +31394,7 @@ export default function AdminIngredientCategoriesPage() {
               <button 
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -31277,11 +31407,21 @@ export default function AdminIngredientCategoriesPage() {
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   value={formData.name}
                   onChange={(e) => handleNameChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveModal();
+                    }
+                  }}
                   placeholder={t('categoryNamePlaceholder', 'e.g., Produce, Dairy, Spices & Seasonings')}
                   className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-medium"
                   style={{
@@ -31301,11 +31441,21 @@ export default function AdminIngredientCategoriesPage() {
                   <input
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
                     value={formData.slug}
                     onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveModal();
+                      }
+                    }}
                     placeholder={t('categorySlugPlaceholder', 'e.g., produce, dairy-eggs, spices')}
                     className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px]"
                     style={{
@@ -31322,11 +31472,21 @@ export default function AdminIngredientCategoriesPage() {
                   <input
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
                     value={formData.icon}
                     onChange={(e) => setFormData(prev => ({ ...prev, icon: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveModal();
+                      }
+                    }}
                     placeholder={t('categoryIconPlaceholder', 'e.g., 🥬, 🥩, 🧀, 🧂')}
                     className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-center font-emoji"
                     style={{
@@ -31346,11 +31506,21 @@ export default function AdminIngredientCategoriesPage() {
                 <textarea
                   rows={2}
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveModal();
+                    }
+                  }}
                   placeholder={t('categoryDescriptionPlaceholder', 'Department description or shelf location...')}
                   className="w-full px-3.5 py-2.5 rounded-xl border outline-none resize-none font-normal"
                   style={{
@@ -31383,7 +31553,7 @@ export default function AdminIngredientCategoriesPage() {
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -31396,7 +31566,7 @@ export default function AdminIngredientCategoriesPage() {
                 type="button"
                 disabled={saving || !formData.name.trim()}
                 onClick={handleSaveModal}
-                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95"
+                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95 cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {saving ? '...' : t('saveBtn', 'Save Category')}
@@ -31412,13 +31582,13 @@ export default function AdminIngredientCategoriesPage() {
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setIsDeleteModalOpen(false);
-          }}
         >
           <div 
             role="region"
             data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
+            data-form-type="other"
             className="w-full max-w-md rounded-3xl border shadow-2xl p-6 space-y-4 transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
@@ -31451,7 +31621,7 @@ export default function AdminIngredientCategoriesPage() {
                   setIsDeleteModalOpen(false);
                   setItemToDelete(null);
                 }}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -31464,7 +31634,7 @@ export default function AdminIngredientCategoriesPage() {
                 type="button"
                 disabled={saving}
                 onClick={handleConfirmDelete}
-                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50 cursor-pointer"
               >
                 {saving ? '...' : t('confirmDeleteBtn', 'Confirm Delete')}
               </button>
@@ -48885,31 +49055,32 @@ export async function GET() {
 
 ## File: `apps/web/src/app/api/admin/social-login/route.ts`
 ```typescript
-import { query } from '@/lib/db';
+// @ts-nocheck
 import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// Private default configuration to prevent TS2344 route export signature error
-const DEFAULT_SOCIAL_CONFIG = {
+const DEFAULT_SETTINGS = {
   google: {
     enabled: true,
+    environment: 'production',
     clientId: '',
     clientSecret: '',
     callbackUrl: '/api/auth/callback/google'
   },
   facebook: {
     enabled: true,
+    environment: 'production',
     appId: '',
     appSecret: '',
     callbackUrl: '/api/auth/callback/facebook'
   },
   apple: {
     enabled: true,
+    environment: 'production',
     clientId: '',
     teamId: '',
     keyId: '',
@@ -48918,142 +49089,171 @@ const DEFAULT_SOCIAL_CONFIG = {
   }
 };
 
-function getPgPool(): Pool | null {
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) return null;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  const cleanConn = connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '');
-  return new Pool({
-    connectionString: cleanConn,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000
-  });
-}
+const DISK_FILES = [
+  path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+  path.join(process.cwd(), 'data', 'admin_settings.json'),
+  path.join(process.cwd(), 'admin_settings.json')
+];
 
-function getLocalFallback(): any {
-  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-    const full = path.join(process.cwd(), rel);
-    if (fs.existsSync(full)) {
+function readDiskSettings() {
+  for (const fp of DISK_FILES) {
+    if (fs.existsSync(fp)) {
       try {
-        const raw = JSON.parse(fs.readFileSync(full, 'utf8'));
-        const conf = raw.socialLogin || raw.settings?.socialLogin || raw.social_login;
-        if (conf && typeof conf === 'object') {
-          return {
-            google: { ...DEFAULT_SOCIAL_CONFIG.google, ...(conf.google || {}) },
-            facebook: { ...DEFAULT_SOCIAL_CONFIG.facebook, ...(conf.facebook || {}) },
-            apple: { ...DEFAULT_SOCIAL_CONFIG.apple, ...(conf.apple || {}) }
-          };
-        }
+        const raw = fs.readFileSync(fp, 'utf-8');
+        const parsed = JSON.parse(raw);
+        const sl = parsed.socialLogin || parsed.settings?.socialLogin || parsed.social_login;
+        if (sl) return sl;
       } catch (_) {}
     }
   }
-  return DEFAULT_SOCIAL_CONFIG;
+  return DEFAULT_SETTINGS;
 }
 
-function saveLocalFallback(data: any) {
-  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-    const full = path.join(process.cwd(), rel);
+function writeDiskSettings(socialLogin: any) {
+  for (const fp of DISK_FILES) {
     try {
-      if (!fs.existsSync(path.dirname(full))) fs.mkdirSync(path.dirname(full), { recursive: true });
-      let current: any = {};
-      if (fs.existsSync(full)) {
-        try { current = JSON.parse(fs.readFileSync(full, 'utf8')); } catch (_) {}
+      let existing: any = {};
+      if (fs.existsSync(fp)) {
+        try {
+          existing = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+        } catch (_) {
+          existing = {};
+        }
+      } else {
+        const dir = path.dirname(fp);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       }
-      current.socialLogin = data;
-      current.social_login = data;
-      if (current.settings) current.settings.socialLogin = data;
-      fs.writeFileSync(full, JSON.stringify(current, null, 2), 'utf8');
+
+      existing.socialLogin = socialLogin;
+      existing.social_login = socialLogin;
+      if (existing.settings && typeof existing.settings === 'object') {
+        existing.settings.socialLogin = socialLogin;
+      }
+
+      fs.writeFileSync(fp, JSON.stringify(existing, null, 2), 'utf-8');
     } catch (_) {}
   }
 }
 
 export async function GET() {
-  const pool = getPgPool();
-  if (pool) {
+  let dbSettings: any = null;
+
+  // 1. Check PostgreSQL
+  if (process.env.DATABASE_URL || process.env.POSTGRES_URL) {
     try {
-      const client = await pool.connect();
-      try {
-        const res = await client.query(`
-          SELECT social_login, settings FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;
-        `);
-        const row = res.rows?.[0];
-        let conf = row?.social_login;
-        if (!conf && row?.settings?.socialLogin) {
-          conf = row.settings.socialLogin;
-        }
-        if (typeof conf === 'string') {
-          try { conf = JSON.parse(conf); } catch (_) {}
-        }
-        if (conf && typeof conf === 'object') {
-          const merged = {
-            google: { ...DEFAULT_SOCIAL_CONFIG.google, ...(conf.google || {}) },
-            facebook: { ...DEFAULT_SOCIAL_CONFIG.facebook, ...(conf.facebook || {}) },
-            apple: { ...DEFAULT_SOCIAL_CONFIG.apple, ...(conf.apple || {}) }
-          };
-          return NextResponse.json({ success: true, socialLogin: merged });
-        }
-      } finally {
-        client.release();
-        await pool.end();
+      const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+      const { Pool } = await import('pg');
+      const pool = new Pool({
+        connectionString: connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, ''),
+        ssl: connStr.includes('localhost') ? false : { rejectUnauthorized: false }
+      });
+
+      const res = await pool.query(`
+        SELECT settings, social_login FROM admin_settings WHERE id IN (1, '1', 'primary_settings') LIMIT 1;
+      `);
+
+      if (res.rows && res.rows.length > 0) {
+        const row = res.rows[0];
+        dbSettings = row.social_login || row.settings?.socialLogin;
       }
-    } catch (err: any) {
-      console.warn('PostgreSQL social-login fetch note:', err.message);
-    }
+      await pool.end();
+    } catch (_) {}
   }
 
-  const fallback = getLocalFallback();
-  return NextResponse.json({ success: true, socialLogin: fallback });
+  // 2. Check MySQL
+  if (!dbSettings && (process.env.MYSQL_DATABASE_URL || process.env.MYSQL_URL)) {
+    try {
+      const mysql = await import('mysql2/promise');
+      const conn = await mysql.createConnection(process.env.MYSQL_DATABASE_URL || process.env.MYSQL_URL);
+      const [rows]: any = await conn.execute(`
+        SELECT settings, social_login FROM admin_settings WHERE id IN (1, '1', 'primary_settings') LIMIT 1;
+      `);
+      if (rows && rows.length > 0) {
+        const row = rows[0];
+        const s = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
+        const sl = typeof row.social_login === 'string' ? JSON.parse(row.social_login) : row.social_login;
+        dbSettings = sl || s?.socialLogin;
+      }
+      await conn.end();
+    } catch (_) {}
+  }
+
+  const finalSettings = dbSettings || readDiskSettings();
+  return NextResponse.json({
+    socialLogin: {
+      google: { ...DEFAULT_SETTINGS.google, ...(finalSettings.google || {}) },
+      facebook: { ...DEFAULT_SETTINGS.facebook, ...(finalSettings.facebook || {}) },
+      apple: { ...DEFAULT_SETTINGS.apple, ...(finalSettings.apple || {}) }
+    }
+  }, {
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' }
+  });
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const payload = body.socialLogin || body.settings?.socialLogin || body;
+    const incoming = body.socialLogin || body.settings?.socialLogin || body;
 
     const merged = {
-      google: { ...DEFAULT_SOCIAL_CONFIG.google, ...(payload.google || {}) },
-      facebook: { ...DEFAULT_SOCIAL_CONFIG.facebook, ...(payload.facebook || {}) },
-      apple: { ...DEFAULT_SOCIAL_CONFIG.apple, ...(payload.apple || {}) }
+      google: { ...DEFAULT_SETTINGS.google, ...(incoming.google || {}) },
+      facebook: { ...DEFAULT_SETTINGS.facebook, ...(incoming.facebook || {}) },
+      apple: { ...DEFAULT_SETTINGS.apple, ...(incoming.apple || {}) }
     };
 
-    saveLocalFallback(merged);
-
-    const pool = getPgPool();
-    if (pool) {
+    // 1. Sync PostgreSQL
+    if (process.env.DATABASE_URL || process.env.POSTGRES_URL) {
       try {
-        const client = await pool.connect();
-        try {
-          await client.query(`
-            INSERT INTO admin_settings (id, social_login, updated_at)
-            VALUES ('primary_settings', $1::jsonb, NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              social_login = EXCLUDED.social_login,
-              updated_at = NOW();
-          `, [JSON.stringify(merged)]);
+        const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+        const { Pool } = await import('pg');
+        const pool = new Pool({
+          connectionString: connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, ''),
+          ssl: connStr.includes('localhost') ? false : { rejectUnauthorized: false }
+        });
 
-          // Also merge into settings JSONB column if exists
-          await client.query(`
-            UPDATE admin_settings
-            SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{socialLogin}', $1::jsonb)
-            WHERE id = 'primary_settings';
-          `, [JSON.stringify(merged)]);
-        } finally {
-          client.release();
-          await pool.end();
-        }
-      } catch (err: any) {
-        console.warn('PostgreSQL social-login save note:', err.message);
-      }
+        await pool.query(`
+          INSERT INTO admin_settings (id, social_login, updated_at)
+          VALUES ('1', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE
+          SET social_login = $1::jsonb,
+              settings = jsonb_set(COALESCE(admin_settings.settings, '{}'::jsonb), '{socialLogin}', $1::jsonb),
+              updated_at = NOW();
+        `, [JSON.stringify(merged)]);
+
+        await pool.end();
+      } catch (_) {}
     }
 
-    return NextResponse.json({ success: true, socialLogin: merged });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
+    // 2. Sync MySQL
+    if (process.env.MYSQL_DATABASE_URL || process.env.MYSQL_URL) {
+      try {
+        const mysql = await import('mysql2/promise');
+        const conn = await mysql.createConnection(process.env.MYSQL_DATABASE_URL || process.env.MYSQL_URL);
+        const jsonStr = JSON.stringify(merged);
+        await conn.execute(`
+          INSERT INTO admin_settings (id, social_login, updated_at)
+          VALUES ('1', ?, NOW())
+          ON DUPLICATE KEY UPDATE
+            social_login = VALUES(social_login),
+            settings = JSON_SET(COALESCE(settings, '{}'), '$.socialLogin', CAST(? AS JSON)),
+            updated_at = NOW();
+        `, [jsonStr, jsonStr]);
+        await conn.end();
+      } catch (_) {}
+    }
 
-export async function PUT(req: Request) {
-  return POST(req);
+    // 3. Sync Disk Stores
+    writeDiskSettings(merged);
+
+    return NextResponse.json({
+      success: true,
+      socialLogin: merged
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed to persist settings' }, { status: 500 });
+  }
 }
 
 ```
@@ -55861,17 +56061,12 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/ingredient-categories/route.ts`
 ```typescript
-import { query } from '@/lib/db';
+// @ts-nocheck
 import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
 import fs from 'fs';
 import path from 'path';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-// Module-scoped private constant (not exported to comply with Next.js App Router route signatures)
-const DEFAULT_INGREDIENT_CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   { id: 'cat_produce', name: 'Produce', slug: 'produce', icon: '🥬', description: 'Fresh vegetables, fruits, and culinary herbs', isActive: true, order: 1 },
   { id: 'cat_meat', name: 'Meat & Poultry', slug: 'meat-poultry', icon: '🥩', description: 'Fresh meats, cuts, beef, poultry, and bacon', isActive: true, order: 2 },
   { id: 'cat_seafood', name: 'Seafood', slug: 'seafood', icon: '🐟', description: 'Fresh fish, fillets, shrimp, and shellfish', isActive: true, order: 3 },
@@ -55887,220 +56082,212 @@ const DEFAULT_INGREDIENT_CATEGORIES = [
   { id: 'cat_snacks', name: 'Snacks & Sweets', slug: 'snacks-sweets', icon: '🍪', description: 'Nuts, dried fruits, crackers, and snacks', isActive: true, order: 13 }
 ];
 
-function getPgPool(): Pool | null {
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) return null;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  const cleanConn = connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '');
-  return new Pool({
-    connectionString: cleanConn,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000
-  });
+function getSettingsFilePaths() {
+  const root = process.cwd();
+  return [
+    path.join(root, 'data', 'admin_settings.json'),
+    path.join(root, 'apps', 'web', 'data', 'admin_settings.json')
+  ];
 }
 
-function normalizeCategories(rawList: any[]): any[] {
-  if (!Array.isArray(rawList)) return DEFAULT_INGREDIENT_CATEGORIES;
-  return rawList.map((item, idx) => {
-    if (typeof item === 'string') {
-      const slug = item.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-      return {
-        id: `cat_${slug || idx + 1}`,
-        name: item,
-        slug: slug || `category-${idx + 1}`,
-        icon: '🥬',
-        description: '',
-        isActive: true,
-        order: idx + 1
-      };
-    }
-    const name = item.name || item.title || item.label || 'Untitled';
-    const slug = (item.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/(^-|-$)/g, '');
-    return {
-      id: item.id || `cat_${slug || idx + 1}`,
-      name,
-      slug: slug || `category-${idx + 1}`,
-      icon: item.icon || '🥬',
-      description: item.description || '',
-      isActive: item.isActive !== undefined ? Boolean(item.isActive) : true,
-      order: item.order !== undefined ? Number(item.order) : idx + 1
-    };
-  });
-}
-
-function getLocalFallback(): any[] {
-  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-    const full = path.join(process.cwd(), rel);
-    if (fs.existsSync(full)) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(full, 'utf8'));
-        const list = raw.ingredientCategories || raw.ingredient_categories;
-        if (Array.isArray(list) && list.length > 0) return normalizeCategories(list);
-      } catch (_) {}
-    }
-  }
-  return DEFAULT_INGREDIENT_CATEGORIES;
-}
-
-function saveLocalFallback(items: any[]) {
-  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-    const full = path.join(process.cwd(), rel);
+function readLocalCategories(): any[] {
+  for (const fp of getSettingsFilePaths()) {
     try {
-      if (!fs.existsSync(path.dirname(full))) fs.mkdirSync(path.dirname(full), { recursive: true });
-      let current: any = {};
-      if (fs.existsSync(full)) {
-        try { current = JSON.parse(fs.readFileSync(full, 'utf8')); } catch (_) {}
+      if (fs.existsSync(fp)) {
+        const raw = fs.readFileSync(fp, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.ingredientCategories) && data.ingredientCategories.length > 0) {
+          return data.ingredientCategories;
+        }
+        if (Array.isArray(data.categories) && data.categories.length > 0) {
+          return data.categories;
+        }
       }
-      current.ingredientCategories = items;
-      current.ingredient_categories = items;
-      fs.writeFileSync(full, JSON.stringify(current, null, 2), 'utf8');
+    } catch (_) {}
+  }
+  return DEFAULT_CATEGORIES;
+}
+
+function writeLocalCategories(items: any[]) {
+  for (const fp of getSettingsFilePaths()) {
+    try {
+      const dir = path.dirname(fp);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      let data: any = {};
+      if (fs.existsSync(fp)) {
+        try {
+          data = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+        } catch (_) {}
+      }
+      data.ingredientCategories = items;
+      data.categories = items;
+      data.updatedAt = new Date().toISOString();
+      fs.writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
     } catch (_) {}
   }
 }
 
 export async function GET() {
-  const pool = getPgPool();
-  if (pool) {
+  try {
+    // 1. Attempt PostgreSQL/MySQL query
     try {
-      const client = await pool.connect();
-      try {
-        const res = await client.query(`
-          SELECT ingredient_categories FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query(`
+          CREATE TABLE IF NOT EXISTS ingredient_categories (
+            id VARCHAR(120) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            slug VARCHAR(255) NOT NULL,
+            icon VARCHAR(64) DEFAULT '🥬',
+            description TEXT DEFAULT '',
+            is_active BOOLEAN DEFAULT true,
+            sort_order INT DEFAULT 0,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
         `);
-        let raw = res.rows?.[0]?.ingredient_categories;
-        if (typeof raw === 'string') {
-          try { raw = JSON.parse(raw); } catch (_) {}
-        }
-        if (Array.isArray(raw) && raw.length > 0) {
-          const normalized = normalizeCategories(raw);
-          return NextResponse.json({
-            success: true,
-            categories: normalized,
-            ingredientCategories: normalized
-          });
-        }
-      } finally {
-        client.release();
-        await pool.end();
-      }
-    } catch (err: any) {
-      console.warn('PostgreSQL ingredient-categories fetch note:', err.message);
-    }
-  }
 
-  const fallback = getLocalFallback();
-  return NextResponse.json({
-    success: true,
-    categories: fallback,
-    ingredientCategories: fallback
-  });
+        const res = await query('SELECT * FROM ingredient_categories ORDER BY sort_order ASC, name ASC');
+        if (res && Array.isArray(res.rows) && res.rows.length > 0) {
+          const mapped = res.rows.map((r: any, idx: number) => ({
+            id: r.id,
+            name: r.name,
+            slug: r.slug,
+            icon: r.icon || '🥬',
+            description: r.description || '',
+            isActive: r.is_active !== undefined ? Boolean(r.is_active) : true,
+            order: r.sort_order !== undefined ? Number(r.sort_order) : idx + 1
+          }));
+          return NextResponse.json({ success: true, categories: mapped, ingredientCategories: mapped });
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fallback to server JSON store
+    const local = readLocalCategories();
+    return NextResponse.json({ success: true, categories: local, ingredientCategories: local });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, categories: DEFAULT_CATEGORIES, error: err.message }, { status: 200 });
+  }
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const current = (await (await GET()).json())?.categories || DEFAULT_INGREDIENT_CATEGORIES;
+    const body = await request.json().catch(() => ({}));
+    let items = Array.isArray(body) 
+      ? body 
+      : Array.isArray(body?.categories) 
+        ? body.categories 
+        : Array.isArray(body?.ingredientCategories) 
+          ? body.ingredientCategories 
+          : null;
 
-    let updated: any[] = [];
-    if (body.action === 'reset') {
-      updated = DEFAULT_INGREDIENT_CATEGORIES;
-    } else if (Array.isArray(body)) {
-      updated = normalizeCategories(body);
-    } else if (Array.isArray(body.ingredientCategories)) {
-      updated = normalizeCategories(body.ingredientCategories);
-    } else if (Array.isArray(body.categories)) {
-      updated = normalizeCategories(body.categories);
-    } else if (body.name) {
-      const name = body.name.trim();
-      const slug = (body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/(^-|-$)/g, '');
-      const newItem = {
-        id: body.id || `cat_${Date.now().toString(36)}`,
+    if (body?.action === 'reset') {
+      items = DEFAULT_CATEGORIES;
+    }
+
+    if (!Array.isArray(items)) {
+      return NextResponse.json({ success: false, error: 'Categories array required' }, { status: 400 });
+    }
+
+    // Normalize items
+    const normalized = items.map((it: any, idx: number) => {
+      const name = String(it.name || it.title || it.label || 'Untitled').trim();
+      const slug = String(it.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/(^-|-$)/g, '');
+      return {
+        id: it.id || `cat_${slug || idx + 1}`,
         name,
-        slug: slug || `cat-${Date.now()}`,
-        icon: body.icon || '🥬',
-        description: body.description || '',
-        isActive: body.isActive !== undefined ? Boolean(body.isActive) : true,
-        order: current.length + 1
+        slug: slug || `category-${idx + 1}`,
+        icon: it.icon || '🥬',
+        description: it.description || '',
+        isActive: it.isActive !== undefined ? Boolean(it.isActive) : true,
+        order: it.order !== undefined ? Number(it.order) : idx + 1
       };
-      updated = [...current, newItem];
-    }
-
-    saveLocalFallback(updated);
-
-    const pool = getPgPool();
-    if (pool) {
-      try {
-        const client = await pool.connect();
-        try {
-          await client.query(`
-            INSERT INTO admin_settings (id, ingredient_categories, updated_at)
-            VALUES ('primary_settings', $1::jsonb, NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              ingredient_categories = EXCLUDED.ingredient_categories,
-              updated_at = NOW();
-          `, [JSON.stringify(updated)]);
-        } finally {
-          client.release();
-          await pool.end();
-        }
-      } catch (err: any) {
-        console.warn('PostgreSQL ingredient-categories save note:', err.message);
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      categories: updated,
-      ingredientCategories: updated
     });
+
+    // 1. Try PostgreSQL/MySQL persistence
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query(`
+          CREATE TABLE IF NOT EXISTS ingredient_categories (
+            id VARCHAR(120) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            slug VARCHAR(255) NOT NULL,
+            icon VARCHAR(64) DEFAULT '🥬',
+            description TEXT DEFAULT '',
+            is_active BOOLEAN DEFAULT true,
+            sort_order INT DEFAULT 0,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+
+        await query('DELETE FROM ingredient_categories');
+        for (const cat of normalized) {
+          await query(`
+            INSERT INTO ingredient_categories (id, name, slug, icon, description, is_active, sort_order, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+              name = EXCLUDED.name,
+              slug = EXCLUDED.slug,
+              icon = EXCLUDED.icon,
+              description = EXCLUDED.description,
+              is_active = EXCLUDED.is_active,
+              sort_order = EXCLUDED.sort_order,
+              updated_at = CURRENT_TIMESTAMP
+          `, [
+            cat.id,
+            cat.name,
+            cat.slug,
+            cat.icon,
+            cat.description,
+            cat.isActive,
+            cat.order
+          ]);
+        }
+      }
+    } catch (_) {}
+
+    // 2. Persist to server JSON stores
+    writeLocalCategories(normalized);
+
+    return NextResponse.json({ success: true, categories: normalized, ingredientCategories: normalized });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function PUT(req: Request) {
-  return POST(req);
-}
-
-export async function DELETE(req: Request) {
+export async function DELETE(request: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get('id');
-    const slug = searchParams.get('slug');
-    const name = searchParams.get('name');
+    const { searchParams } = new URL(request.url);
+    const targetId = searchParams.get('id') || '';
+    const targetSlug = searchParams.get('slug') || '';
+    const targetName = searchParams.get('name') || '';
 
-    const current = (await (await GET()).json())?.categories || DEFAULT_INGREDIENT_CATEGORIES;
-    const filtered = current.filter((item: any) => {
-      if (id && item.id === id) return false;
-      if (slug && item.slug === slug) return false;
-      if (name && item.name.toLowerCase() === name.toLowerCase()) return false;
-      return true;
-    });
-
-    saveLocalFallback(filtered);
-
-    const pool = getPgPool();
-    if (pool) {
-      try {
-        const client = await pool.connect();
-        try {
-          await client.query(`
-            UPDATE admin_settings
-            SET ingredient_categories = $1::jsonb, updated_at = NOW()
-            WHERE id = 'primary_settings';
-          `, [JSON.stringify(filtered)]);
-        } finally {
-          client.release();
-          await pool.end();
-        }
-      } catch (_) {}
+    if (!targetId && !targetSlug && !targetName) {
+      return NextResponse.json({ success: false, error: 'Identifier required for deletion' }, { status: 400 });
     }
 
-    return NextResponse.json({
-      success: true,
-      categories: filtered,
-      ingredientCategories: filtered
-    });
+    // 1. Delete from DB
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query(
+          'DELETE FROM ingredient_categories WHERE id = $1 OR slug = $2 OR name = $3',
+          [targetId, targetSlug, targetName]
+        );
+      }
+    } catch (_) {}
+
+    // 2. Delete from local JSON files
+    const current = readLocalCategories();
+    const updated = current.filter(it => 
+      it.id !== targetId && it.slug !== targetSlug && it.name !== targetName
+    );
+    writeLocalCategories(updated);
+
+    return NextResponse.json({ success: true, categories: updated });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -67412,6 +67599,10 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "envProduction": "Production",
+    "envSandbox": "Sandbox / Testing",
+    "appleClientIdPlaceholder": "e.g. com.zecratary.service",
+    "loadingConfig": "Loading configuration...",
     "filterStatusAll": "All Statuses",
     "filterStatusActive": "Active Only",
     "filterStatusInactive": "Inactive Only",
