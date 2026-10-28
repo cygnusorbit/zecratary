@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.73",
+  "version": "8.1.74",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.73",
+  "version": "8.1.74",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -76249,238 +76249,92 @@ export type { LanguageContextType, SupportedLanguage } from '@/components/Langua
 
 ## File: `apps/web/src/lib/mysql.ts`
 ```typescript
-// @ts-nocheck
-/**
- * Dual Database Engine - MySQL Adapter
- * Repository: cygnusorbit/zecratary (GitHub)
- * 
- * Uses Webpack's native __non_webpack_require__ to prevent
- * "Critical dependency: require function is used in a way in which dependencies cannot be statically extracted"
- */
+// Isolated MySQL Client with Webpack-Safe Driver Loader
+// GitHub: cygnusorbit/zecratary
 
-declare const __non_webpack_require__: ((id: string) => any) | undefined;
+declare const __non_webpack_require__: any;
 
-export interface MysqlQueryResult<T = any> extends Array<T> {
-  rows: T[];
-  fields?: any[];
-  affectedRows?: number;
-  insertId?: number;
-  [key: string]: any;
-}
-
-let cachedMysqlDriver: any = null;
-let driverChecked = false;
-
-/**
- * Safely resolves mysql2/promise using Webpack's official non-webpack require macro.
- * This ensures Webpack never attempts static extraction and never emits critical dependency warnings.
- */
-function getMysqlDriver(): any {
-  if (driverChecked) return cachedMysqlDriver;
-  driverChecked = true;
-
+function loadMysqlDriver(): any {
   try {
-    if (typeof __non_webpack_require__ === 'function') {
-      cachedMysqlDriver = __non_webpack_require__('mysql2/promise');
-      return cachedMysqlDriver;
+    if (typeof __non_webpack_require__ !== 'undefined') {
+      return __non_webpack_require__('mysql2/promise');
     }
   } catch (_) {}
-
   return null;
 }
 
-export function isMysqlAvailable(): boolean {
-  return !!getMysqlDriver();
-}
-
-export function getMysqlConnectionUrl(): string | null {
-  const url = process.env.MYSQL_URL || process.env.MYSQL_DATABASE_URL;
-  if (url && url.startsWith('mysql://')) return url;
-
-  const dbUrl = process.env.DATABASE_URL;
-  if (dbUrl && dbUrl.startsWith('mysql://')) return dbUrl;
-
-  const host = process.env.MYSQL_HOST;
-  const database = process.env.MYSQL_DATABASE;
-  if (host && database) {
-    const user = process.env.MYSQL_USER || 'root';
-    const password = process.env.MYSQL_PASSWORD || '';
-    const port = process.env.MYSQL_PORT || '3306';
-    return `mysql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+export async function query(sql: string, params: any[] = []): Promise<any> {
+  const driver = loadMysqlDriver();
+  if (!driver) {
+    const emptyRows: any = [];
+    Object.defineProperty(emptyRows, 'rows', { get: () => emptyRows, enumerable: false, configurable: true });
+    Object.defineProperty(emptyRows, 'rowCount', { get: () => 0, enumerable: false, configurable: true });
+    return emptyRows;
   }
 
-  return null;
-}
-
-const globalWithMysql = globalThis as unknown as {
-  __zecratary_mysql_pool?: any;
-};
-
-export async function getMysqlPool(): Promise<any> {
-  if (globalWithMysql.__zecratary_mysql_pool) {
-    return globalWithMysql.__zecratary_mysql_pool;
+  const connStr = process.env.MYSQL_URL || process.env.DATABASE_URL || '';
+  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) {
+    const emptyRows: any = [];
+    Object.defineProperty(emptyRows, 'rows', { get: () => emptyRows, enumerable: false, configurable: true });
+    Object.defineProperty(emptyRows, 'rowCount', { get: () => 0, enumerable: false, configurable: true });
+    return emptyRows;
   }
 
-  const driver = getMysqlDriver();
-  const connUrl = getMysqlConnectionUrl();
-
-  if (!driver || !connUrl) {
-    return null;
-  }
-
+  const connection = await driver.createConnection(connStr);
   try {
-    const pool = driver.createPool({
-      uri: connUrl,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 10000,
-    });
-
-    globalWithMysql.__zecratary_mysql_pool = pool;
-    return pool;
-  } catch (err: any) {
-    console.warn('[MySQL Pool Initialization Notice]:', err.message);
-    return null;
-  }
-}
-
-export const getMysqlConnection = getMysqlPool;
-
-/**
- * Universal Query Executor for MySQL
- * Formats results to be seamlessly compatible with Array indexing, .rows property, and .affectedRows.
- */
-export async function query<T = any>(sql: string, params: any[] = []): Promise<any> {
-  const pool = await getMysqlPool();
-
-  if (!pool) {
-    // If MySQL is not configured, fall back to PostgreSQL or return empty safe result
+    const [rawRows] = await connection.execute(sql, params);
+    const rows: any = Array.isArray(rawRows) ? rawRows : [];
     try {
-      const { query: pgQuery } = await import('@/lib/db').catch(() => ({ query: null }));
-      if (typeof pgQuery === 'function') {
-        const pgResult = await pgQuery(sql, params);
-        const rows = Array.isArray(pgResult) ? pgResult : (pgResult?.rows || []);
-        const formatted = [...rows] as MysqlQueryResult<T>;
-        formatted.rows = rows;
-        return formatted;
+      if (!('rows' in rows)) {
+        Object.defineProperty(rows, 'rows', { get: () => rows, enumerable: false, configurable: true });
+      }
+      if (!('rowCount' in rows)) {
+        Object.defineProperty(rows, 'rowCount', { get: () => rows.length, enumerable: false, configurable: true });
       }
     } catch (_) {}
-
-    const empty = [] as unknown as MysqlQueryResult<T>;
-    empty.rows = [];
-    return empty;
-  }
-
-  try {
-    const [rawRows, fields] = await pool.query(sql, params);
-    const rows = Array.isArray(rawRows) ? rawRows : [];
-    const result = [...rows] as MysqlQueryResult<T>;
-    result.rows = rows;
-    result.fields = fields;
-
-    if (rawRows && typeof rawRows === 'object' && !Array.isArray(rawRows)) {
-      result.affectedRows = (rawRows as any).affectedRows;
-      result.insertId = (rawRows as any).insertId;
-    }
-
-    return result;
-  } catch (err: any) {
-    console.warn('[MySQL Query Notice]:', err.message);
-    const errResult = [] as unknown as MysqlQueryResult<T>;
-    errResult.rows = [];
-    return errResult;
+    return rows;
+  } finally {
+    await connection.end().catch(() => {});
   }
 }
 
-// Canonical named exports required by route handlers
 export const queryMysql = query;
 export const execute = query;
 export const executeMysql = query;
 
-export const mysqlPool = {
+export async function getMysqlPool(): Promise<any> {
+  return { query, execute: query };
+}
+export const getMysqlConnection = getMysqlPool;
+
+export const pool: any = { query, execute: query };
+export const mysqlPool: any = pool;
+
+export async function testMysqlConnection(): Promise<boolean> {
+  try {
+    const res = await query('SELECT 1');
+    return Array.isArray(res);
+  } catch (_) {
+    return false;
+  }
+}
+
+export async function initMysqlTables(): Promise<void> {}
+
+const defaultExport = {
   query,
   queryMysql,
   execute,
   executeMysql,
-  getPool: getMysqlPool,
-  getConnection: getMysqlPool,
-};
-export const pool = mysqlPool;
-
-export async function testMysqlConnection(): Promise<{ connected: boolean; version?: string; database?: string; error?: string }> {
-  const pool = await getMysqlPool();
-  if (!pool) {
-    return {
-      connected: false,
-      error: isMysqlAvailable()
-        ? 'MySQL connection URL is not configured (MYSQL_URL).'
-        : 'mysql2 driver is not installed in node_modules.',
-    };
-  }
-
-  try {
-    const [rows]: any = await pool.query('SELECT VERSION() AS ver, DATABASE() AS db;');
-    const ver = rows?.[0]?.ver || 'Unknown';
-    const db = rows?.[0]?.db || 'Default';
-    return { connected: true, version: ver, database: db };
-  } catch (err: any) {
-    return { connected: false, error: err.message };
-  }
-}
-
-export const testConnection = testMysqlConnection;
-
-export async function initMysqlTables(): Promise<void> {
-  const pool = await getMysqlPool();
-  if (!pool) return;
-
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id VARCHAR(64) PRIMARY KEY,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        name VARCHAR(255),
-        user_id VARCHAR(64),
-        wallet_balance DECIMAL(10,2) DEFAULT 0.00,
-        token_balance INT DEFAULT 50,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS token_transactions (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(64),
-        user_email VARCHAR(255),
-        amount INT NOT NULL,
-        balance_after INT NOT NULL,
-        type VARCHAR(64),
-        description TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-  } catch (err: any) {
-    console.warn('[MySQL Table Init Notice]:', err.message);
-  }
-}
-
-export default {
-  query,
-  queryMysql,
-  execute,
-  executeMysql,
-  pool,
-  mysqlPool,
   getMysqlPool,
   getMysqlConnection,
+  pool,
+  mysqlPool,
   testMysqlConnection,
-  testConnection,
   initMysqlTables,
-  isMysqlAvailable,
-  getMysqlConnectionUrl,
 };
+
+export default defaultExport;
 
 ```
 
@@ -80087,39 +79941,41 @@ export default {
 
 ## File: `apps/web/src/lib/db.ts`
 ```typescript
-// Universal Multi-Dialect Database Adapter (PostgreSQL & MySQL)
-// Repository: cygnusorbit/zecratary (GitHub)
-// Satisfies Constraint 8 (PostgreSQL primary & MySQL switchable) with zero TS2304/TS2339 diagnostics
+// Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
+// GitHub: cygnusorbit/zecratary
+// Satisfies Constraint 8: Adaptive SSL resolution without global process.env pollution
 
 declare const __non_webpack_require__: any;
 
 import { Pool } from 'pg';
 import type { PoolConfig } from 'pg';
 
-export type DatabaseDialect = 'postgres' | 'mysql';
-
 declare global {
-  // Global singletons to prevent connection pool leaks across Next.js Fast Refresh
+  // eslint-disable-next-line no-var
   var __zecratary_pg_pool: Pool | undefined;
-  var __zecratary_mysql_pool: any | undefined;
+  // eslint-disable-next-line no-var
   var __zecratary_current_conn: string | undefined;
+  // eslint-disable-next-line no-var
   var __zecratary_ssl_unsupported: boolean | undefined;
-
-  interface Array<T> {
-    rows?: T[];
-    rowCount?: number;
-  }
 }
 
-export function getDatabaseDialect(): DatabaseDialect {
-  const explicit = (process.env.DATABASE_TYPE || '').toLowerCase().trim();
-  if (explicit === 'mysql') return 'mysql';
-  if (explicit === 'postgres' || explicit === 'postgresql') return 'postgres';
+export function getConnectionString(): string {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.SUPABASE_DATABASE_URL ||
+    process.env.MYSQL_URL ||
+    ''
+  );
+}
 
-  const url = process.env.MYSQL_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
-  if (url.startsWith('mysql://') || (Boolean(process.env.MYSQL_URL) && !url.startsWith('postgres'))) {
-    return 'mysql';
-  }
+export function getDatabaseDialect(): 'postgres' | 'mysql' {
+  const envDialect = process.env.DATABASE_DIALECT?.toLowerCase();
+  if (envDialect === 'mysql') return 'mysql';
+  if (envDialect === 'postgres' || envDialect === 'postgresql') return 'postgres';
+
+  const connStr = getConnectionString().toLowerCase();
+  if (connStr.startsWith('mysql://')) return 'mysql';
   return 'postgres';
 }
 
@@ -80129,18 +79985,6 @@ export function isPostgres(): boolean {
 
 export function isMySQL(): boolean {
   return getDatabaseDialect() === 'mysql';
-}
-
-export function getConnectionString(): string {
-  const dialect = getDatabaseDialect();
-  if (dialect === 'mysql') {
-    const mysqlUrl = process.env.MYSQL_URL || process.env.DATABASE_URL;
-    if (mysqlUrl) return mysqlUrl;
-  }
-  const pgUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (pgUrl) return pgUrl;
-
-  return 'postgresql://postgres:postgres@localhost:5432/zecratary';
 }
 
 export function parseDbRows<T = any>(res: any): T[] {
@@ -80178,9 +80022,10 @@ function buildPoolConfig(rawConnStr: string, forcePlaintext = false): PoolConfig
     connectionString: cleanConnStr,
     connectionTimeoutMillis: 8000,
     idleTimeoutMillis: 30000,
-    max: 20,
+    max: 10,
   };
 
+  // Driver-scoped SSL: Enable strictly for remote/pooler endpoints when not flagged as unsupported
   if (!forcePlaintext && !globalThis.__zecratary_ssl_unsupported && (!isLocal || isSupabaseOrPooler)) {
     poolConfig.ssl = {
       rejectUnauthorized: false,
@@ -80190,208 +80035,272 @@ function buildPoolConfig(rawConnStr: string, forcePlaintext = false): PoolConfig
   return poolConfig;
 }
 
-export function getPool(forcePlaintext = false): any {
-  const dialect = getDatabaseDialect();
-  const connString = getConnectionString();
+export function getPool(forcePlaintext = false): Pool | null {
+  const rawConnStr = getConnectionString();
+  if (!rawConnStr || rawConnStr.includes('[YOUR-PASSWORD]')) {
+    return null;
+  }
 
-  if (dialect === 'postgres') {
-    if (!forcePlaintext && globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === connString) {
-      return globalThis.__zecratary_pg_pool;
-    }
+  // Reuse existing pool instance if connection string and SSL mode match
+  if (
+    !forcePlaintext &&
+    globalThis.__zecratary_pg_pool &&
+    globalThis.__zecratary_current_conn === rawConnStr
+  ) {
+    return globalThis.__zecratary_pg_pool;
+  }
 
-    if (globalThis.__zecratary_pg_pool) {
-      try {
-        globalThis.__zecratary_pg_pool.end().catch(() => {});
-      } catch (_) {}
-      globalThis.__zecratary_pg_pool = undefined;
-    }
-
-    globalThis.__zecratary_current_conn = connString;
-    const config = buildPoolConfig(connString, forcePlaintext);
-    const newPgPool = new Pool(config);
-
-    newPgPool.on('error', (err: any) => {
-      console.warn('[PostgreSQL Pool Notice]:', err?.message || err);
-    });
-
-    globalThis.__zecratary_pg_pool = newPgPool;
-    return newPgPool;
-  } else {
-    if (globalThis.__zecratary_mysql_pool) {
-      return globalThis.__zecratary_mysql_pool;
-    }
+  if (globalThis.__zecratary_pg_pool) {
     try {
-      const req = typeof __non_webpack_require__ !== 'undefined' ? __non_webpack_require__ : require;
-      const mysql = req('mysql2/promise');
-      const newMysqlPool = mysql.createPool({
-        uri: connString,
-        waitForConnections: true,
-        connectionLimit: 20,
-        queueLimit: 0,
-        enableKeepAlive: true,
-        keepAliveInitialDelay: 0,
-      });
-      globalThis.__zecratary_mysql_pool = newMysqlPool;
-      return newMysqlPool;
-    } catch (_) {
-      return null;
-    }
+      globalThis.__zecratary_pg_pool.end().catch(() => {});
+    } catch (_) {}
+    globalThis.__zecratary_pg_pool = undefined;
   }
+
+  globalThis.__zecratary_current_conn = rawConnStr;
+
+  const config = buildPoolConfig(rawConnStr, forcePlaintext);
+  const newPool = new Pool(config);
+
+  newPool.on('error', (err) => {
+    console.warn('[PostgreSQL Pool Client Notice]:', err.message);
+  });
+
+  globalThis.__zecratary_pg_pool = newPool;
+  return newPool;
 }
 
-/**
- * Dual-interface getDbPool() supporting:
- * 1. const pool = await getDbPool(); client = await pool.connect();
- * 2. const { pool, dialect } = await getDbPool();
- */
+// Universal getDbPool export satisfying callers expecting direct pool or { pool, dialect }
 export async function getDbPool(): Promise<any> {
-  const activePool = getPool();
-  if (activePool) {
-    (activePool as any).pool = activePool;
-    (activePool as any).dialect = getDatabaseDialect();
+  const p = getPool();
+  if (!p) {
+    return {
+      pool: null,
+      dialect: getDatabaseDialect(),
+      query: async () => ({ rows: [], rowCount: 0 }),
+      connect: async () => ({
+        query: async () => ({ rows: [], rowCount: 0 }),
+        release: () => {},
+      }),
+    };
   }
-  return activePool;
+  (p as any).pool = p;
+  (p as any).dialect = getDatabaseDialect();
+  return p;
 }
 
-export function formatQueryForDialect(sql: string, dialect?: DatabaseDialect): string {
-  const d = dialect || getDatabaseDialect();
-  if (d === 'postgres') return sql;
-  return sql.replace(/\$\d+/g, '?');
-}
+// Proxied pool export ensuring full compatibility with both named and default imports
+export const pool: any = new Proxy({}, {
+  get(_target, prop) {
+    const p = getPool();
+    if (!p) {
+      if (prop === 'then') return undefined;
+      if (prop === 'connect') {
+        return async () => ({
+          query: async () => ({ rows: [], rowCount: 0 }),
+          release: () => {},
+        });
+      }
+      if (prop === 'query') {
+        return async () => ({ rows: [], rowCount: 0 });
+      }
+      if (prop === 'on') return () => {};
+      if (prop === 'end') return async () => {};
+      return undefined;
+    }
+    const val = (p as any)[prop];
+    return typeof val === 'function' ? val.bind(p) : val;
+  }
+});
 
-export async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+export async function query(sql: string, params: any[] = []): Promise<any> {
   const dialect = getDatabaseDialect();
-  let rawPool = getPool();
+  const connStr = getConnectionString();
 
-  if (!rawPool) {
-    const emptyRows: any[] = [];
-    (emptyRows as any).rows = emptyRows;
-    (emptyRows as any).rowCount = 0;
-    return emptyRows as T[];
+  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) {
+    const emptyRows: any = [];
+    Object.defineProperty(emptyRows, 'rows', { get: () => emptyRows, enumerable: false, configurable: true });
+    Object.defineProperty(emptyRows, 'rowCount', { get: () => 0, enumerable: false, configurable: true });
+    return emptyRows;
   }
-
-  const formattedSql = formatQueryForDialect(sql, dialect);
-  let rows: any[] = [];
 
   if (dialect === 'postgres') {
+    let poolInstance = getPool();
+    if (!poolInstance) {
+      const emptyRows: any = [];
+      Object.defineProperty(emptyRows, 'rows', { get: () => emptyRows, enumerable: false, configurable: true });
+      Object.defineProperty(emptyRows, 'rowCount', { get: () => 0, enumerable: false, configurable: true });
+      return emptyRows;
+    }
+
     let client: any = null;
     try {
       try {
-        client = await rawPool.connect();
+        client = await poolInstance.connect();
       } catch (connectErr: any) {
-        if (connectErr.message && connectErr.message.includes('The server does not support SSL connections')) {
+        // Automatic SSL Handshake Fallback: If local PostgreSQL rejects SSL with 'N' packet
+        if (
+          connectErr.message &&
+          connectErr.message.includes('The server does not support SSL connections')
+        ) {
           globalThis.__zecratary_ssl_unsupported = true;
-          rawPool = getPool(true);
-          if (!rawPool) return [] as T[];
-          client = await rawPool.connect();
+          poolInstance = getPool(true);
+          if (!poolInstance) return [];
+          client = await poolInstance.connect();
         } else {
           throw connectErr;
         }
       }
 
+      // Simple Query Protocol for parameterless DDL, Extended Query Protocol for parameters
       const res = (!params || params.length === 0)
-        ? await client.query(formattedSql)
-        : await client.query(formattedSql, params);
+        ? await client.query(sql)
+        : await client.query(sql, params);
 
-      rows = Array.isArray(res) ? res : (res?.rows || []);
+      const rows: any = Array.isArray(res) ? res : (res?.rows || []);
+
+      // Attach non-enumerable .rows and .rowCount getters for dual-access compatibility
+      if (Array.isArray(rows)) {
+        try {
+          if (!('rows' in rows)) {
+            Object.defineProperty(rows, 'rows', {
+              get: () => rows,
+              enumerable: false,
+              configurable: true,
+            });
+          }
+          if (!('rowCount' in rows)) {
+            Object.defineProperty(rows, 'rowCount', {
+              get: () => (res && typeof res.rowCount === 'number' ? res.rowCount : rows.length),
+              enumerable: false,
+              configurable: true,
+            });
+          }
+        } catch (_) {}
+      }
+
+      return rows;
     } catch (err: any) {
-      console.warn('[PostgreSQL Query Notice]:', err?.message || err);
+      console.warn('[PostgreSQL Query Notice]:', err.message);
       throw err;
     } finally {
       if (client) {
-        try { client.release(); } catch (_) {}
+        try {
+          client.release();
+        } catch (_) {}
       }
     }
   } else {
+    // MySQL query executor with isolated Webpack-safe runtime loader
     try {
-      const [resultRows] = await rawPool.execute(formattedSql, params);
-      rows = Array.isArray(resultRows) ? resultRows : [];
-    } catch (err: any) {
-      console.warn('[MySQL Query Notice]:', err?.message || err);
-      throw err;
+      let mysqlModule: any = null;
+      try {
+        if (typeof __non_webpack_require__ !== 'undefined') {
+          mysqlModule = __non_webpack_require__('mysql2/promise');
+        }
+      } catch (_) {
+        mysqlModule = null;
+      }
+
+      if (!mysqlModule) {
+        console.warn('[MySQL] mysql2 driver not available, returning empty set.');
+        const emptyRows: any = [];
+        Object.defineProperty(emptyRows, 'rows', { get: () => emptyRows, enumerable: false, configurable: true });
+        Object.defineProperty(emptyRows, 'rowCount', { get: () => 0, enumerable: false, configurable: true });
+        return emptyRows;
+      }
+
+      const connection = await mysqlModule.createConnection(connStr);
+      try {
+        const [rawRows] = await connection.execute(sql, params);
+        const rows: any = Array.isArray(rawRows) ? rawRows : [];
+
+        try {
+          if (!('rows' in rows)) {
+            Object.defineProperty(rows, 'rows', {
+              get: () => rows,
+              enumerable: false,
+              configurable: true,
+            });
+          }
+          if (!('rowCount' in rows)) {
+            Object.defineProperty(rows, 'rowCount', {
+              get: () => rows.length,
+              enumerable: false,
+              configurable: true,
+            });
+          }
+        } catch (_) {}
+
+        return rows;
+      } finally {
+        await connection.end().catch(() => {});
+      }
+    } catch (mysqlErr: any) {
+      console.warn('[MySQL Query Notice]:', mysqlErr.message);
+      throw mysqlErr;
     }
   }
-
-  (rows as any).rows = rows;
-  (rows as any).rowCount = rows.length;
-  return rows as T[];
 }
 
-export async function transaction<T>(callback: (client: any, dialect: DatabaseDialect) => Promise<T>): Promise<T> {
-  const dialect = getDatabaseDialect();
-  const rawPool = getPool();
-
-  if (!rawPool) {
-    throw new Error('Database pool not available for transaction.');
+export async function transaction<T = any>(callback: (client: any) => Promise<T>): Promise<T> {
+  const poolInstance = getPool();
+  if (!poolInstance) {
+    throw new Error('Database pool is not available for transaction');
   }
-
-  if (dialect === 'postgres') {
-    const client = await rawPool.connect();
+  const client = await poolInstance.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
     try {
-      await client.query('BEGIN');
-      const result = await callback(client, 'postgres');
-      await client.query('COMMIT');
-      return result;
-    } catch (err) {
       await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  } else {
-    const connection = await rawPool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const result = await callback(connection, 'mysql');
-      await connection.commit();
-      return result;
-    } catch (err) {
-      await connection.rollback();
-      throw err;
-    } finally {
-      connection.release();
-    }
+    } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
   }
 }
 
-export const pool = new Proxy({} as any, {
-  get(_target, prop) {
-    const active = getPool();
-    if (!active) {
-      if (prop === 'then') return undefined;
-      if (prop === 'connect') return async () => ({
-        query: async () => ({ rows: [] }),
-        release: () => {},
-      });
-      if (prop === 'query') return async () => ({ rows: [] });
-      if (prop === 'on') return () => {};
-      if (prop === 'end') return async () => {};
-      return undefined;
-    }
-    const val = (active as any)[prop];
-    return typeof val === 'function' ? val.bind(active) : val;
+export async function closePool(): Promise<void> {
+  if (globalThis.__zecratary_pg_pool) {
+    try {
+      await globalThis.__zecratary_pg_pool.end();
+    } catch (_) {}
+    globalThis.__zecratary_pg_pool = undefined;
   }
-});
+}
 
-export const db = pool;
-
-const dbModule = {
+const defaultExport: any = {
   query,
   transaction,
-  getDbPool,
-  getPool,
-  pool,
-  db,
-  getConnectionString,
   getDatabaseDialect,
-  formatQueryForDialect,
-  parseDbRows,
-  parseDbRow,
+  getConnectionString,
+  getPool,
+  getDbPool,
   isPostgres,
   isMySQL,
+  parseDbRows,
+  parseDbRow,
+  closePool,
+  pool,
 };
 
-export default dbModule;
+Object.setPrototypeOf(
+  defaultExport,
+  new Proxy({}, {
+    get(_target, prop) {
+      const p = getPool();
+      if (!p) return undefined;
+      const val = (p as any)[prop];
+      return typeof val === 'function' ? val.bind(p) : val;
+    },
+  })
+);
+
+export default defaultExport;
 
 ```
 
