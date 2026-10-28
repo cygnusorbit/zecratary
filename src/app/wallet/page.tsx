@@ -13,6 +13,18 @@ import {
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
+interface ManualDetails {
+  enabled?: boolean;
+  bankName?: string;
+  accountHolder?: string;
+  accountNumber?: string;
+  routingNumber?: string;
+  swiftBic?: string;
+  branchName?: string;
+  instructions?: string;
+  requireReference?: boolean;
+}
+
 interface WalletSettings {
   is_enabled: boolean;
   currency: string;
@@ -22,6 +34,11 @@ interface WalletSettings {
   bonus_rules: Array<{ threshold: number; bonus_percent: number }>;
   allowed_gateways: string[];
   allow_site_purchases: boolean;
+  test_mode?: boolean;
+  active_gateway?: string;
+  stripe_configured?: boolean;
+  paypal_configured?: boolean;
+  manual_details?: ManualDetails;
 }
 
 interface WalletTx {
@@ -37,7 +54,7 @@ interface WalletTx {
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', THB: '฿'
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
 };
 
 function WalletContent() {
@@ -48,7 +65,7 @@ function WalletContent() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reconciling, setReconciling] = useState(false);
-  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // User & Balances
   const [user, setUser] = useState<User | null>(null);
@@ -70,6 +87,7 @@ function WalletContent() {
   const [selectedAmount, setSelectedAmount] = useState<number>(50);
   const [customAmount, setCustomAmount] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<string>('stripe');
+  const [manualReference, setManualReference] = useState<string>('');
 
   // Ledger States
   const [transactions, setTransactions] = useState<WalletTx[]>([]);
@@ -82,14 +100,15 @@ function WalletContent() {
   // Concurrency & Debounce locks to prevent runaway request loops
   const isFetchingRef = useRef(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const verifyingIdRef = useRef<string | null>(null);
 
   const activeCurrencySymbol = useMemo(() => {
-    return CURRENCY_SYMBOLS[settings.currency] || '$';
+    return CURRENCY_SYMBOLS[settings.currency?.toUpperCase()] || '$';
   }, [settings.currency]);
 
-  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3800);
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
   // 1. Silent sync for GET reads (Updates React state & storage WITHOUT re-broadcasting events)
@@ -115,6 +134,7 @@ function WalletContent() {
     syncLocalBalanceQuietly(newBal);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('zecratary_wallet_updated'));
+      window.dispatchEvent(new Event('zecratary_payment_updated'));
       window.dispatchEvent(new Event('storage'));
       try {
         const bc = new BroadcastChannel('zecratary_balance_channel');
@@ -142,7 +162,7 @@ function WalletContent() {
     try {
       const qParams = new URLSearchParams({
         email: userEmail,
-        userId: userId,
+        userId: String(userId),
         page: String(targetPage),
         limit: '10',
         search: search,
@@ -165,25 +185,48 @@ function WalletContent() {
             ? data.wallet_balance 
             : (typeof data.balance === 'number' ? data.balance : Number(data.user?.wallet_balance || 0));
           
-          // Quiet sync prevents circular event loop
           syncLocalBalanceQuietly(wBal);
+
+          const loadedAllowed: string[] = Array.isArray(data.settings?.allowed_gateways)
+            ? data.settings.allowed_gateways
+            : Array.isArray(data.allowed_gateways)
+            ? data.allowed_gateways
+            : Array.isArray(data.allowedGateways)
+            ? data.allowedGateways
+            : [];
 
           if (data.settings) {
             setSettings({
               is_enabled: data.settings.is_enabled !== false,
-              currency: data.settings.currency || 'USD',
+              currency: data.settings.currency || data.currency || 'USD',
               min_topup: Number(data.settings.min_topup || 5),
               max_topup: Number(data.settings.max_topup || 1000),
               preset_amounts: Array.isArray(data.settings.preset_amounts) && data.settings.preset_amounts.length > 0 
                 ? data.settings.preset_amounts.map(Number) 
                 : [10, 25, 50, 100, 250],
               bonus_rules: Array.isArray(data.settings.bonus_rules) ? data.settings.bonus_rules : [],
-              allowed_gateways: Array.isArray(data.settings.allowed_gateways) ? data.settings.allowed_gateways : ['stripe', 'paypal', 'manual'],
-              allow_site_purchases: data.settings.allow_site_purchases !== false
+              allowed_gateways: loadedAllowed,
+              allow_site_purchases: data.settings.allow_site_purchases !== false,
+              test_mode: Boolean(data.settings.test_mode),
+              active_gateway: data.settings.active_gateway || 'stripe',
+              stripe_configured: Boolean(data.settings.stripe_configured),
+              paypal_configured: Boolean(data.settings.paypal_configured),
+              manual_details: data.settings.manual_details || data.gatewaySettings?.manualSettlement || {}
             });
-            if (Array.isArray(data.settings.allowed_gateways) && !data.settings.allowed_gateways.includes(selectedGateway)) {
-              setSelectedGateway(data.settings.allowed_gateways[0] || 'stripe');
-            }
+          } else {
+            setSettings((prev) => ({
+              ...prev,
+              currency: data.currency || prev.currency,
+              allowed_gateways: loadedAllowed,
+              manual_details: data.gatewaySettings?.manualSettlement || prev.manual_details
+            }));
+          }
+
+          // Dynamic sync: ensure selectedGateway is currently active in /admin/payment-gateway
+          if (loadedAllowed.length > 0) {
+            setSelectedGateway((prev) => loadedAllowed.includes(prev) ? prev : loadedAllowed[0]);
+          } else {
+            setSelectedGateway('');
           }
 
           if (Array.isArray(data.transactions)) {
@@ -201,7 +244,7 @@ function WalletContent() {
       isFetchingRef.current = false;
       setLoading(false);
     }
-  }, [syncLocalBalanceQuietly, selectedGateway]);
+  }, [syncLocalBalanceQuietly]);
 
   // Reconciliation Handler for Stripe Checkout Sessions & External Payments
   const handleReconcile = async () => {
@@ -260,14 +303,50 @@ function WalletContent() {
       }
     }
 
+    // Stripe checkout return verification workflow
     const sessionId = searchParams?.get('session_id');
-    const isSuccess = searchParams?.get('success') === 'true';
-    if (sessionId || isSuccess) {
-      showToast(t('paymentReconciledToast', 'Payment verified! Your wallet has been credited.'), 'success');
-    }
+    const isSuccess = searchParams?.get('status') === 'success' || searchParams?.get('success') === 'true';
 
-    // Initial mount query
-    fetchWalletData(u, 1, '', 'all', true);
+    if (sessionId && isSuccess && verifyingIdRef.current !== sessionId) {
+      verifyingIdRef.current = sessionId;
+      const verifyCheckoutSession = async () => {
+        showToast(t('verifyingStripeSession', 'Confirming payment session and crediting wallet...'), 'info');
+        try {
+          const res = await fetch('/api/wallet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'verify_stripe_session',
+              sessionId: sessionId,
+              email: u.email,
+              userId: String(u.id || '')
+            })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (data.success) {
+            if (typeof data.wallet_balance === 'number') {
+              broadcastBalanceUpdate(data.wallet_balance);
+            }
+            showToast(data.message || t('paymentReconciledToast', 'Payment verified! Your wallet has been credited.'), 'success');
+            fetchWalletData(u, 1, '', 'all', true);
+            if (typeof window !== 'undefined') {
+              window.history.replaceState({}, '', '/wallet');
+            }
+          } else {
+            showToast(data.error || 'Failed to verify session.', 'error');
+            if (typeof window !== 'undefined') {
+              window.history.replaceState({}, '', '/wallet');
+            }
+          }
+        } catch (e: any) {
+          showToast(e.message || 'Payment verification failed.', 'error');
+        }
+      };
+      verifyCheckoutSession();
+    } else {
+      // Initial mount query
+      fetchWalletData(u, 1, '', 'all', true);
+    }
 
     const debouncedSync = () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
@@ -275,7 +354,7 @@ function WalletContent() {
         const active = getCurrentUser();
         if (active) {
           setUser(active);
-          fetchWalletData(active, page, searchQuery, typeFilter, false);
+          fetchWalletData(active, page, searchQuery, typeFilter, true);
         }
       }, 250);
     };
@@ -285,14 +364,24 @@ function WalletContent() {
     window.addEventListener('zecratary_languages_updated', debouncedSync);
     window.addEventListener('zecratary_dictionary_updated', debouncedSync);
     window.addEventListener('zecratary_locale_changed', debouncedSync);
+    window.addEventListener('zecratary_payment_updated', debouncedSync);
+    window.addEventListener('zecratary_payment_gateway_updated', debouncedSync);
+    window.addEventListener('zecratary_admin_settings_updated', debouncedSync);
+    window.addEventListener('zecratary_wallet_settings_updated', debouncedSync);
+    window.addEventListener('zecratary_wallet_updated', debouncedSync);
 
     let bc: BroadcastChannel | null = null;
+    let gwBc: BroadcastChannel | null = null;
     try {
       bc = new BroadcastChannel('zecratary_balance_channel');
       bc.onmessage = (ev) => {
         if (ev.data?.type === 'WALLET_UPDATED' && typeof ev.data.wallet === 'number') {
           setBalance(ev.data.wallet);
         }
+      };
+      gwBc = new BroadcastChannel('zecratary_gateway_channel');
+      gwBc.onmessage = () => {
+        debouncedSync();
       };
     } catch (_) {}
 
@@ -303,9 +392,15 @@ function WalletContent() {
       window.removeEventListener('zecratary_languages_updated', debouncedSync);
       window.removeEventListener('zecratary_dictionary_updated', debouncedSync);
       window.removeEventListener('zecratary_locale_changed', debouncedSync);
+      window.removeEventListener('zecratary_payment_updated', debouncedSync);
+      window.removeEventListener('zecratary_payment_gateway_updated', debouncedSync);
+      window.removeEventListener('zecratary_admin_settings_updated', debouncedSync);
+      window.removeEventListener('zecratary_wallet_settings_updated', debouncedSync);
+      window.removeEventListener('zecratary_wallet_updated', debouncedSync);
       if (bc) bc.close();
+      if (gwBc) gwBc.close();
     };
-  }, []); // Run mount lifecycle once
+  }, []);
 
   // Trigger search and filter changes cleanly
   useEffect(() => {
@@ -336,6 +431,10 @@ function WalletContent() {
   }, [finalDepositAmount, activeBonusPercent]);
 
   const handleDeposit = async () => {
+    if (settings.allowed_gateways.length === 0) {
+      showToast(t('noGatewaysEnabledNotice', 'No payment gateways are currently enabled in Payment Gateway settings.'), 'error');
+      return;
+    }
     if (finalDepositAmount < settings.min_topup) {
       showToast((t('minTopupWarning', 'Minimum deposit is {min}')).replace('{min}', `${activeCurrencySymbol}${settings.min_topup}`), 'error');
       return;
@@ -348,6 +447,7 @@ function WalletContent() {
     setSubmitting(true);
 
     try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const res = await fetch('/api/wallet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -358,7 +458,9 @@ function WalletContent() {
           gateway: selectedGateway,
           email: user.email,
           userId: user.id || 'usr_admin_1',
-          gatewayTxId: `gw_manual_${Date.now()}`
+          origin: origin,
+          transferReference: manualReference,
+          gatewayTxId: manualReference || `gw_manual_${Date.now()}`
         })
       });
 
@@ -375,8 +477,17 @@ function WalletContent() {
       }
 
       if (data.checkoutUrl) {
-        showToast(t('checkoutRedirectNotice', 'Redirecting to secure payment checkout...'));
-        window.location.href = data.checkoutUrl;
+        showToast(
+          selectedGateway === 'paypal' 
+            ? t('redirectingToPaypal', 'Redirecting to PayPal...') 
+            : t('checkoutRedirectNotice', 'Redirecting to secure payment checkout...'), 
+          'info'
+        );
+        try {
+          window.location.assign(data.checkoutUrl);
+        } catch (_) {
+          window.location.href = data.checkoutUrl;
+        }
         return;
       }
 
@@ -387,12 +498,13 @@ function WalletContent() {
       broadcastBalanceUpdate(newBal);
 
       showToast(
-        (t('depositSuccessToast', 'Successfully deposited {amount} into your wallet!'))
+        data.message || (t('depositSuccessToast', 'Successfully deposited {amount} into your wallet!'))
           .replace('{amount}', `${activeCurrencySymbol}${finalDepositAmount.toFixed(2)}`),
         'success'
       );
 
       setCustomAmount('');
+      setManualReference('');
       setSelectedAmount(settings.preset_amounts[0] || 50);
       fetchWalletData(user, page, searchQuery, typeFilter, true);
     } catch (err: any) {
@@ -403,7 +515,6 @@ function WalletContent() {
   };
 
   return (
-    /* TASK 1: Full-Width (100%) Fluid Canvas with Responsive Padding */
     <div 
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
@@ -414,12 +525,14 @@ function WalletContent() {
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
           style={{
             backgroundColor: 'var(--color-card)',
-            borderColor: toastMessage.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            borderColor: toastMessage.type === 'success' ? 'var(--color-emerald)' : toastMessage.type === 'info' ? 'var(--color-primary)' : '#ef4444',
             color: 'var(--color-text)'
           }}
         >
           {toastMessage.type === 'success' ? (
             <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+          ) : toastMessage.type === 'info' ? (
+            <Info className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
           ) : (
             <AlertCircle className="h-4 w-4 text-red-500" />
           )}
@@ -587,68 +700,118 @@ function WalletContent() {
             </div>
           </div>
 
-          {/* Payment Gateway Options */}
+          {/* Payment Gateway Options - Synchronized with /admin/payment-gateway */}
           <div className="space-y-2">
             <label className="block text-xs font-bold opacity-80">{t('paymentGateway', 'Payment Gateway')}</label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {settings.allowed_gateways.includes('stripe') && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedGateway('stripe')}
-                  className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                    selectedGateway === 'stripe' ? 'border-[var(--color-primary)] bg-[var(--color-inner-dark)]' : 'hover:border-slate-500'
-                  }`}
-                  style={{ borderColor: selectedGateway === 'stripe' ? 'var(--color-primary)' : 'var(--color-border)' }}
-                >
-                  <span className="flex items-center gap-2">
-                    <CreditCard className="h-4 w-4 text-sky-400" />
-                    <span>{t('stripeGateway', 'Stripe')}</span>
-                  </span>
-                  {selectedGateway === 'stripe' && <Check className="h-4 w-4 text-[var(--color-primary)]" />}
-                </button>
-              )}
 
-              {settings.allowed_gateways.includes('paypal') && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedGateway('paypal')}
-                  className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                    selectedGateway === 'paypal' ? 'border-[var(--color-primary)] bg-[var(--color-inner-dark)]' : 'hover:border-slate-500'
-                  }`}
-                  style={{ borderColor: selectedGateway === 'paypal' ? 'var(--color-primary)' : 'var(--color-border)' }}
-                >
-                  <span className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-amber-400" />
-                    <span>{t('paypalGateway', 'PayPal')}</span>
-                  </span>
-                  {selectedGateway === 'paypal' && <Check className="h-4 w-4 text-[var(--color-primary)]" />}
-                </button>
-              )}
+            {settings.allowed_gateways.length === 0 ? (
+              <div 
+                className="p-3.5 rounded-xl border text-xs flex items-center gap-2.5 opacity-90 transition"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <AlertCircle className="h-4 w-4 text-amber-400 flex-shrink-0" />
+                <span>{t('noGatewaysEnabledNotice', 'No payment gateways are currently enabled in Payment Gateway settings. Please contact the administrator.')}</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {settings.allowed_gateways.includes('stripe') && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGateway('stripe')}
+                    className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                      selectedGateway === 'stripe' ? 'border-[var(--color-primary)] bg-[var(--color-inner-dark)]' : 'hover:border-slate-500'
+                    }`}
+                    style={{ borderColor: selectedGateway === 'stripe' ? 'var(--color-primary)' : 'var(--color-border)' }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <CreditCard className="h-4 w-4 text-sky-400" />
+                      <span>{t('stripeGateway', 'Stripe')}</span>
+                    </span>
+                    {selectedGateway === 'stripe' && <Check className="h-4 w-4 text-[var(--color-primary)]" />}
+                  </button>
+                )}
 
-              {settings.allowed_gateways.includes('manual') && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedGateway('manual')}
-                  className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                    selectedGateway === 'manual' ? 'border-[var(--color-primary)] bg-[var(--color-inner-dark)]' : 'hover:border-slate-500'
-                  }`}
-                  style={{ borderColor: selectedGateway === 'manual' ? 'var(--color-primary)' : 'var(--color-border)' }}
-                >
-                  <span className="flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                    <span>{t('manualGateway', 'Manual Settlement')}</span>
-                  </span>
-                  {selectedGateway === 'manual' && <Check className="h-4 w-4 text-[var(--color-primary)]" />}
-                </button>
-              )}
-            </div>
+                {settings.allowed_gateways.includes('paypal') && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGateway('paypal')}
+                    className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                      selectedGateway === 'paypal' ? 'border-[var(--color-primary)] bg-[var(--color-inner-dark)]' : 'hover:border-slate-500'
+                    }`}
+                    style={{ borderColor: selectedGateway === 'paypal' ? 'var(--color-primary)' : 'var(--color-border)' }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-amber-400" />
+                      <span>{t('paypalGateway', 'PayPal')}</span>
+                    </span>
+                    {selectedGateway === 'paypal' && <Check className="h-4 w-4 text-[var(--color-primary)]" />}
+                  </button>
+                )}
+
+                {settings.allowed_gateways.includes('manual') && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGateway('manual')}
+                    className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                      selectedGateway === 'manual' ? 'border-[var(--color-primary)] bg-[var(--color-inner-dark)]' : 'hover:border-slate-500'
+                    }`}
+                    style={{ borderColor: selectedGateway === 'manual' ? 'var(--color-primary)' : 'var(--color-border)' }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                      <span>{t('manualGateway', 'Manual Settlement')}</span>
+                    </span>
+                    {selectedGateway === 'manual' && <Check className="h-4 w-4 text-[var(--color-primary)]" />}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* Bank Wire Details (When Manual Settlement is active) */}
+          {selectedGateway === 'manual' && settings.allowed_gateways.includes('manual') && (
+            <div 
+              className="p-3.5 rounded-xl border text-xs space-y-2 transition animate-in fade-in"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between font-bold">
+                <span className="flex items-center gap-1.5 text-emerald-400">
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>{t('bankTransferInstructions', 'Bank Wire / Manual Settlement Details')}</span>
+                </span>
+              </div>
+              {settings.manual_details?.bankName && (
+                <div className="grid grid-cols-2 gap-2 text-[11px] opacity-80 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                  <div><span className="font-semibold">{t('bankName', 'Bank')}:</span> {settings.manual_details.bankName}</div>
+                  <div><span className="font-semibold">{t('accountHolder', 'Account')}:</span> {settings.manual_details.accountHolder}</div>
+                  <div><span className="font-semibold">{t('accountNumber', 'Number')}:</span> {settings.manual_details.accountNumber}</div>
+                  {settings.manual_details.swiftBic && <div><span className="font-semibold">SWIFT/BIC:</span> {settings.manual_details.swiftBic}</div>}
+                </div>
+              )}
+              {settings.manual_details?.instructions && (
+                <p className="text-[11px] opacity-70 italic">{settings.manual_details.instructions}</p>
+              )}
+              <div className="pt-1">
+                <label className="block text-[11px] font-bold opacity-80 mb-1">{t('transferReference', 'Transfer Reference / Receipt ID')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  placeholder={t('transferReferencePlaceholder', 'e.g. WIRE-94821 or Transaction Ref')}
+                  value={manualReference}
+                  onChange={(e) => setManualReference(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg border text-xs outline-none font-mono"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Deposit Trigger Button */}
           <button
             type="button"
             onClick={handleDeposit}
-            disabled={submitting || finalDepositAmount < settings.min_topup}
+            disabled={submitting || finalDepositAmount < settings.min_topup || settings.allowed_gateways.length === 0}
             className="w-full py-3 rounded-xl text-white font-bold text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-40"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
@@ -656,8 +819,11 @@ function WalletContent() {
               <>
                 <Plus className="h-4 w-4" />
                 <span>
-                  {t('addFundsBtn', 'Add Funds to Wallet')} ({activeCurrencySymbol}{finalDepositAmount.toFixed(2)}
-                  {bonusAmount > 0 && ` + ${activeCurrencySymbol}${bonusAmount.toFixed(2)} Bonus`})
+                  {settings.allowed_gateways.length === 0 ? (
+                    t('topupsUnavailable', 'Top-Ups Temporarily Unavailable')
+                  ) : (
+                    `${t('addFundsBtn', 'Add Funds to Wallet')} (${activeCurrencySymbol}${finalDepositAmount.toFixed(2)}${bonusAmount > 0 ? ` + ${activeCurrencySymbol}${bonusAmount.toFixed(2)} Bonus` : ''})`
+                  )}
                 </span>
               </>
             )}

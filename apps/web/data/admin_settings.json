@@ -10841,5 +10841,62 @@
     "stripeKeysVerified": true,
     "paypalWebhookVerified": false,
     "stripeWebhookVerified": true
-  }
+  },
+  "subscriptionPlans": [
+    {
+      "id": "preset_taster",
+      "name": "Taster",
+      "slug": "taster",
+      "badge": "",
+      "monthlyPriceDollars": 0,
+      "annualPriceDollars": 0,
+      "descriptionMonthly": "Free tier with limited features",
+      "descriptionAnnual": "Free tier with limited features",
+      "tokensMonthly": 500,
+      "tokensAnnual": 0,
+      "tokenLimit": 500,
+      "maxSavedRecipes": 50,
+      "allowedModels": [
+        "gemini-2.5-flash"
+      ],
+      "features": [
+        "Create up to 5 AI-powered recipes per month",
+        "Personal recipe library (25 total recipes)",
+        "Smart ingredient repurposing",
+        "Automated shopping list creation",
+        "Direct online grocery shopping links",
+        "Meal planner",
+        "Ingredient photo recognition"
+      ],
+      "canViewMacros": false,
+      "isFree": true,
+      "isDefault": true
+    },
+    {
+      "id": "plan_culinary-pro_mvs29nne",
+      "name": "Culinary Pro",
+      "slug": "culinary-pro",
+      "badge": "Most Popular",
+      "monthlyPriceDollars": 9.99,
+      "annualPriceDollars": 79.99,
+      "descriptionMonthly": "Ideal for passionate home cooks.",
+      "descriptionAnnual": "Maximum savings with yearly billing.",
+      "tokensMonthly": 250000,
+      "tokensAnnual": 3000000,
+      "tokenLimit": 250000,
+      "maxSavedRecipes": 200,
+      "allowedModels": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro"
+      ],
+      "features": [
+        "Full Macronutrient Tracking (Macros)",
+        "Automated Aisle Grocery Consolidation",
+        "AI Smart Recipe Formulator"
+      ],
+      "canViewMacros": true,
+      "isFree": false,
+      "isDefault": false
+    }
+  ]
 }

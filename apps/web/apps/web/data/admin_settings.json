@@ -31,7 +31,18 @@
       "id": "preset_taster",
       "name": "Taster",
       "slug": "taster",
-      "isFree": true,
+      "badge": "",
+      "monthlyPriceDollars": 0,
+      "annualPriceDollars": 0,
+      "descriptionMonthly": "Free tier with limited features",
+      "descriptionAnnual": "Free tier with limited features",
+      "tokensMonthly": 500,
+      "tokensAnnual": 0,
+      "tokenLimit": 500,
+      "maxSavedRecipes": 50,
+      "allowedModels": [
+        "gemini-2.5-flash"
+      ],
       "features": [
         "Create up to 5 AI-powered recipes per month",
         "Personal recipe library (25 total recipes)",
@@ -41,24 +52,35 @@
         "Meal planner",
         "Ingredient photo recognition"
       ],
-      "isDefault": true,
-      "updatedAt": "2026-09-16T08:22:09.057Z",
-      "buttonText": "Manage",
-      "tokenLimit": 500,
-      "trialBadge": "",
-      "annualBadge": "",
-      "featuresText": "Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner\nIngredient photo recognition",
-      "monthlyBadge": "",
-      "aiRecipeLimit": 5,
       "canViewMacros": false,
-      "allowedAiModels": "gemini-3.5-flash-lite,gpt-3.5-turbo",
-      "descriptionAnnual": "Free tier with limited features",
-      "socialScrapeLimit": 5,
-      "annualPriceDollars": 0,
-      "descriptionMonthly": "Free tier with limited features",
-      "recipeLibraryLimit": 25,
-      "monthlyPriceDollars": 0,
-      "tokenReimburseFrequency": "monthly"
+      "isFree": true,
+      "isDefault": true
+    },
+    {
+      "id": "plan_culinary-pro_mvs29nne",
+      "name": "Culinary Pro",
+      "slug": "culinary-pro",
+      "badge": "Most Popular",
+      "monthlyPriceDollars": 9.99,
+      "annualPriceDollars": 79.99,
+      "descriptionMonthly": "Ideal for passionate home cooks.",
+      "descriptionAnnual": "Maximum savings with yearly billing.",
+      "tokensMonthly": 250000,
+      "tokensAnnual": 3000000,
+      "tokenLimit": 250000,
+      "maxSavedRecipes": 200,
+      "allowedModels": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro"
+      ],
+      "features": [
+        "Full Macronutrient Tracking (Macros)",
+        "Automated Aisle Grocery Consolidation",
+        "AI Smart Recipe Formulator"
+      ],
+      "canViewMacros": true,
+      "isFree": false,
+      "isDefault": false
     }
   ],
   "updatedAt": "2026-10-27T19:35:35.924Z",
