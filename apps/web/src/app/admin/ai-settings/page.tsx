@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, KeyboardEvent } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
-  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle
+  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle, ChevronDown
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -75,6 +75,7 @@ export default function ChefAISettingsPage() {
   const [autoConnecting, setAutoConnecting] = useState(false);
   const [testingKey, setTestingKey] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   
   // Capabilities
   const [enableWebSearch, setEnableWebSearch] = useState(true);
@@ -221,7 +222,9 @@ export default function ChefAISettingsPage() {
 
   // Load Settings Exclusively from Server Storage
   const loadSettingsFromServer = useCallback(async () => {
-    purgeLegacyBrowserAdminStorage();
+    if (typeof purgeLegacyBrowserAdminStorage === 'function') {
+      purgeLegacyBrowserAdminStorage();
+    }
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData) {
@@ -306,6 +309,7 @@ export default function ChefAISettingsPage() {
         body: JSON.stringify({
           provider,
           apiKey: keyToTest,
+          key: keyToTest,
           model
         })
       });
@@ -317,10 +321,10 @@ export default function ChefAISettingsPage() {
       } catch (_) {
         data = { success: false, error: `Invalid response from server (${res.status}: ${res.statusText})` };
       }
-      if (data.success) {
+      if (res.ok && data.success) {
         setTestResult({ success: true, message: data.message || `${t('connectedPrefix', 'Connected to')} ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'}!` });
       } else {
-        setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection failed.') });
+        setTestResult({ success: false, message: data.error || data.message || t('connectionFailed', 'Connection failed.') });
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message || t('verificationEndpointError', 'Could not reach verification endpoint.') });
@@ -338,15 +342,24 @@ export default function ChefAISettingsPage() {
       const data = await res.json();
       let resolvedKey = apiKey.trim();
 
-      if (data.success && Array.isArray(data.keys)) {
-        const geminiEntry = data.keys.find((k: any) => 
-          k.envKey === 'GEMINI_API_KEY' || 
-          k.envKey === 'GOOGLE_API_KEY' || 
-          k.provider?.toLowerCase().includes('gemini')
-        );
-        if (geminiEntry && geminiEntry.keyValue && !geminiEntry.keyValue.includes('sample')) {
-          resolvedKey = geminiEntry.keyValue.trim();
-          setApiKey(resolvedKey);
+      if (data.success) {
+        if (Array.isArray(data.keys)) {
+          const geminiEntry = data.keys.find((k: any) => 
+            k.envKey === 'GEMINI_API_KEY' || 
+            k.envKey === 'GOOGLE_API_KEY' || 
+            k.provider?.toLowerCase().includes('gemini')
+          );
+          if (geminiEntry && geminiEntry.keyValue && !geminiEntry.keyValue.includes('sample')) {
+            resolvedKey = geminiEntry.keyValue.trim();
+            setApiKey(resolvedKey);
+          }
+        }
+        if (!resolvedKey && data.envMap) {
+          const fromEnv = data.envMap['GEMINI_API_KEY'] || data.envMap['GOOGLE_API_KEY'] || data.envMap['NEXT_PUBLIC_GEMINI_API_KEY'];
+          if (fromEnv && !fromEnv.includes('sample')) {
+            resolvedKey = fromEnv.trim();
+            setApiKey(resolvedKey);
+          }
         }
       }
 
@@ -365,6 +378,7 @@ export default function ChefAISettingsPage() {
         body: JSON.stringify({
           provider: 'gemini',
           apiKey: resolvedKey,
+          key: resolvedKey,
           model: activeModel
         })
       });
@@ -376,7 +390,7 @@ export default function ChefAISettingsPage() {
       } catch (_) {
         testData = { success: false, error: `Invalid server response (${testRes.status})` };
       }
-      if (testData.success) {
+      if (testRes.ok && testData.success) {
         setTestResult({ 
           success: true, 
           message: `${t('connectedPrefix', 'Connected to')} Google Gemini (${activeModel}) ${t('keySyncedSuffix', 'and key synced!')}` 
@@ -397,12 +411,12 @@ export default function ChefAISettingsPage() {
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
           window.dispatchEvent(new Event('zecratary_settings_updated'));
           window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-      window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
-      try {
-        const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
-        syncCh.postMessage({ model, provider });
-        syncCh.close();
-      } catch (_) {}
+          window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+          try {
+            const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
+            syncCh.postMessage({ model: activeModel, provider: 'gemini' });
+            syncCh.close();
+          } catch (_) {}
         }
       } else if (!silent) {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
@@ -523,10 +537,12 @@ export default function ChefAISettingsPage() {
     }));
   };
 
-  const handleSave = async (e?: React.FormEvent) => {
+  const handleSave = async (e?: React.FormEvent | React.MouseEvent) => {
     if (e) e.preventDefault();
-    const cleanApiKey = apiKey.trim();
+    if (isSaving) return;
+    setIsSaving(true);
 
+    const cleanApiKey = apiKey.trim();
     const config = {
       provider,
       apiKey: cleanApiKey,
@@ -555,70 +571,74 @@ export default function ChefAISettingsPage() {
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
-    await persistServerAdminSettings({
-      aiProvider: provider,
-      aiModel: model,
-      chefAiSettings: config,
-      chefQuestionnaire: activeFlattenedQuestions
-    });
+    try {
+      await persistServerAdminSettings({
+        aiProvider: provider,
+        aiModel: model,
+        chefAiSettings: config,
+        chefQuestionnaire: activeFlattenedQuestions
+      });
 
-    if (cleanApiKey) {
-      try {
-        const res = await fetch('/api/admin/keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
-            provider,
-            envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
-            keyValue: cleanApiKey,
-            status: 'active'
-          })
-        });
+      if (cleanApiKey) {
+        try {
+          const res = await fetch('/api/admin/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
+              provider,
+              envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
+              keyValue: cleanApiKey,
+              status: 'active'
+            })
+          });
 
-        const data = await res.json();
-        if (res.ok && data.success) {
-          setTestResult({
-            success: true,
-            message: `${t('keySavedToEnv', 'Key saved to local .env and synchronized')} (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
-          });
-        } else {
-          setTestResult({
-            success: false,
-            message: `${t('serverStoredSettings', 'Server stored settings')}: ${data.error || 'Backend rejected key save'}`
-          });
-        }
-      } catch (err: any) {
-        setTestResult({
-          success: false,
-          message: `${t('serverStoredSettings', 'Server stored settings')}: ${err.message || 'Network error'}`
-        });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            setTestResult({
+              success: true,
+              message: `${t('keySavedToEnv', 'Key saved to local .env and synchronized')} (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
+            });
+          }
+        } catch (_) {}
       }
-    }
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-      window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
-      try {
-        const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
-        syncCh.postMessage({ model, provider });
-        syncCh.close();
-      } catch (_) {}
-      window.dispatchEvent(new Event('zecratary_settings_updated'));
-      window.dispatchEvent(new Event('storage'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+        try {
+          const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
+          syncCh.postMessage({ model, provider });
+          syncCh.close();
+        } catch (_) {}
+        window.dispatchEvent(new Event('zecratary_settings_updated'));
+        window.dispatchEvent(new Event('storage'));
+      }
+      
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3500);
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: `${t('serverStoredSettings', 'Server stored settings')}: ${err?.message || 'Failed to save'}`
+      });
+    } finally {
+      setIsSaving(false);
     }
-    
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3500);
   };
 
   const activeSection = sections.find(s => s.id === activeTopicId) || sections[0];
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 font-sans px-2 sm:px-4 pt-2 transition-colors duration-200"
+      id="zecratary-ai-settings-canvas"
+      role="region"
+      aria-label={t('aiAssistantConfigTitle', 'AI Assistant Configuration')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans pt-2 transition-colors duration-200"
       style={{ 
+        boxSizing: 'border-box',
         color: 'var(--color-text)',
         transition: 'background-color 200ms ease, color 200ms ease, border-color 200ms ease'
       }}
@@ -665,7 +685,8 @@ export default function ChefAISettingsPage() {
           <button
             type="button"
             onClick={handleSave}
-            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90"
+            disabled={isSaving}
+            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
             style={{ 
               backgroundColor: 'var(--color-primary)',
               boxShadow: 'var(--color-primary-shadow, 0 8px 20px -4px rgba(224, 86, 56, 0.3))'
@@ -673,7 +694,17 @@ export default function ChefAISettingsPage() {
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            <Check className="h-4 w-4" /> {t('saveConfigurationBtn', 'Save Configuration')}
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>{t('saving', 'Saving...')}</span>
+              </>
+            ) : (
+              <>
+                <Check className="h-4 w-4" />
+                <span>{t('saveConfigurationBtn', 'Save Configuration')}</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -707,7 +738,13 @@ export default function ChefAISettingsPage() {
         })}
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      {/* Accessible Landmark Container replacing form tag */}
+      <div 
+        role="region"
+        aria-label={t('aiAssistantConfigForm', 'AI Assistant Settings Configuration Form')}
+        data-lpignore="true"
+        className="space-y-6"
+      >
         
         {/* TAB 1: GENERAL & MODEL CONFIG */}
         {activeTab === 'general' && (
@@ -819,7 +856,11 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
                       placeholder={provider === 'gemini' ? t('apiKeyPlaceholderGemini', 'AIzaSy...') : t('apiKeyPlaceholderOpenAI', 'sk-...')}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('apiKeyLabel', 'API Key')}
@@ -888,34 +929,43 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
+                {/* Harmonized Model Selector with Custom Chevron */}
                 <div>
                   <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('modelVersionIdentifier', 'Model Version Identifier')}
                   </label>
-                  <select
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    aria-label={t('modelVersionIdentifier', 'Model Version Identifier')}
-                    className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    {provider === 'gemini' ? (
-                      <>
-                        <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption36', 'Gemini 3.6 Flash (Latest Recommended)')}</option>
-                        <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption35', 'Gemini 3.5 Flash Lite (Lightweight & Fast)')}</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4o', 'GPT-4o (Advanced reasoning)')}</option>
-                        <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4Turbo', 'GPT-4 Turbo')}</option>
-                        <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption35Turbo', 'GPT-3.5 Turbo (High speed)')}</option>
-                      </>
-                    )}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      aria-label={t('modelVersionIdentifier', 'Model Version Identifier')}
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-form-type="other"
+                      className="w-full appearance-none border rounded-xl px-4 py-3 pr-10 outline-none cursor-pointer transition font-medium text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                    >
+                      {provider === 'gemini' ? (
+                        <>
+                          <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption36', 'Gemini 3.6 Flash (Latest Recommended)')}</option>
+                          <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption35', 'Gemini 3.5 Flash Lite (Lightweight & Fast)')}</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4o', 'GPT-4o (Advanced reasoning)')}</option>
+                          <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4Turbo', 'GPT-4 Turbo')}</option>
+                          <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption35Turbo', 'GPT-3.5 Turbo (High speed)')}</option>
+                        </>
+                      )}
+                    </select>
+                    <ChevronDown className="h-4 w-4 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors" style={{ color: 'var(--color-text-secondary)' }} />
+                  </div>
                   <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
                   </span>
@@ -1058,7 +1108,11 @@ export default function ChefAISettingsPage() {
                       value={newTopicTitle}
                       onChange={(e) => setNewTopicTitle(e.target.value)}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('topicTitlePlaceholder', 'Topic Title')}
@@ -1077,7 +1131,11 @@ export default function ChefAISettingsPage() {
                       value={newTopicDesc}
                       onChange={(e) => setNewTopicDesc(e.target.value)}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('topicDescPlaceholder', 'Topic Description')}
@@ -1125,7 +1183,12 @@ export default function ChefAISettingsPage() {
                               setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
                             }}
                             autoComplete="off"
+                            autoCorrect="off"
+                            autoCapitalize="off"
                             data-lpignore="true"
+                            data-1p-ignore="true"
+                            data-bwignore="true"
+                            data-form-type="other"
                             spellCheck={false}
                             className="font-bold text-sm bg-transparent border-b border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
                             style={{ color: 'var(--color-text)' }}
@@ -1151,7 +1214,12 @@ export default function ChefAISettingsPage() {
                             setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
                           }}
                           autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="off"
                           data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-bwignore="true"
+                          data-form-type="other"
                           spellCheck={false}
                           className="text-[11px] bg-transparent border-b border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -1204,9 +1272,14 @@ export default function ChefAISettingsPage() {
                                 }));
                               }}
                               autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="off"
                               data-lpignore="true"
+                              data-1p-ignore="true"
+                              data-bwignore="true"
+                              data-form-type="other"
                               spellCheck={false}
-                              aria-label={`Question ${qIdx + 1}`}
+                              aria-label={`${t('questionNumber', 'Question')} ${qIdx + 1}`}
                               className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
                               style={{ color: 'var(--color-text)' }}
                             />
@@ -1234,7 +1307,11 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => setNewQuestionText(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('addQuestionPrefix', 'Add question')}
@@ -1337,7 +1414,7 @@ export default function ChefAISettingsPage() {
                         <span className="font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                           <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('previewPlanTitle', 'High Protein Plan (3 Days)')}
                         </span>
-                        <span style={{ color: 'var(--color-text-secondary)' }}>3/3 Days</span>
+                        <span style={{ color: 'var(--color-text-secondary)' }}>{t('threeOfThreeDays', '3/3 Days')}</span>
                       </div>
                       <div className="space-y-1.5">
                         <div 
@@ -1406,7 +1483,7 @@ export default function ChefAISettingsPage() {
                       >
                         <div className="text-white px-3 py-2 flex items-center justify-between font-bold text-xs" style={{ backgroundColor: 'var(--color-primary)' }}>
                           <span>{t('previewDay1Title', 'Day 1 - Sunday')}</span>
-                          <span className="text-[10px] opacity-90">Sep 6</span>
+                          <span className="text-[10px] opacity-90">{t('previewSampleDate', 'Sep 6')}</span>
                         </div>
                         <div className="p-3 space-y-2">
                           <div className="flex items-start gap-3">
@@ -1517,26 +1594,35 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
+              {/* Harmonized Persona Selector with Custom Chevron */}
               <div className="space-y-2">
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('assistantVoicePersona', 'Assistant Voice Persona')}
                 </label>
-                <select
-                  value={selectedVoiceName}
-                  onChange={(e) => setSelectedVoiceName(e.target.value)}
-                  aria-label={t('assistantVoicePersona', 'Assistant Voice Persona')}
-                  className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <option value="en-US-Neural2-F" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceAria', 'Chef Aria (US Female - Warm & Professional)')}</option>
-                  <option value="en-US-Neural2-D" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceMarcus', 'Chef Marcus (US Male - Deep & Authoritative)')}</option>
-                  <option value="en-GB-Neural2-A" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceOliver', 'Chef Oliver (UK Male - Refined Accent)')}</option>
-                  <option value="en-AU-Neural2-B" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceMatilda', 'Chef Matilda (Australian - Friendly & Casual)')}</option>
-                </select>
+                <div className="relative">
+                  <select
+                    value={selectedVoiceName}
+                    onChange={(e) => setSelectedVoiceName(e.target.value)}
+                    aria-label={t('assistantVoicePersona', 'Assistant Voice Persona')}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    className="w-full appearance-none border rounded-xl px-4 py-3 pr-10 outline-none cursor-pointer transition text-xs"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  >
+                    <option value="en-US-Neural2-F" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceAria', 'Chef Aria (US Female - Warm & Professional)')}</option>
+                    <option value="en-US-Neural2-D" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceMarcus', 'Chef Marcus (US Male - Deep & Authoritative)')}</option>
+                    <option value="en-GB-Neural2-A" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceOliver', 'Chef Oliver (UK Male - Refined Accent)')}</option>
+                    <option value="en-AU-Neural2-B" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceMatilda', 'Chef Matilda (Australian - Friendly & Casual)')}</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors" style={{ color: 'var(--color-text-secondary)' }} />
+                </div>
               </div>
             </div>
 
@@ -1793,7 +1879,12 @@ export default function ChefAISettingsPage() {
                     value={maxPlanDays}
                     onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
                     aria-label={t('maxPlanDaysCap', 'Max Plan Days')}
                     className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
                     style={{
@@ -1843,7 +1934,11 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('knowledgeBaseHeader', 'Knowledge Base')}
@@ -1863,7 +1958,7 @@ export default function ChefAISettingsPage() {
                         backgroundColor: 'var(--color-card)',
                         color: 'var(--color-text)'
                       }}
-                      aria-label="Add Knowledge Base Item"
+                      aria-label={t('addKnowledgeBaseItem', 'Add Knowledge Base Item')}
                     >
                       +
                     </button>
@@ -1887,7 +1982,7 @@ export default function ChefAISettingsPage() {
                         onClick={() => setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx))}
                         className="transition cursor-pointer hover:opacity-75"
                         style={{ color: 'var(--color-text-secondary)' }}
-                        aria-label={`Remove ${item}`}
+                        aria-label={`${t('removeItem', 'Remove')} ${item}`}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -1899,7 +1994,7 @@ export default function ChefAISettingsPage() {
               {/* CUSTOM VOCABULARY FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
                     <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1929,7 +2024,11 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('customVocabularyHeader', 'Custom Vocabulary')}
@@ -1981,7 +2080,7 @@ export default function ChefAISettingsPage() {
                         onClick={() => setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx))}
                         className="transition cursor-pointer hover:opacity-75"
                         style={{ color: 'var(--color-text-secondary)' }}
-                        aria-label={`Remove ${item}`}
+                        aria-label={`${t('removeItem', 'Remove')} ${item}`}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -1990,10 +2089,10 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* FILTER WORDS FEATURE */}
+              {/* FILTER WORDS FEATURE - PROPERLY BALANCED H3 CONTAINER */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-danger, #ef4444)' }}>
                     <Ban className="h-4 w-4" style={{ color: 'var(--color-danger, #ef4444)' }} /> {t('filterWordsHeader', 'Filter Words')}
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -2023,7 +2122,11 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('filterWordsHeader', 'Filter Words')}
@@ -2075,7 +2178,7 @@ export default function ChefAISettingsPage() {
                         onClick={() => setFilterWordsList(filterWordsList.filter((_, i) => i !== idx))}
                         className="transition cursor-pointer hover:opacity-75"
                         style={{ color: 'var(--color-text-secondary)' }}
-                        aria-label={`Remove ${item}`}
+                        aria-label={`${t('removeItem', 'Remove')} ${item}`}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -2094,7 +2197,12 @@ export default function ChefAISettingsPage() {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
                   spellCheck={false}
                   aria-label={t('systemPromptHeader', 'System Prompt')}
                   className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
@@ -2114,7 +2222,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-      </form>
+      </div>
     </div>
   );
 }
