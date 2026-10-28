@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.84",
+  "version": "8.1.85",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.84",
+  "version": "8.1.85",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -66783,6 +66783,9 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "languageSetting": "Language Setting",
+    "navWallet": "Wallet",
+    "walletSettings": "Wallet Settings",
     "selectEnginePrompt": "Select Database Dialect",
     "showPassword": "Show Password",
     "hidePassword": "Hide Password",
@@ -75481,6 +75484,9 @@ export default function Sidebar() {
     ? t('topbarPlanPro', 'Pro Plan') 
     : t('topbarPlanFree', 'Free Tier');
 
+  // Task 1: Robust fallback resolving to 'Wallet' across all locales
+  const financeWalletLabel = t('navWallet', t('wallet') === 'Wallet Settings' ? 'Wallet' : t('wallet', 'Wallet'));
+
   return (
     <>
       {/* DESKTOP TOP BAR (Fixed Header with Real-Time Telemetry) */}
@@ -75978,7 +75984,7 @@ export default function Sidebar() {
             <Link 
               href="/wallet" 
               className="flex items-center px-1.5 py-0.5 hover:opacity-85 transition"
-              title={t('wallet', 'Wallet')}
+              title={financeWalletLabel}
             >
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
@@ -76072,7 +76078,7 @@ export default function Sidebar() {
             </Link>
           </div>
 
-          {/* 1. CREATE ACCORDION (Task 1: Same Primary Accent Color as Admin Access) */}
+          {/* 1. CREATE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -76105,7 +76111,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION (Task 1: Same Primary Accent Color as Admin Access) */}
+          {/* 2. MANAGE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -76138,7 +76144,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 3. PLAN ACCORDION (Task 1: Same Primary Accent Color as Admin Access) */}
+          {/* 3. PLAN ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -76171,7 +76177,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY ACCORDION (Task 1: Same Primary Accent Color as Admin Access) */}
+          {/* 4. FINANCIAL & UTILITY ACCORDION (Task 1: Clean 'Wallet' Link) */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -76188,15 +76194,19 @@ export default function Sidebar() {
 
             {(openSections.finance || isCollapsed) && (
               <div className="space-y-0.5">
-                {/* Task 2: Token */}
                 <Link href="/token" className={navClass('/token')} style={navStyle('/token')} title={t('token', 'Token')}>
                   <Coins className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('token', 'Token')}</span>}
                 </Link>
-                {/* Task 3: Wallet */}
-                <Link href="/wallet" className={navClass('/wallet')} style={navStyle('/wallet')} title={t('wallet', 'Wallet')}>
+                {/* Finance Hub: Text changed to 'Wallet' */}
+                <Link 
+                  href="/wallet" 
+                  className={navClass('/wallet')} 
+                  style={navStyle('/wallet')} 
+                  title={financeWalletLabel}
+                >
                   <Wallet className="h-4 w-4 shrink-0" />
-                  {!isCollapsed && <span>{t('wallet', 'Wallet')}</span>}
+                  {!isCollapsed && <span>{financeWalletLabel}</span>}
                 </Link>
                 <Link href="/subscriptions" className={navClass('/subscriptions')} style={navStyle('/subscriptions')} title={t('subscriptions', 'Subscriptions')}>
                   <Layers className="h-4 w-4 shrink-0" />
@@ -76210,7 +76220,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION (ALL MODULES PRESERVED) */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (Task 2: Added /admin/language Menu Link) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -76228,7 +76238,6 @@ export default function Sidebar() {
 
               {(openSections.admin || isCollapsed) && (
                 <div className="space-y-0.5">
-                  {/* Task 4: General Settings */}
                   <Link href="/admin" className={navClass('/admin')} style={navStyle('/admin')} title={t('generalSettings', 'General Settings')}>
                     <Settings className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('generalSettings', 'General Settings')}</span>}
@@ -76236,6 +76245,11 @@ export default function Sidebar() {
                   <Link href="/admin/frontend" className={navClass('/admin/frontend')} style={navStyle('/admin/frontend')} title={t('pageBuilder', 'Page Builder')}>
                     <Globe className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('pageBuilder', 'Page Builder')}</span>}
+                  </Link>
+                  {/* Task 2: Language Setting Menu Link */}
+                  <Link href="/admin/language" className={navClass('/admin/language')} style={navStyle('/admin/language')} title={t('languageSetting', 'Language Setting')}>
+                    <Languages className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('languageSetting', 'Language Setting')}</span>}
                   </Link>
                   <Link href="/admin/users" className={navClass('/admin/users')} style={navStyle('/admin/users')} title={t('users', 'Users')}>
                     <UserPlus className="h-4 w-4 shrink-0" />
@@ -76249,14 +76263,13 @@ export default function Sidebar() {
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
                   </Link>
-                  {/* Task 5: Token Settings */}
                   <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} style={navStyle('/admin/token-setting')} title={t('tokenSettings', 'Token Settings')}>
                     <Coins className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('tokenSettings', 'Token Settings')}</span>}
                   </Link>
-                  <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} style={navStyle('/admin/wallet-settings')} title={t('wallet', 'Wallet')}>
+                  <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} style={navStyle('/admin/wallet-settings')} title={t('walletSettings', 'Wallet Settings')}>
                     <Wallet className="h-4 w-4 shrink-0" />
-                    {!isCollapsed && <span>{t('wallet', 'Wallet Settings')}</span>}
+                    {!isCollapsed && <span>{t('walletSettings', 'Wallet Settings')}</span>}
                   </Link>
                   <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Alerts')}>
                     <BellRing className="h-4 w-4 shrink-0" />
@@ -76282,7 +76295,6 @@ export default function Sidebar() {
                     <Key className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('socialLogin', 'Social Login')}</span>}
                   </Link>
-                  {/* Task 6: Database Settings */}
                   <Link href="/admin/database" className={navClass('/admin/database')} style={navStyle('/admin/database')} title={t('databaseSettings', 'Database Settings')}>
                     <Database className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('databaseSettings', 'Database Settings')}</span>}
@@ -76356,13 +76368,11 @@ export default function Sidebar() {
               <Link href="/shopping" onClick={() => setMobileMenuOpen(false)} className={navClass('/shopping')} style={navStyle('/shopping')}>
                 <ShoppingCart className="h-4 w-4 shrink-0" /> <span>{t('shoppingList', 'Shopping List')}</span>
               </Link>
-              {/* Task 2: Token */}
               <Link href="/token" onClick={() => setMobileMenuOpen(false)} className={navClass('/token')} style={navStyle('/token')}>
                 <Coins className="h-4 w-4 shrink-0" /> <span>{t('token', 'Token')}</span>
               </Link>
-              {/* Task 3: Wallet */}
               <Link href="/wallet" onClick={() => setMobileMenuOpen(false)} className={navClass('/wallet')} style={navStyle('/wallet')}>
-                <Wallet className="h-4 w-4 shrink-0" /> <span>{t('wallet', 'Wallet')}</span>
+                <Wallet className="h-4 w-4 shrink-0" /> <span>{financeWalletLabel}</span>
               </Link>
               <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className={navClass('/profile')} style={navStyle('/profile')}>
                 <UserIcon className="h-4 w-4 shrink-0" /> <span>{t('topbarProfile', 'User Profile')}</span>

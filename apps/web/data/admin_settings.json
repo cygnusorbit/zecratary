@@ -10962,7 +10962,8 @@
       "nativeName": "English",
       "flag": "🇺🇸",
       "isDefault": true,
-      "isEnabled": true
+      "isEnabled": true,
+      "status": "active"
     },
     {
       "code": "th",
@@ -10970,7 +10971,8 @@
       "nativeName": "ไทย",
       "flag": "🇹🇭",
       "isDefault": false,
-      "isEnabled": true
+      "isEnabled": true,
+      "status": "active"
     },
     {
       "code": "es",
@@ -10978,7 +10980,8 @@
       "nativeName": "Español",
       "flag": "🇪🇸",
       "isDefault": false,
-      "isEnabled": true
+      "isEnabled": true,
+      "status": "active"
     },
     {
       "code": "fr",
@@ -10986,7 +10989,8 @@
       "nativeName": "Français",
       "flag": "🇫🇷",
       "isDefault": false,
-      "isEnabled": true
+      "isEnabled": true,
+      "status": "active"
     }
   ],
   "default_language": "en",
@@ -11421,5 +11425,57 @@
       "isFree": false,
       "isDefault": false
     }
-  ]
+  ],
+  "supportedLanguages": [
+    {
+      "code": "en",
+      "flag": "🇺🇸",
+      "name": "English",
+      "status": "active",
+      "direction": "ltr",
+      "isDefault": true,
+      "nativeName": "English",
+      "lastUpdated": "2026-09-18T10:38:26.048Z",
+      "native": "English",
+      "dir": "ltr"
+    },
+    {
+      "code": "es",
+      "flag": "🇪🇸",
+      "name": "Spanish",
+      "status": "inactive",
+      "direction": "ltr",
+      "isDefault": false,
+      "nativeName": "Español",
+      "lastUpdated": "2026-09-18T10:38:11.128Z",
+      "native": "Español",
+      "dir": "ltr"
+    },
+    {
+      "code": "fr",
+      "flag": "🇫🇷",
+      "name": "French",
+      "status": "inactive",
+      "direction": "ltr",
+      "isDefault": false,
+      "nativeName": "Français",
+      "lastUpdated": "2026-09-18T10:38:11.128Z",
+      "native": "Français",
+      "dir": "ltr"
+    },
+    {
+      "code": "th",
+      "flag": "🇹🇭",
+      "name": "Thai",
+      "status": "active",
+      "direction": "ltr",
+      "isDefault": false,
+      "nativeName": "ไทย",
+      "lastUpdated": "2026-09-18T10:38:11.128Z",
+      "native": "ไทย",
+      "dir": "ltr"
+    }
+  ],
+  "defaultLanguage": "en",
+  "lastUpdated": "2026-10-28T17:54:46.527Z"
 }
