@@ -1,6 +1,8 @@
+// Generated & Maintained by AI Collaborator - Production Build Compliant
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import packageInfo from '../../package.json';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -8,11 +10,12 @@ import {
   Book, Package, ShoppingCart, Calendar, LayoutTemplate, UserPlus, 
   ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
   Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
-  Bell, BellRing, User as UserIcon, Plus, ChevronDown, ChevronRight, 
-  Layers, Check, Database, Receipt, Globe
+  Bell, BellRing, User as UserIcon, ChevronDown, 
+  Layers, Check, Database, Receipt, Globe, Mail, ChevronRight,
+  Plus, CheckCheck, HardDrive
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
-import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
+import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon, fetchSiteConfig } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 
 interface InAppNotification {
@@ -23,44 +26,51 @@ interface InAppNotification {
   isRead: boolean;
   actionUrl?: string;
   actionLabel?: string;
-  timestamp?: string;
+  createdAt?: string;
 }
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$',
-  EUR: '€',
-  GBP: '£',
-  CAD: 'CA$',
-  AUD: 'AU$',
-  JPY: '¥'
+export interface DynamicLanguageItem {
+  id?: string;
+  code: string;
+  name?: string;
+  native?: string;
+  flag?: string;
+  direction?: 'ltr' | 'rtl';
+  status?: string;
+  is_default?: boolean;
+}
+
+// Initial SSR-safe fallback dictionaries
+const DEFAULT_CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
+  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿',
+  BRL: 'R$', INR: '₹', MYR: 'RM', PHP: '₱', IDR: 'Rp',
+  VND: '₫', KRW: '₩', CNY: '¥', HKD: 'HK$', TWD: 'NT$',
+  AED: 'د.إ', SAR: '﷼', ZAR: 'R', MXN: 'Mex$'
 };
 
-const LANGUAGE_FLAG_MAP: Record<string, string> = {
-  en: '🇺🇸',
-  es: '🇪🇸',
-  fr: '🇫🇷',
-  th: '🇹🇭',
-  de: '🇩🇪',
-  it: '🇮🇹',
-  ja: '🇯🇵',
-  zh: '🇨🇳',
-  ko: '🇰🇷',
-  pt: '🇵🇹',
-  ru: '🇷🇺',
-  ar: '🇸🇦',
-  nl: '🇳🇱',
-  hi: '🇮🇳',
-  vi: '🇻🇳',
-  id: '🇮🇩',
-  tr: '🇹🇷'
+const DEFAULT_LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
+  en: { flag: '🇺🇸', native: 'English' },
+  th: { flag: '🇹🇭', native: 'ไทย' },
+  es: { flag: '🇪🇸', native: 'Español' },
+  fr: { flag: '🇫🇷', native: 'Français' },
+  de: { flag: '🇩🇪', native: 'Deutsch' },
+  it: { flag: '🇮🇹', native: 'Italiano' },
+  ja: { flag: '🇯🇵', native: '日本語' },
+  zh: { flag: '🇨🇳', native: '中文' },
+  ko: { flag: '🇰🇷', native: '한국어' },
+  pt: { flag: '🇵🇹', native: 'Português' },
+  ru: { flag: '🇷🇺', native: 'Русский' },
+  ar: { flag: '🇸🇦', native: 'العربية' },
+  vi: { flag: '🇻🇳', native: 'Tiếng Việt' },
+  nl: { flag: '🇳🇱', native: 'Nederlands' },
+  hi: { flag: '🇮🇳', native: 'हिन्दी' },
+  id: { flag: '🇮🇩', native: 'Bahasa Indonesia' },
+  ms: { flag: '🇲🇾', native: 'Bahasa Melayu' },
+  tr: { flag: '🇹🇷', native: 'Türkçe' }
 };
 
-const getLanguageFlag = (code: string): string => {
-  if (!code) return '🌐';
-  return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
-};
-
-const isImageIcon = (icon?: unknown): icon is string =>
+const isImageIcon = (icon?: unknown): boolean =>
   typeof icon === 'string' && (
     icon.startsWith('/') ||
     icon.startsWith('http://') ||
@@ -68,8 +78,33 @@ const isImageIcon = (icon?: unknown): icon is string =>
     icon.startsWith('data:image')
   );
 
+/**
+ * Universal Dynamic Token Icon Renderer
+ */
+function DynamicTokenIcon({ icon, symbol, size = 16, className = '' }: { icon?: any; symbol?: any; size?: number; className?: string }) {
+  const iconStr = typeof icon === 'string' ? icon.trim() : '';
+  const symStr = typeof symbol === 'string' ? symbol.trim() : '';
+
+  if (isImageIcon(iconStr)) {
+    return (
+      <img 
+        src={iconStr} 
+        alt="Token" 
+        className={`object-contain rounded shrink-0 ${className}`} 
+        style={{ width: size, height: size }} 
+      />
+    );
+  }
+  if (iconStr && iconStr !== 'Coins' && iconStr !== '🪙') {
+    return <span className={`shrink-0 leading-none select-none ${className}`} style={{ fontSize: size }}>{iconStr}</span>;
+  }
+  if (symStr && symStr !== '🪙' && symStr.length <= 3) {
+    return <span className={`font-mono font-black text-amber-500 shrink-0 ${className}`} style={{ fontSize: size }}>{symStr}</span>;
+  }
+  return <Coins className={`text-amber-500 shrink-0 ${className}`} style={{ width: size, height: size }} />;
+}
+
 export default function Sidebar() {
-  // 1. ALL REACT HOOKS UNCONDITIONALLY AT THE TOP LEVEL (REACT 19 COMPLIANT)
   const pathname = usePathname() || '';
   const langContext = useTranslation();
   const t = langContext?.t || ((k: string, fb?: string) => fb || k);
@@ -78,13 +113,82 @@ export default function Sidebar() {
 
   const [mounted, setMounted] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
-  const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
+  const [siteName, setSiteName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('zecratary_site_config');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.siteName || parsed.site_name) return parsed.siteName || parsed.site_name;
+        }
+      } catch (_) {}
+    }
+    return DEFAULT_SITE_NAME;
+  });
+  const [siteIcon, setSiteIcon] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('zecratary_site_config');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const icon = parsed.titlebarImage || parsed.titlebar_image || parsed.titlebarEmoji || parsed.titlebar_emoji || parsed.siteIcon;
+          if (icon) return icon;
+        }
+      } catch (_) {}
+    }
+    return DEFAULT_SITE_ICON;
+  });
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
-  // Accordion Sections State
+  // Dynamic Currencies & Languages States (from Admin Settings)
+  const [currencySymbols, setCurrencySymbols] = useState<Record<string, string>>(DEFAULT_CURRENCY_SYMBOLS);
+  const [dynamicLanguages, setDynamicLanguages] = useState<DynamicLanguageItem[]>(() => {
+    return (langContext as any)?.availableLanguages || [
+      { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
+      { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
+      { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
+      { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
+    ];
+  });
+
+  // Dynamic LANGUAGE_FLAG_MAP Synthesizer
+  const dynamicFlagMap = useMemo(() => {
+    const map: Record<string, { flag: string; native: string }> = { ...DEFAULT_LANGUAGE_FLAG_MAP };
+    (dynamicLanguages || []).forEach((l) => {
+      if (l && l.code) {
+        const c = l.code.toLowerCase().trim();
+        map[c] = {
+          flag: l.flag || map[c]?.flag || '🌐',
+          native: l.native || l.name || map[c]?.native || l.code.toUpperCase()
+        };
+      }
+    });
+    return map;
+  }, [dynamicLanguages]);
+
+  const getLanguageMeta = useCallback((code: string) => {
+    const c = (code || 'en').toLowerCase().trim();
+    return dynamicFlagMap[c] || { flag: '🌐', native: code.toUpperCase() };
+  }, [dynamicFlagMap]);
+
+  // Active Languages Filtered by Status
+  const activeLanguages = useMemo(() => {
+    const list = dynamicLanguages.length > 0 ? dynamicLanguages : (langContext as any)?.availableLanguages || [];
+    if (!Array.isArray(list) || list.length === 0) {
+      return [
+        { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
+        { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
+        { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
+        { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
+      ];
+    }
+    const filtered = list.filter((l: any) => l.status !== 'inactive');
+    return filtered.length > 0 ? filtered : list;
+  }, [dynamicLanguages, langContext]);
+
+  // Accordion Sections
   const [openSections, setOpenSections] = useState<{
     create: boolean;
     manage: boolean;
@@ -99,79 +203,138 @@ export default function Sidebar() {
     admin: false,
   });
 
-  // Dropdown States
-  const [walletDropdownOpen, setWalletDropdownOpen] = useState<boolean>(false);
+  // Topbar Dropdown Controls
   const [notifDropdownOpen, setNotifDropdownOpen] = useState<boolean>(false);
   const [langDropdownOpen, setLangDropdownOpen] = useState<boolean>(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
+  const [dropdownLangExpanded, setDropdownLangExpanded] = useState<boolean>(false);
 
-  // Live Balances & Telemetry
-  const [tokenBalance, setTokenBalance] = useState<number>(50);
-  const [walletBalance, setWalletBalance] = useState<number>(0.00);
-  const [currencySymbol, setCurrencySymbol] = useState<string>('$');
+  // Synchronous Balances & Telemetry
+  const [tokenBalance, setTokenBalance] = useState<number>(() => {
+    try {
+      const u = getCurrentUser();
+      const val = Number(u?.token_balance ?? u?.tokenBalance ?? u?.tokens ?? 100);
+      return isNaN(val) ? 100 : val;
+    } catch (_) { return 100; }
+  });
+  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenIcon, setTokenIcon] = useState<string>('🪙');
+
+  const [walletBalance, setWalletBalance] = useState<number>(() => {
+    try {
+      const u = getCurrentUser();
+      const val = parseFloat(String(u?.wallet_balance ?? u?.walletBalance ?? 0));
+      return isNaN(val) ? 0 : val;
+    } catch (_) { return 0; }
+  });
+  const [walletCurrency, setWalletCurrency] = useState<string>('USD');
+  const [walletSymbol, setWalletSymbol] = useState<string>('$');
+
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
 
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const topbarRef = useRef<HTMLDivElement>(null);
 
-  // Route Suppression Checks
-  const isAuthRoute = Boolean(
-    pathname === '/login' ||
-    pathname === '/register' ||
-    pathname === '/forgot-password' ||
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/register') ||
-    pathname.startsWith('/forgot-password')
-  );
+  // Dynamic Telemetry & Settings Fetcher (PostgreSQL & MySQL Synced)
+  const fetchBalancesAndTelemetry = useCallback(async (activeU?: any) => {
+    try {
+      const u = activeU || getCurrentUser();
+      const params = new URLSearchParams();
+      if (u?.id) params.set('userId', String(u.id));
+      if (u?.email) params.set('email', String(u.email));
+      const qs = params.toString() ? `?${params.toString()}&t=${Date.now()}` : `?t=${Date.now()}`;
 
-  const isHomePage = Boolean(
-    pathname === '/' ||
-    pathname === '' ||
-    pathname === '/index'
-  );
+      const [tokRes, walRes, notifRes, cfgRes, curRes, langRes] = await Promise.allSettled([
+        fetch(`/api/tokens${qs}`, { cache: 'no-store' }),
+        fetch(`/api/wallet${qs}`, { cache: 'no-store' }),
+        fetch(`/api/notifications${qs}`, { cache: 'no-store' }),
+        fetch(`/api/admin/token-setting`, { cache: 'no-store' }),
+        fetch(`/api/admin/currencies`, { cache: 'no-store' }),
+        fetch(`/api/admin/languages`, { cache: 'no-store' })
+      ]);
 
-  // Layout Clearance Token Synchronization
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
+      let dynamicCurrMap = { ...DEFAULT_CURRENCY_SYMBOLS };
 
-    const updateLayoutMetrics = () => {
-      if (isAuthRoute || isHomePage) {
-        root.style.setProperty('--sidebar-width', '0px');
-        root.style.setProperty('--topbar-height', '0px');
-        return;
+      if (curRes.status === 'fulfilled' && curRes.value.ok) {
+        const curData = await curRes.value.json();
+        if (curData.currencySymbols && typeof curData.currencySymbols === 'object') {
+          dynamicCurrMap = { ...dynamicCurrMap, ...curData.currencySymbols };
+          setCurrencySymbols(dynamicCurrMap);
+        }
       }
-      if (window.innerWidth < 768) {
-        root.style.setProperty('--sidebar-width', '0px');
-        root.style.setProperty('--topbar-height', '3.5rem');
-      } else {
-        root.style.setProperty('--sidebar-width', isCollapsed ? '5rem' : '16rem');
-        root.style.setProperty('--topbar-height', '4rem');
-      }
-    };
 
-    updateLayoutMetrics();
-    window.addEventListener('resize', updateLayoutMetrics);
-    return () => window.removeEventListener('resize', updateLayoutMetrics);
-  }, [isAuthRoute, isHomePage, isCollapsed]);
+      if (langRes.status === 'fulfilled' && langRes.value.ok) {
+        const lData = await langRes.value.json();
+        if (Array.isArray(lData.languages) && lData.languages.length > 0) {
+          setDynamicLanguages(lData.languages);
+        }
+      }
+
+      if (tokRes.status === 'fulfilled' && tokRes.value.ok) {
+        const tData = await tokRes.value.json();
+        const rawTok = tData.tokenBalance ?? tData.token_balance ?? tData.balance ?? tData.tokens;
+        const numTok = Number(rawTok);
+        if (!isNaN(numTok)) setTokenBalance(numTok);
+        if (tData.tokenSymbol) setTokenSymbol(tData.tokenSymbol);
+        if (tData.tokenIcon) setTokenIcon(tData.tokenIcon);
+      }
+
+      if (walRes.status === 'fulfilled' && walRes.value.ok) {
+        const wData = await walRes.value.json();
+        const rawWal = wData.wallet_balance ?? wData.walletBalance ?? wData.balance ?? wData.user?.wallet_balance;
+        const numWal = parseFloat(String(rawWal ?? 0));
+        if (!isNaN(numWal)) setWalletBalance(numWal);
+        const curr = (wData.currency || wData.settings?.currency || 'USD').toUpperCase();
+        setWalletCurrency(curr);
+        setWalletSymbol(dynamicCurrMap[curr] || wData.walletSymbol || '$');
+      }
+
+      if (notifRes.status === 'fulfilled' && notifRes.value.ok) {
+        const nData = await notifRes.value.json();
+        if (Array.isArray(nData.notifications)) {
+          setNotifications(nData.notifications);
+          setUnreadCount(nData.unreadCount ?? nData.notifications.filter((x: any) => !x.isRead).length);
+        }
+      }
+
+      if (cfgRes.status === 'fulfilled' && cfgRes.value.ok) {
+        const cData = await cfgRes.value.json();
+        const cfg = cData.settings || cData.config || cData;
+        if (cfg?.tokenIcon) setTokenIcon(cfg.tokenIcon);
+        if (cfg?.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
+      }
+    } catch (_) {}
+  }, []);
 
   const syncUserState = useCallback(() => {
     try {
       const u = getCurrentUser();
       setCurrentUser(u);
       if (typeof getSiteName === 'function') setSiteName(getSiteName());
-      if (typeof getSiteIcon === 'function') setSiteIcon(getSiteIcon());
+      if (typeof getSiteIcon === 'function') {
+        const icon = getSiteIcon();
+        setSiteIcon(icon);
+        updateFavicon(icon);
+      }
+
+      fetchSiteConfig().then((cfg) => {
+        if (cfg) {
+          if (cfg.siteName) setSiteName(cfg.siteName);
+          const authoritativeIcon = cfg.titlebarImage || cfg.titlebar_image || cfg.titlebarEmoji || cfg.titlebar_emoji || cfg.siteIcon;
+          if (authoritativeIcon) {
+            setSiteIcon(authoritativeIcon);
+            updateFavicon(cfg.faviconImage || cfg.favicon_image || cfg.faviconEmoji || authoritativeIcon);
+          }
+        }
+      }).catch(() => {});
 
       if (typeof window !== 'undefined') {
         const themeMode = localStorage.getItem('zecratary_theme_mode') || 'dark';
         setIsDarkMode(themeMode === 'dark');
 
-        const cur = localStorage.getItem('zecratary_currency') || 'USD';
-        setCurrencySymbol(CURRENCY_SYMBOLS[cur] || '$');
-
-        const storedCollapsed = localStorage.getItem('zecratary_sidebar_collapsed');
-        if (storedCollapsed !== null) {
-          setIsCollapsed(storedCollapsed === 'true');
-        }
+        const cur = (localStorage.getItem('zecratary_currency') || 'USD').toUpperCase();
+        setWalletCurrency(cur);
+        setWalletSymbol(currencySymbols[cur] || '$');
 
         const storedSections = localStorage.getItem('zecratary_sidebar_sections');
         if (storedSections) {
@@ -179,24 +342,29 @@ export default function Sidebar() {
             setOpenSections(prev => ({ ...prev, ...JSON.parse(storedSections) }));
           } catch (_) {}
         }
-
-        if (u) {
-          const storedTokens = localStorage.getItem(`zecratary_tokens_${u.id}`);
-          if (storedTokens !== null) setTokenBalance(Number(storedTokens) || 50);
-
-          const storedWallet = localStorage.getItem(`zecratary_wallet_${u.id}`);
-          if (storedWallet !== null) setWalletBalance(Number(storedWallet) || 0.00);
-        }
       }
-    } catch (_) {}
-  }, []);
 
-  // Route-Aware Auto-Expansion
+      if (u?.id || u?.email) {
+        fetch(`/api/user/sidebar-settings?userId=${encodeURIComponent(u.id || u.email)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data?.success && data?.sections) {
+              setOpenSections(prev => ({ ...prev, ...data.sections }));
+            }
+          })
+          .catch(() => {});
+      }
+
+      fetchBalancesAndTelemetry(u);
+    } catch (_) {}
+  }, [currencySymbols, fetchBalancesAndTelemetry]);
+
+  // Route Auto-Expansion: Synchronized with canonical routes
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
-    } else if (['/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+    } else if (['/recipes', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
     } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
@@ -207,53 +375,108 @@ export default function Sidebar() {
     }
   }, [pathname]);
 
+  // Real-Time Event & Cross-Tab Subscriptions
   useEffect(() => {
     setMounted(true);
     syncUserState();
 
     const handleSync = () => syncUserState();
+    const handleWalletUpdate = (e?: any) => {
+      if (e?.detail) {
+        const b = e.detail.wallet_balance ?? e.detail.walletBalance ?? e.detail.balance;
+        if (b !== undefined && b !== null) {
+          const parsed = parseFloat(String(b));
+          if (!isNaN(parsed)) setWalletBalance(parsed);
+        }
+      }
+      fetchBalancesAndTelemetry();
+    };
+    const handleTokensUpdate = (e?: any) => {
+      if (e?.detail) {
+        const b = e.detail.token_balance ?? e.detail.tokenBalance ?? e.detail.balance;
+        if (b !== undefined && b !== null) {
+          const parsed = Number(b);
+          if (!isNaN(parsed)) setTokenBalance(parsed);
+        }
+      }
+      fetchBalancesAndTelemetry();
+    };
+
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_site_settings_changed', handleSync);
+    window.addEventListener('zecratary_site_config_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
-    window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_tokens_updated', handleSync);
+    window.addEventListener('zecratary_wallet_updated', handleWalletUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleTokensUpdate);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_currency_updated', handleSync);
+    window.addEventListener('focus', () => fetchBalancesAndTelemetry());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') fetchBalancesAndTelemetry();
+    });
+
+    let balanceChannel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        balanceChannel = new BroadcastChannel('zecratary_balance_channel');
+        balanceChannel.onmessage = (msg) => {
+          if (msg.data?.wallet_balance !== undefined) {
+            setWalletBalance(parseFloat(String(msg.data.wallet_balance)));
+          }
+          if (msg.data?.token_balance !== undefined || msg.data?.tokens !== undefined) {
+            setTokenBalance(Number(msg.data.token_balance ?? msg.data.tokens));
+          }
+        };
+      } catch (_) {}
+    }
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('zecratary_site_settings_changed', handleSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
-      window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_tokens_updated', handleSync);
+      window.removeEventListener('zecratary_wallet_updated', handleWalletUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleTokensUpdate);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_currency_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      if (balanceChannel) balanceChannel.close();
     };
-  }, [syncUserState]);
+  }, [syncUserState, fetchBalancesAndTelemetry]);
 
-  // Click outside listener for dropdowns
+  // Click Outside & Escape Key Listener
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setWalletDropdownOpen(false);
+      if (topbarRef.current && !topbarRef.current.contains(e.target as Node)) {
         setNotifDropdownOpen(false);
         setLangDropdownOpen(false);
         setProfileDropdownOpen(false);
+        setDropdownLangExpanded(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
-  const toggleCollapse = () => {
-    setIsCollapsed(prev => {
-      const next = !prev;
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('zecratary_sidebar_collapsed', next ? 'true' : 'false');
-        } catch (_) {}
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setNotifDropdownOpen(false);
+        setLangDropdownOpen(false);
+        setProfileDropdownOpen(false);
+        setDropdownLangExpanded(false);
       }
-      return next;
-    });
-  };
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const toggleSection = (sectionKey: keyof typeof openSections) => {
     setOpenSections(prev => {
@@ -261,12 +484,16 @@ export default function Sidebar() {
       if (typeof window !== 'undefined') {
         try {
           localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
-          fetch('/api/user/sidebar-settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sections: next }),
-          }).catch(() => {});
         } catch (_) {}
+      }
+      const u = getCurrentUser();
+      const uId = u?.id || u?.email;
+      if (uId) {
+        fetch('/api/user/sidebar-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: uId, sections: next })
+        }).catch(() => {});
       }
       return next;
     });
@@ -289,7 +516,51 @@ export default function Sidebar() {
     }
   };
 
-  if (!mounted || isAuthRoute || isHomePage) {
+  const markAllNotificationsRead = async () => {
+    setUnreadCount(0);
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    try {
+      const u = getCurrentUser();
+      const params = new URLSearchParams();
+      if (u?.id) params.set('userId', String(u.id));
+      if (u?.email) params.set('email', String(u.email));
+      await fetch(`/api/notifications?${params.toString()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'mark_all_read' })
+      });
+    } catch (_) {}
+  };
+
+  const handleLogout = async () => {
+    try {
+      setProfileDropdownOpen(false);
+      await logoutUser();
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      if (typeof window !== 'undefined') {
+        window.location.replace('/login?logout=true');
+      }
+    }
+  };
+
+  const isAuthRoute = Boolean(
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password' ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/register') ||
+    pathname.startsWith('/forgot-password')
+  );
+
+  const isHomePage = Boolean(
+    pathname === '/' ||
+    pathname === '' ||
+    pathname === '/index'
+  );
+
+  if (!mounted || isAuthRoute || isHomePage || !currentUser) {
     return null;
   }
 
@@ -299,27 +570,21 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
-  // ACCURATE ROUTE MATCHER: Eliminates dual-highlighting between /admin and /admin/*
   const isRouteActive = (route: string): boolean => {
     if (!pathname) return false;
     const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
     const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
 
-    // Root and Admin Overview require exact match so child modules don't activate them
     if (cleanRoute === '/' || cleanRoute === '/admin') {
       return cleanPath === cleanRoute;
     }
-
-    // Sibling routes require exact match or explicit sub-path boundary ('/route/...')
     return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
   };
 
   const navClass = (route: string) => {
     const active = isRouteActive(route);
     return `flex items-center gap-3 px-3 py-2 rounded-xl font-bold text-xs transition duration-200 cursor-pointer ${
-      active
-        ? 'text-white shadow-xs'
-        : 'hover:text-white hover:bg-slate-800/30'
+      active ? 'text-white shadow-xs' : 'hover:text-white hover:bg-slate-800/30'
     }`;
   };
 
@@ -330,23 +595,32 @@ export default function Sidebar() {
       : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
   };
 
+  // Task 3: Subscription badge in user profile dropdown (Admin Access removed)
+  const planBadgeText = currentUser?.subscription_plan === 'pro' 
+    ? t('topbarPlanPro', 'Pro Plan') 
+    : t('topbarPlanFree', 'Free Tier');
+
   return (
     <>
-      {/* DESKTOP TOP BAR */}
+      {/* DESKTOP TOP BAR (Fixed Header with Real-Time Telemetry) */}
       <header
         id="zecratary-desktop-topbar"
+        role="banner"
+        aria-label="Application Header"
+        data-lpignore="true"
+        data-form-type="other"
         className="hidden md:flex fixed top-0 left-0 right-0 h-16 border-b z-40 items-center justify-between px-6 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)',
           color: 'var(--color-text)'
         }}
-        ref={dropdownRef}
+        ref={topbarRef}
       >
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={toggleCollapse}
+            onClick={() => setIsCollapsed(!isCollapsed)}
             className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer transition mr-1"
             style={{ borderColor: 'var(--color-border)' }}
             title={isCollapsed ? t('expandSidebar', 'Expand Menu') : t('collapseSidebar', 'Collapse Menu')}
@@ -363,82 +637,85 @@ export default function Sidebar() {
           </Link>
         </div>
 
-        {/* TOP CONTROLS */}
-        <div className="flex items-center gap-3">
-          {/* WALLET / TOKEN BADGE */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => {
-                setWalletDropdownOpen(!walletDropdownOpen);
-                setNotifDropdownOpen(false);
-                setLangDropdownOpen(false);
-                setProfileDropdownOpen(false);
-              }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs cursor-pointer"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* 1. DEDICATED STORE WALLET CAPSULE (Task 2: Left Wallet Icon Removed) */}
+          <div 
+            className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/wallet" 
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
+              title={t('viewWalletBalance', 'View Wallet Balance & History')}
             >
-              <Coins className="h-3.5 w-3.5 text-amber-400" />
-              <span>{tokenBalance.toLocaleString()}</span>
-              <span className="opacity-40">|</span>
-              <Wallet className="h-3.5 w-3.5 text-emerald-400" />
-              <span>{currencySymbol}{walletBalance.toFixed(2)}</span>
-              <ChevronDown className="h-3 w-3 opacity-60" />
-            </button>
-
-            {walletDropdownOpen && (
-              <div
-                className="absolute right-0 mt-2 w-64 border rounded-2xl p-3 shadow-xl z-50 space-y-2 text-xs"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
+              <span 
+                suppressHydrationWarning
+                className="text-xs font-mono font-black" 
+                style={{ color: 'var(--color-emerald)' }}
               >
-                <div className="font-extrabold text-[11px] uppercase tracking-wider text-[var(--color-primary)] px-1">
-                  {t('tokenAndWallet', 'Token & Wallet Balance')}
-                </div>
-                <div className="p-2.5 rounded-xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">{t('availableTokens', 'Available Tokens')}:</span>
-                    <span className="font-bold text-amber-400">{tokenBalance.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">{t('walletCredits', 'Wallet Credits')}:</span>
-                    <span className="font-bold text-emerald-400">{currencySymbol}{walletBalance.toFixed(2)}</span>
-                  </div>
-                </div>
-                <Link
-                  href="/wallet"
-                  onClick={() => setWalletDropdownOpen(false)}
-                  className="block w-full py-2 text-center rounded-xl text-white font-bold text-xs transition shadow-xs"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  {t('manageWallet', 'Top Up & Wallet Portal')}
-                </Link>
-                <Link
-                  href="/token"
-                  onClick={() => setWalletDropdownOpen(false)}
-                  className="block w-full py-2 text-center rounded-xl font-bold text-xs transition border"
-                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
-                >
-                  {t('manageTokens', 'Token Bundles & Quotas')}
-                </Link>
-              </div>
-            )}
+                {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
+              </span>
+              <span className="text-[10px] font-bold opacity-60 font-mono">
+                {walletCurrency}
+              </span>
+            </Link>
+
+            <Link
+              href="/wallet"
+              className="flex items-center justify-center w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer hover:opacity-90 active:scale-95 text-white shadow-xs shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpWallet', 'Top Up Wallet')}
+              aria-label="Top Up Wallet"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </Link>
           </div>
 
-          {/* NOTIFICATION BELL */}
+          {/* 2. DEDICATED AI TOKEN CAPSULE (Task 2: Left Diamond/Token Icon Removed) */}
+          <div 
+            className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/token" 
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
+              title={t('viewTokenBalance', 'View Token Balance & History')}
+            >
+              <span 
+                suppressHydrationWarning
+                className="text-xs font-mono font-black" 
+                style={{ color: 'var(--color-emerald)' }}
+              >
+                {Number(tokenBalance || 0).toLocaleString()}
+              </span>
+              <span className="text-xs font-bold text-amber-500 font-mono">
+                {tokenSymbol}
+              </span>
+            </Link>
+
+            <Link
+              href="/token"
+              className="flex items-center justify-center w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer hover:opacity-90 active:scale-95 text-white shadow-xs shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpTokens', 'Top Up Tokens')}
+              aria-label="Top Up Tokens"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </Link>
+          </div>
+
+          {/* 3. NOTIFICATIONS BELL & POPOVER */}
           <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setNotifDropdownOpen(!notifDropdownOpen);
-                setWalletDropdownOpen(false);
                 setLangDropdownOpen(false);
                 setProfileDropdownOpen(false);
               }}
@@ -448,49 +725,86 @@ export default function Sidebar() {
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text)'
               }}
-              title={t('notifications', 'Notifications')}
+              title={t('topbarNotifications', 'Notifications')}
+              aria-label="Notifications"
             >
               <Bell className="h-4 w-4" />
-              {notifications.some(n => !n.isRead) && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
               )}
             </button>
 
             {notifDropdownOpen && (
               <div
-                className="absolute right-0 mt-2 w-80 border rounded-2xl p-4 shadow-xl z-50 space-y-3 text-xs"
+                role="region"
+                aria-label="Notifications Panel"
+                data-lpignore="true"
+                data-form-type="other"
+                className="absolute right-0 mt-2 w-80 border rounded-3xl p-4 shadow-2xl z-50 space-y-3 text-xs transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                <div className="flex items-center justify-between font-bold">
-                  <span>{t('notifications', 'Notifications')}</span>
-                  {isAdmin && (
-                    <Link
-                      href="/admin/notification-settings"
-                      onClick={() => setNotifDropdownOpen(false)}
-                      className="text-[10px] text-[var(--color-primary)] hover:underline"
-                    >
-                      {t('settings', 'Settings')}
-                    </Link>
-                  )}
+                <div className="flex items-center justify-between pb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold uppercase tracking-wider text-xs">{t('topbarNotifications', 'Notifications')}</span>
+                    {unreadCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold text-[10px]">
+                        {unreadCount} {t('topbarUnreadCount', 'unread')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={markAllNotificationsRead}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <CheckCheck className="h-3 w-3" />
+                        <span>{t('topbarMarkAllRead', 'Mark all read')}</span>
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <Link
+                        href="/admin/notification-settings"
+                        onClick={() => setNotifDropdownOpen(false)}
+                        className="text-[10px] opacity-70 hover:opacity-100"
+                      >
+                        {t('settings', 'Settings')}
+                      </Link>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                   {notifications.length === 0 ? (
-                    <div className="text-center py-6 text-muted-foreground opacity-60 text-xs">
-                      {t('noNotifications', 'No unread notifications')}
+                    <div className="text-center py-8 opacity-60 text-xs">
+                      {t('topbarNoNotifications', 'No unread notifications')}
                     </div>
                   ) : (
                     notifications.map((n) => (
                       <div
                         key={n.id}
-                        className="p-2.5 rounded-xl border space-y-1"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                        className={`p-2.5 rounded-2xl border space-y-1 transition ${
+                          n.isRead ? 'opacity-70' : 'border-[var(--color-primary)]/40 shadow-xs'
+                        }`}
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: n.isRead ? 'var(--color-border)' : 'var(--color-primary)'
+                        }}
                       >
-                        <div className="font-bold text-xs">{n.title}</div>
-                        <div className="text-[11px] opacity-80">{n.message}</div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-xs">{n.title}</span>
+                          {!n.isRead && (
+                            <span className="w-2 h-2 rounded-full bg-[var(--color-primary)] shrink-0" />
+                          )}
+                        </div>
+                        <div className="text-[11px] opacity-80 leading-relaxed">{n.message}</div>
                       </div>
                     ))
                   )}
@@ -499,13 +813,12 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* LANGUAGE PICKER */}
+          {/* 4. DYNAMIC QUICK LANGUAGE SELECTOR */}
           <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setLangDropdownOpen(!langDropdownOpen);
-                setWalletDropdownOpen(false);
                 setNotifDropdownOpen(false);
                 setProfileDropdownOpen(false);
               }}
@@ -515,43 +828,52 @@ export default function Sidebar() {
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text)'
               }}
-              title={t('selectLanguage', 'Select Language')}
+              title={t('topbarLanguageSelector', 'Select Language')}
             >
-              <span className="text-sm">{getLanguageFlag(currentLanguage || 'en')}</span>
+              <span className="text-sm">{getLanguageMeta(currentLanguage).flag}</span>
               <span className="uppercase text-[11px] font-extrabold">{currentLanguage || 'EN'}</span>
             </button>
 
             {langDropdownOpen && (
               <div
-                className="absolute right-0 mt-2 w-44 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
+                role="menu"
+                aria-label="Language Selector"
+                data-lpignore="true"
+                data-form-type="other"
+                className="absolute right-0 mt-2 w-52 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                {Object.keys(LANGUAGE_FLAG_MAP).map((code) => (
-                  <button
-                    key={code}
-                    type="button"
-                    onClick={() => {
-                      if (typeof changeLanguage === 'function') changeLanguage(code);
-                      setLangDropdownOpen(false);
-                    }}
-                    className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-slate-800/40 text-xs font-semibold cursor-pointer transition"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span>{LANGUAGE_FLAG_MAP[code]}</span>
-                      <span className="uppercase">{code}</span>
-                    </span>
-                    {currentLanguage === code && <Check className="h-3.5 w-3.5 text-emerald-400" />}
-                  </button>
-                ))}
+                {activeLanguages.map((lang: any) => {
+                  const meta = getLanguageMeta(lang.code);
+                  const isSelected = currentLanguage === lang.code;
+                  return (
+                    <button
+                      key={lang.code}
+                      type="button"
+                      onClick={() => {
+                        if (typeof changeLanguage === 'function') changeLanguage(lang.code);
+                        setLangDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-800/40 text-xs font-semibold cursor-pointer transition"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="text-base">{meta.flag}</span>
+                        <span>{lang.native || meta.native}</span>
+                        <span className="text-[10px] opacity-60 uppercase font-mono">({lang.code})</span>
+                      </span>
+                      {isSelected && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
 
-          {/* THEME TOGGLE */}
+          {/* 5. QUICK DAY / DARK TOGGLE */}
           <button
             type="button"
             onClick={toggleTheme}
@@ -566,15 +888,15 @@ export default function Sidebar() {
             {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
           </button>
 
-          {/* USER PROFILE */}
+          {/* 6. USER PROFILE DROPDOWN */}
           <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setProfileDropdownOpen(!profileDropdownOpen);
-                setWalletDropdownOpen(false);
                 setNotifDropdownOpen(false);
                 setLangDropdownOpen(false);
+                setDropdownLangExpanded(false);
               }}
               className="flex items-center gap-2 p-1.5 pr-2.5 rounded-xl border transition cursor-pointer shadow-xs"
               style={{
@@ -582,97 +904,273 @@ export default function Sidebar() {
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text)'
               }}
+              aria-label={t('topbarUserMenu', 'User Menu')}
             >
               <div className="w-6 h-6 rounded-lg bg-[var(--color-primary)] text-white flex items-center justify-center font-black text-xs">
                 {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
               </div>
-              <span className="text-xs font-bold max-w-[80px] truncate">{currentUser?.name || 'Chef'}</span>
+              <span className="text-xs font-bold max-w-[85px] truncate">{currentUser?.name || 'User'}</span>
               <ChevronDown className="h-3 w-3 opacity-60" />
             </button>
 
             {profileDropdownOpen && (
               <div
-                className="absolute right-0 mt-2 w-48 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
+                role="menu"
+                aria-label="User Profile Dropdown"
+                data-lpignore="true"
+                data-form-type="other"
+                className="absolute right-0 mt-2 w-64 border rounded-3xl p-2.5 shadow-2xl z-50 space-y-1.5 text-xs transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                <div className="px-3 py-1.5 border-b mb-1" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="font-bold truncate">{currentUser?.name || 'Chef'}</div>
-                  <div className="text-[10px] opacity-60 truncate">{currentUser?.email || ''}</div>
+                {/* User Identity Header (Task 3: Admin Access Removed from Badge) */}
+                <div className="px-3 py-2 border-b mb-1 space-y-1" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold truncate text-xs">{currentUser?.name || 'User'}</span>
+                    <span 
+                      className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-white"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      {planBadgeText}
+                    </span>
+                  </div>
+                  <div className="text-[11px] opacity-60 truncate">{currentUser?.email || ''}</div>
                 </div>
+
                 <Link
                   href="/profile"
                   onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800/40 font-bold transition"
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
                 >
-                  <UserIcon className="h-3.5 w-3.5" /> {t('profile', 'User Profile')}
+                  <UserIcon className="h-4 w-4 opacity-75" />
+                  <span>{t('topbarProfile', 'User Profile')}</span>
                 </Link>
+
                 <Link
                   href="/subscriptions"
                   onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800/40 font-bold transition"
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
                 >
-                  <Layers className="h-3.5 w-3.5" /> {t('subscriptions', 'Subscriptions')}
+                  <Layers className="h-4 w-4 opacity-80" />
+                  <span>{t('topbarSubscriptions', 'Subscriptions')}</span>
                 </Link>
+
                 <Link
                   href="/billing"
                   onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800/40 font-bold transition"
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
                 >
-                  <Receipt className="h-3.5 w-3.5" /> {t('billing', 'Billing History')}
+                  <Receipt className="h-4 w-4 opacity-75" />
+                  <span>{t('topbarBillingHistory', 'Billing History')}</span>
                 </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    logoutUser();
-                    window.location.href = '/login';
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-red-400 hover:bg-red-500/10 font-bold transition text-left cursor-pointer"
+
+                <Link
+                  href="/contacts"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
                 >
-                  <LogOut className="h-3.5 w-3.5" /> {t('logOut', 'Log Out')}
-                </button>
+                  <Mail className="h-4 w-4 opacity-75" />
+                  <span>{t('contactSupport', 'Contact Support')}</span>
+                </Link>
+
+                <div className="pt-1.5 border-t space-y-1" style={{ borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setDropdownLangExpanded(!dropdownLangExpanded)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <Globe className="h-4 w-4 text-[var(--color-primary)]" />
+                        <span>{t('interfaceLanguage', 'Language')}</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-xs">{getLanguageMeta(currentLanguage).flag}</span>
+                        <span className="text-[10px] font-mono uppercase opacity-75">{currentLanguage}</span>
+                        <ChevronRight className={`h-3 w-3 opacity-60 transition-transform duration-200 ${dropdownLangExpanded ? 'rotate-90' : 'rotate-0'}`} />
+                      </span>
+                    </button>
+
+                    {dropdownLangExpanded && (
+                      <div 
+                        className="my-1 ml-2 p-1.5 border rounded-2xl space-y-1 transition-colors duration-200"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        {activeLanguages.map((lang: any) => {
+                          const meta = getLanguageMeta(lang.code);
+                          const isSel = currentLanguage === lang.code;
+                          return (
+                            <button
+                              key={lang.code}
+                              type="button"
+                              onClick={() => {
+                                if (typeof changeLanguage === 'function') changeLanguage(lang.code);
+                                setDropdownLangExpanded(false);
+                              }}
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-slate-800/30 text-xs font-semibold cursor-pointer transition"
+                            >
+                              <span className="flex items-center gap-2">
+                                <span>{meta.flag}</span>
+                                <span>{lang.native || meta.native}</span>
+                              </span>
+                              {isSel && <Check className="h-3 w-3 text-emerald-400" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={toggleTheme}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
+                      <span>{t('themeMode', 'Theme Mode')}</span>
+                    </span>
+                    <span 
+                      className="px-2 py-0.5 rounded-lg border text-[10px] font-bold"
+                      style={{
+                        borderColor: 'var(--color-border)',
+                        backgroundColor: 'var(--color-inner-dark)'
+                      }}
+                    >
+                      {isDarkMode ? t('topbarThemeDark', 'Dark') : t('topbarThemeDay', 'Day')}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="pt-1.5 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-red-400 hover:bg-red-500/10 font-bold transition text-left cursor-pointer"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>{t('logOut', 'Log Out')}</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
       </header>
 
-      {/* MOBILE TOP BAR */}
+      {/* MOBILE APPLICATION HEADER (Task 2: Left Wallet & Token Icons Removed) */}
       <header
-        className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-4 transition-colors duration-200"
+        role="banner"
+        aria-label="Mobile Application Header"
+        data-lpignore="true"
+        data-form-type="other"
+        className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-3 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)',
           color: 'var(--color-text)'
         }}
       >
-        <Link href="/dashboard" className="flex items-center gap-2 font-black text-sm text-[var(--color-primary)]">
+        <Link href="/dashboard" className="flex items-center gap-1.5 font-black text-sm text-[var(--color-primary)] truncate max-w-[110px]">
           {isImageIcon(siteIcon) ? (
-            <img src={siteIcon} alt="Logo" className="w-6 h-6 rounded-md object-contain" />
+            <img src={siteIcon} alt="Logo" className="w-6 h-6 rounded-md object-contain shrink-0" />
           ) : (
-            <span className="text-xl">{siteIcon || '🍳'}</span>
+            <span className="text-xl shrink-0">{siteIcon || '🍳'}</span>
           )}
-          <span>{siteName || 'Zecratary'}</span>
+          <span className="truncate">{siteName || 'Zecratary'}</span>
         </Link>
 
-        <button
-          type="button"
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-2 rounded-xl border cursor-pointer"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Mobile Wallet Capsule */}
+          <div 
+            className="flex items-center rounded-xl border p-0.5 text-[11px] font-mono font-bold shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/wallet" 
+              className="flex items-center px-1.5 py-0.5 hover:opacity-85 transition"
+              title={t('wallet', 'Store Wallet')}
+            >
+              <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
+                {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
+              </span>
+            </Link>
+            <Link 
+              href="/wallet"
+              className="w-5 h-5 rounded-lg text-white flex items-center justify-center cursor-pointer hover:opacity-90 active:scale-95 shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpWallet', 'Top Up Wallet')}
+            >
+              <Plus className="h-3 w-3 stroke-[3]" />
+            </Link>
+          </div>
+
+          {/* Mobile Token Capsule */}
+          <div 
+            className="flex items-center rounded-xl border p-0.5 text-[11px] font-mono font-bold shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/token" 
+              className="flex items-center px-1.5 py-0.5 hover:opacity-85 transition"
+              title={t('token', 'AI Tokens')}
+            >
+              <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
+                {Number(tokenBalance || 0).toLocaleString()}
+              </span>
+            </Link>
+            <Link 
+              href="/token"
+              className="w-5 h-5 rounded-lg text-white flex items-center justify-center cursor-pointer hover:opacity-90 active:scale-95 shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpTokens', 'Top Up Tokens')}
+            >
+              <Plus className="h-3 w-3 stroke-[3]" />
+            </Link>
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="p-1.5 rounded-lg border shrink-0"
+            style={{ borderColor: 'var(--color-border)' }}
+            title={isDarkMode ? 'Day Mode' : 'Dark Mode'}
+          >
+            {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-1.5 rounded-xl border cursor-pointer shrink-0"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </header>
 
-      {/* DESKTOP SIDEBAR DRAWER WITH ACCORDION SECTIONS */}
+      {/* SIDEBAR NAVIGATION DRAWER */}
       <aside
+        role="navigation"
+        aria-label="Main Navigation Sidebar"
+        data-lpignore="true"
+        data-form-type="other"
         className={`hidden md:flex flex-col fixed top-16 bottom-0 left-0 border-r z-30 transition-all duration-200 ${
           isCollapsed ? 'w-20' : 'w-64'
         }`}
@@ -682,7 +1180,6 @@ export default function Sidebar() {
         }}
       >
         <div className="flex-1 overflow-y-auto p-3 space-y-4">
-          {/* DASHBOARD LINK */}
           <div>
             <Link
               href="/dashboard"
@@ -695,13 +1192,13 @@ export default function Sidebar() {
             </Link>
           </div>
 
-          {/* 1. CREATE ACCORDION GROUP */}
+          {/* 1. CREATE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
                 type="button"
                 onClick={() => toggleSection('create')}
-                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground opacity-70 hover:opacity-100 transition cursor-pointer"
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider opacity-70 hover:opacity-100 transition cursor-pointer"
               >
                 <span>{t('createSection', 'Create')}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.create ? 'rotate-0' : '-rotate-90'}`} />
@@ -728,13 +1225,13 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION GROUP */}
+          {/* 2. MANAGE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
                 type="button"
                 onClick={() => toggleSection('manage')}
-                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground opacity-70 hover:opacity-100 transition cursor-pointer"
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider opacity-70 hover:opacity-100 transition cursor-pointer"
               >
                 <span>{t('manageSection', 'Manage')}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.manage ? 'rotate-0' : '-rotate-90'}`} />
@@ -745,7 +1242,7 @@ export default function Sidebar() {
 
             {(openSections.manage || isCollapsed) && (
               <div className="space-y-0.5">
-                <Link href="/recipes" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
+                <Link href="/recipes" className={navClass('/recipes')} style={navStyle('/recipes')} title={t('savedRecipes', 'Saved Recipes')}>
                   <BookOpen className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('savedRecipes', 'Saved Recipes')}</span>}
                 </Link>
@@ -761,13 +1258,13 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 3. PLAN ACCORDION GROUP */}
+          {/* 3. PLAN ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
                 type="button"
                 onClick={() => toggleSection('plan')}
-                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground opacity-70 hover:opacity-100 transition cursor-pointer"
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider opacity-70 hover:opacity-100 transition cursor-pointer"
               >
                 <span>{t('planSection', 'Plan')}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.plan ? 'rotate-0' : '-rotate-90'}`} />
@@ -782,7 +1279,7 @@ export default function Sidebar() {
                   <Calendar className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('mealPlanner', 'Meal Planner')}</span>}
                 </Link>
-                <Link href="/templates" className={navClass('/templates')} style={navStyle('/templates')} title={t('templates', 'Templates')}>
+                <Link href="/templates" className={navClass('/templates')} style={navStyle('/templates')} title={t('templates', 'Meal Blueprints')}>
                   <LayoutTemplate className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('templates', 'Meal Blueprints')}</span>}
                 </Link>
@@ -794,13 +1291,13 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY GROUP */}
+          {/* 4. FINANCIAL & UTILITY ACCORDION (Task 1: All Icons Harmonized to Theme Color) */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
                 type="button"
                 onClick={() => toggleSection('finance')}
-                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground opacity-70 hover:opacity-100 transition cursor-pointer"
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider opacity-70 hover:opacity-100 transition cursor-pointer"
               >
                 <span>{t('financeSection', 'Finance & Hub')}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.finance ? 'rotate-0' : '-rotate-90'}`} />
@@ -812,15 +1309,15 @@ export default function Sidebar() {
             {(openSections.finance || isCollapsed) && (
               <div className="space-y-0.5">
                 <Link href="/token" className={navClass('/token')} style={navStyle('/token')} title={t('tokenPortal', 'Token Portal')}>
-                  <Coins className="h-4 w-4 shrink-0 text-amber-400" />
+                  <Coins className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('tokenPortal', 'Token Portal')}</span>}
                 </Link>
                 <Link href="/wallet" className={navClass('/wallet')} style={navStyle('/wallet')} title={t('walletPortal', 'Store Wallet')}>
-                  <Wallet className="h-4 w-4 shrink-0 text-emerald-400" />
+                  <Wallet className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('walletPortal', 'Store Wallet')}</span>}
                 </Link>
                 <Link href="/subscriptions" className={navClass('/subscriptions')} style={navStyle('/subscriptions')} title={t('subscriptions', 'Subscriptions')}>
-                  <Layers className="h-4 w-4 shrink-0 text-sky-400" />
+                  <Layers className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('subscriptions', 'Subscriptions')}</span>}
                 </Link>
                 <Link href="/billing" className={navClass('/billing')} style={navStyle('/billing')} title={t('billing', 'Billing History')}>
@@ -831,7 +1328,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION GROUP */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (ALL MODULES PRESERVED) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -885,6 +1382,10 @@ export default function Sidebar() {
                     <Cpu className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('aiModels', 'AI Engine')}</span>}
                   </Link>
+                  <Link href="/admin/storage" className={navClass('/admin/storage')} style={navStyle('/admin/storage')} title={t('storageSettings', 'Storage Settings')}>
+                    <HardDrive className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('storageSettings', 'Storage Settings')}</span>}
+                  </Link>
                   <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} style={navStyle('/admin/recipe-type')} title={t('recipeTypes', 'Recipe Types')}>
                     <Utensils className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('recipeTypes', 'Recipe Types')}</span>}
@@ -906,11 +1407,29 @@ export default function Sidebar() {
             </div>
           )}
         </div>
+
+        {/* FOOTER CONTROLS */}
+        <div className="p-3 border-t space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+          <Link href="/contacts" className={navClass('/contacts')} style={navStyle('/contacts')} title={t('contactSupport', 'Contact Support')}>
+            <Mail className="h-4 w-4 shrink-0" />
+            {!isCollapsed && <span>{t('contactSupport', 'Contact Support')}</span>}
+          </Link>
+
+          <div className="flex items-center justify-between pt-1 px-1 text-[10px] font-mono opacity-60">
+            {!isCollapsed && <span>{t('version', 'App Version')}</span>}
+            <span>v{packageInfo.version || '1.0.0'}</span>
+          </div>
+        </div>
       </aside>
 
-      {/* MOBILE DRAWER */}
+      {/* MOBILE APPLICATION DRAWER (Task 1: All Finance Icons Same Color) */}
       {mobileMenuOpen && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile Navigation Drawer"
+          data-lpignore="true"
+          data-form-type="other"
           className="md:hidden fixed inset-0 z-50 flex"
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
           onClick={() => setMobileMenuOpen(false)}
@@ -932,53 +1451,50 @@ export default function Sidebar() {
 
             <div className="space-y-1">
               <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)} className={navClass('/dashboard')} style={navStyle('/dashboard')}>
-                <LayoutDashboard className="h-4 w-4" /> <span>{t('dashboard', 'Dashboard')}</span>
+                <LayoutDashboard className="h-4 w-4 shrink-0" /> <span>{t('dashboard', 'Dashboard')}</span>
               </Link>
               <Link href="/chef" onClick={() => setMobileMenuOpen(false)} className={navClass('/chef')} style={navStyle('/chef')}>
-                <MessageSquare className="h-4 w-4" /> <span>{t('aiChef', 'AI Assistant')}</span>
+                <MessageSquare className="h-4 w-4 shrink-0" /> <span>{t('aiChef', 'AI Assistant')}</span>
               </Link>
-              <Link href="/recipes" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
-                <BookOpen className="h-4 w-4" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
+              <Link href="/recipes" onClick={() => setMobileMenuOpen(false)} className={navClass('/recipes')} style={navStyle('/recipes')}>
+                <BookOpen className="h-4 w-4 shrink-0" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
               </Link>
               <Link href="/books" onClick={() => setMobileMenuOpen(false)} className={navClass('/books')} style={navStyle('/books')}>
-                <Book className="h-4 w-4" /> <span>{t('cookbooks', 'Cookbooks')}</span>
+                <Book className="h-4 w-4 shrink-0" /> <span>{t('cookbooks', 'Cookbooks')}</span>
               </Link>
               <Link href="/pantry" onClick={() => setMobileMenuOpen(false)} className={navClass('/pantry')} style={navStyle('/pantry')}>
-                <Package className="h-4 w-4" /> <span>{t('pantryInventory', 'Pantry Inventory')}</span>
+                <Package className="h-4 w-4 shrink-0" /> <span>{t('pantryInventory', 'Pantry Inventory')}</span>
               </Link>
               <Link href="/planner" onClick={() => setMobileMenuOpen(false)} className={navClass('/planner')} style={navStyle('/planner')}>
-                <Calendar className="h-4 w-4" /> <span>{t('mealPlanner', 'Meal Planner')}</span>
+                <Calendar className="h-4 w-4 shrink-0" /> <span>{t('mealPlanner', 'Meal Planner')}</span>
               </Link>
               <Link href="/shopping" onClick={() => setMobileMenuOpen(false)} className={navClass('/shopping')} style={navStyle('/shopping')}>
-                <ShoppingCart className="h-4 w-4" /> <span>{t('shoppingList', 'Shopping List')}</span>
+                <ShoppingCart className="h-4 w-4 shrink-0" /> <span>{t('shoppingList', 'Shopping List')}</span>
               </Link>
               <Link href="/token" onClick={() => setMobileMenuOpen(false)} className={navClass('/token')} style={navStyle('/token')}>
-                <Coins className="h-4 w-4 text-amber-400" /> <span>{t('tokenPortal', 'Token Portal')}</span>
+                <Coins className="h-4 w-4 shrink-0" /> <span>{t('tokenPortal', 'Token Portal')}</span>
               </Link>
               <Link href="/wallet" onClick={() => setMobileMenuOpen(false)} className={navClass('/wallet')} style={navStyle('/wallet')}>
-                <Wallet className="h-4 w-4 text-emerald-400" /> <span>{t('walletPortal', 'Store Wallet')}</span>
+                <Wallet className="h-4 w-4 shrink-0" /> <span>{t('walletPortal', 'Store Wallet')}</span>
+              </Link>
+              <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className={navClass('/profile')} style={navStyle('/profile')}>
+                <UserIcon className="h-4 w-4 shrink-0" /> <span>{t('topbarProfile', 'User Profile')}</span>
+              </Link>
+              <Link href="/contacts" onClick={() => setMobileMenuOpen(false)} className={navClass('/contacts')} style={navStyle('/contacts')}>
+                <Mail className="h-4 w-4 shrink-0" /> <span>{t('contactSupport', 'Contact Support')}</span>
               </Link>
             </div>
 
-            {isAdmin && (
-              <div className="space-y-1 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)]">
-                  {t('adminAccess', 'Admin Management')}
-                </div>
-                <Link href="/admin" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin')} style={navStyle('/admin')}>
-                  <Settings className="h-4 w-4" /> <span>{t('adminOverview', 'Admin Overview')}</span>
-                </Link>
-                <Link href="/admin/frontend" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/frontend')} style={navStyle('/admin/frontend')}>
-                  <Globe className="h-4 w-4" /> <span>{t('pageBuilder', 'Page Builder')}</span>
-                </Link>
-                <Link href="/admin/users" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/users')} style={navStyle('/admin/users')}>
-                  <UserPlus className="h-4 w-4" /> <span>{t('users', 'User Accounts')}</span>
-                </Link>
-                <Link href="/admin/payment-gateway" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/payment-gateway')} style={navStyle('/admin/payment-gateway')}>
-                  <ShieldCheck className="h-4 w-4" /> <span>{t('payments', 'Payment Gateway')}</span>
-                </Link>
-              </div>
-            )}
+            <div className="pt-4 border-t space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold text-red-400 border border-red-500/20 hover:bg-red-500/10 transition"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>{t('logOut', 'Log Out')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

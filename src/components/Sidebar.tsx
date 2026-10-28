@@ -104,9 +104,7 @@ function DynamicTokenIcon({ icon, symbol, size = 16, className = '' }: { icon?: 
   return <Coins className={`text-amber-500 shrink-0 ${className}`} style={{ width: size, height: size }} />;
 }
 
-export default function Sidebar(
-  // [Server-Loop-Guard: Debounced lifecycle]
-) {
+export default function Sidebar() {
   const pathname = usePathname() || '';
   const langContext = useTranslation();
   const t = langContext?.t || ((k: string, fb?: string) => fb || k);
@@ -318,7 +316,7 @@ export default function Sidebar(
         setSiteIcon(icon);
         updateFavicon(icon);
       }
-      // Async authoritative hydration from server
+
       fetchSiteConfig().then((cfg) => {
         if (cfg) {
           if (cfg.siteName) setSiteName(cfg.siteName);
@@ -416,7 +414,6 @@ export default function Sidebar(
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
     window.addEventListener('zecratary_currency_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('focus', () => fetchBalancesAndTelemetry());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') fetchBalancesAndTelemetry();
@@ -598,11 +595,10 @@ export default function Sidebar(
       : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
   };
 
-  const planBadgeText = isAdmin 
-    ? t('topbarPlanAdmin', 'Admin Access')
-    : currentUser?.subscription_plan === 'pro' 
-      ? t('topbarPlanPro', 'Pro Plan') 
-      : t('topbarPlanFree', 'Free Tier');
+  // Task 3: Subscription badge in user profile dropdown (Admin Access removed)
+  const planBadgeText = currentUser?.subscription_plan === 'pro' 
+    ? t('topbarPlanPro', 'Pro Plan') 
+    : t('topbarPlanFree', 'Free Tier');
 
   return (
     <>
@@ -642,7 +638,7 @@ export default function Sidebar(
         </div>
 
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* 1. DEDICATED STORE WALLET CAPSULE + DIRECT BUTTON (DYNAMIC CURRENCY) */}
+          {/* 1. DEDICATED STORE WALLET CAPSULE (Task 2: Left Wallet Icon Removed) */}
           <div 
             className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
             style={{
@@ -652,10 +648,9 @@ export default function Sidebar(
           >
             <Link 
               href="/wallet" 
-              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
               title={t('viewWalletBalance', 'View Wallet Balance & History')}
             >
-              <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform shrink-0" />
               <span 
                 suppressHydrationWarning
                 className="text-xs font-mono font-black" 
@@ -679,7 +674,7 @@ export default function Sidebar(
             </Link>
           </div>
 
-          {/* 2. DEDICATED AI TOKEN CAPSULE + DIRECT BUTTON */}
+          {/* 2. DEDICATED AI TOKEN CAPSULE (Task 2: Left Diamond/Token Icon Removed) */}
           <div 
             className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
             style={{
@@ -689,10 +684,9 @@ export default function Sidebar(
           >
             <Link 
               href="/token" 
-              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
               title={t('viewTokenBalance', 'View Token Balance & History')}
             >
-              <DynamicTokenIcon icon={tokenIcon} symbol={tokenSymbol} size={16} className="group-hover:scale-110 transition-transform" />
               <span 
                 suppressHydrationWarning
                 className="text-xs font-mono font-black" 
@@ -932,6 +926,7 @@ export default function Sidebar(
                   color: 'var(--color-text)'
                 }}
               >
+                {/* User Identity Header (Task 3: Admin Access Removed from Badge) */}
                 <div className="px-3 py-2 border-b mb-1 space-y-1" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center justify-between">
                     <span className="font-extrabold truncate text-xs">{currentUser?.name || 'User'}</span>
@@ -959,7 +954,7 @@ export default function Sidebar(
                   onClick={() => setProfileDropdownOpen(false)}
                   className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
                 >
-                  <Layers className="h-4 w-4 text-sky-400 opacity-80" />
+                  <Layers className="h-4 w-4 opacity-80" />
                   <span>{t('topbarSubscriptions', 'Subscriptions')}</span>
                 </Link>
 
@@ -1069,7 +1064,7 @@ export default function Sidebar(
         </div>
       </header>
 
-      {/* MOBILE APPLICATION HEADER WITH COMPACT WALLET & TOKEN WIDGETS */}
+      {/* MOBILE APPLICATION HEADER (Task 2: Left Wallet & Token Icons Removed) */}
       <header
         role="banner"
         aria-label="Mobile Application Header"
@@ -1102,10 +1097,9 @@ export default function Sidebar(
           >
             <Link 
               href="/wallet" 
-              className="flex items-center gap-1 px-1.5 py-0.5 hover:opacity-85 transition"
+              className="flex items-center px-1.5 py-0.5 hover:opacity-85 transition"
               title={t('wallet', 'Store Wallet')}
             >
-              <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)] shrink-0" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
               </span>
@@ -1130,10 +1124,9 @@ export default function Sidebar(
           >
             <Link 
               href="/token" 
-              className="flex items-center gap-1 px-1.5 py-0.5 hover:opacity-85 transition"
+              className="flex items-center px-1.5 py-0.5 hover:opacity-85 transition"
               title={t('token', 'AI Tokens')}
             >
-              <DynamicTokenIcon icon={tokenIcon} symbol={tokenSymbol} size={14} />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {Number(tokenBalance || 0).toLocaleString()}
               </span>
@@ -1298,7 +1291,7 @@ export default function Sidebar(
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY ACCORDION */}
+          {/* 4. FINANCIAL & UTILITY ACCORDION (Task 1: All Icons Harmonized to Theme Color) */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1316,15 +1309,15 @@ export default function Sidebar(
             {(openSections.finance || isCollapsed) && (
               <div className="space-y-0.5">
                 <Link href="/token" className={navClass('/token')} style={navStyle('/token')} title={t('tokenPortal', 'Token Portal')}>
-                  <Coins className="h-4 w-4 shrink-0 text-amber-400" />
+                  <Coins className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('tokenPortal', 'Token Portal')}</span>}
                 </Link>
                 <Link href="/wallet" className={navClass('/wallet')} style={navStyle('/wallet')} title={t('walletPortal', 'Store Wallet')}>
-                  <Wallet className="h-4 w-4 shrink-0 text-emerald-400" />
+                  <Wallet className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('walletPortal', 'Store Wallet')}</span>}
                 </Link>
                 <Link href="/subscriptions" className={navClass('/subscriptions')} style={navStyle('/subscriptions')} title={t('subscriptions', 'Subscriptions')}>
-                  <Layers className="h-4 w-4 shrink-0 text-sky-400" />
+                  <Layers className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('subscriptions', 'Subscriptions')}</span>}
                 </Link>
                 <Link href="/billing" className={navClass('/billing')} style={navStyle('/billing')} title={t('billing', 'Billing History')}>
@@ -1335,7 +1328,7 @@ export default function Sidebar(
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION (WITH STORAGE SETTINGS PRESERVED) */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (ALL MODULES PRESERVED) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -1429,7 +1422,7 @@ export default function Sidebar(
         </div>
       </aside>
 
-      {/* MOBILE APPLICATION DRAWER */}
+      {/* MOBILE APPLICATION DRAWER (Task 1: All Finance Icons Same Color) */}
       {mobileMenuOpen && (
         <div
           role="dialog"
@@ -1458,37 +1451,37 @@ export default function Sidebar(
 
             <div className="space-y-1">
               <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)} className={navClass('/dashboard')} style={navStyle('/dashboard')}>
-                <LayoutDashboard className="h-4 w-4" /> <span>{t('dashboard', 'Dashboard')}</span>
+                <LayoutDashboard className="h-4 w-4 shrink-0" /> <span>{t('dashboard', 'Dashboard')}</span>
               </Link>
               <Link href="/chef" onClick={() => setMobileMenuOpen(false)} className={navClass('/chef')} style={navStyle('/chef')}>
-                <MessageSquare className="h-4 w-4" /> <span>{t('aiChef', 'AI Assistant')}</span>
+                <MessageSquare className="h-4 w-4 shrink-0" /> <span>{t('aiChef', 'AI Assistant')}</span>
               </Link>
               <Link href="/recipes" onClick={() => setMobileMenuOpen(false)} className={navClass('/recipes')} style={navStyle('/recipes')}>
-                <BookOpen className="h-4 w-4" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
+                <BookOpen className="h-4 w-4 shrink-0" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
               </Link>
               <Link href="/books" onClick={() => setMobileMenuOpen(false)} className={navClass('/books')} style={navStyle('/books')}>
-                <Book className="h-4 w-4" /> <span>{t('cookbooks', 'Cookbooks')}</span>
+                <Book className="h-4 w-4 shrink-0" /> <span>{t('cookbooks', 'Cookbooks')}</span>
               </Link>
               <Link href="/pantry" onClick={() => setMobileMenuOpen(false)} className={navClass('/pantry')} style={navStyle('/pantry')}>
-                <Package className="h-4 w-4" /> <span>{t('pantryInventory', 'Pantry Inventory')}</span>
+                <Package className="h-4 w-4 shrink-0" /> <span>{t('pantryInventory', 'Pantry Inventory')}</span>
               </Link>
               <Link href="/planner" onClick={() => setMobileMenuOpen(false)} className={navClass('/planner')} style={navStyle('/planner')}>
-                <Calendar className="h-4 w-4" /> <span>{t('mealPlanner', 'Meal Planner')}</span>
+                <Calendar className="h-4 w-4 shrink-0" /> <span>{t('mealPlanner', 'Meal Planner')}</span>
               </Link>
               <Link href="/shopping" onClick={() => setMobileMenuOpen(false)} className={navClass('/shopping')} style={navStyle('/shopping')}>
-                <ShoppingCart className="h-4 w-4" /> <span>{t('shoppingList', 'Shopping List')}</span>
+                <ShoppingCart className="h-4 w-4 shrink-0" /> <span>{t('shoppingList', 'Shopping List')}</span>
               </Link>
               <Link href="/token" onClick={() => setMobileMenuOpen(false)} className={navClass('/token')} style={navStyle('/token')}>
-                <Coins className="h-4 w-4 text-amber-400" /> <span>{t('tokenPortal', 'Token Portal')}</span>
+                <Coins className="h-4 w-4 shrink-0" /> <span>{t('tokenPortal', 'Token Portal')}</span>
               </Link>
               <Link href="/wallet" onClick={() => setMobileMenuOpen(false)} className={navClass('/wallet')} style={navStyle('/wallet')}>
-                <Wallet className="h-4 w-4 text-emerald-400" /> <span>{t('walletPortal', 'Store Wallet')}</span>
+                <Wallet className="h-4 w-4 shrink-0" /> <span>{t('walletPortal', 'Store Wallet')}</span>
               </Link>
               <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className={navClass('/profile')} style={navStyle('/profile')}>
-                <UserIcon className="h-4 w-4" /> <span>{t('topbarProfile', 'User Profile')}</span>
+                <UserIcon className="h-4 w-4 shrink-0" /> <span>{t('topbarProfile', 'User Profile')}</span>
               </Link>
               <Link href="/contacts" onClick={() => setMobileMenuOpen(false)} className={navClass('/contacts')} style={navStyle('/contacts')}>
-                <Mail className="h-4 w-4" /> <span>{t('contactSupport', 'Contact Support')}</span>
+                <Mail className="h-4 w-4 shrink-0" /> <span>{t('contactSupport', 'Contact Support')}</span>
               </Link>
             </div>
 
