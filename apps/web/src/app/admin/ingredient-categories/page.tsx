@@ -1,5 +1,5 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
@@ -142,14 +142,33 @@ export default function AdminIngredientCategoriesPage() {
 
     window.addEventListener('zecratary_ingredient_categories_updated', handleExternalUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_languages_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_dictionary_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_locale_changed', handleExternalUpdates);
     window.addEventListener('storage', handleExternalUpdates);
 
     return () => {
       window.removeEventListener('zecratary_ingredient_categories_updated', handleExternalUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_languages_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_dictionary_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_locale_changed', handleExternalUpdates);
       window.removeEventListener('storage', handleExternalUpdates);
     };
   }, [fetchCategories, t]);
+
+  // Global Escape Key Listener for Modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isModalOpen) setIsModalOpen(false);
+        if (isDeleteModalOpen) setIsDeleteModalOpen(false);
+        if (inlineEditingId) setInlineEditingId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isModalOpen, isDeleteModalOpen, inlineEditingId]);
 
   const filteredCategories = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -265,17 +284,17 @@ export default function AdminIngredientCategoriesPage() {
         body: JSON.stringify({ categories: updatedList, ingredientCategories: updatedList })
       });
 
-      if (!res.ok) throw new Error('Failed to update category');
+      if (!res.ok) throw new Error(t('categorySaveError', 'Failed to update category'));
 
       setCategories(updatedList);
       setInlineEditingId(null);
-      showToast(t('categorySavedSuccess', 'Ingredient category saved successfully!'), 'success');
+      showToast(t('categoryUpdatedSuccess', 'Ingredient category updated successfully!'), 'success');
 
       window.dispatchEvent(new Event('zecratary_ingredient_categories_updated'));
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      showToast(err.message || 'Failed to update category', 'error');
+      showToast(err.message || t('categorySaveError', 'Failed to update category'), 'error');
     } finally {
       setSaving(false);
       setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
@@ -346,7 +365,7 @@ export default function AdminIngredientCategoriesPage() {
         method: 'DELETE'
       });
 
-      if (!res.ok) throw new Error('Failed to delete ingredient category');
+      if (!res.ok) throw new Error(t('categoryDeleteError', 'Failed to delete ingredient category'));
 
       setCategories(updatedList);
       setIsDeleteModalOpen(false);
@@ -357,7 +376,7 @@ export default function AdminIngredientCategoriesPage() {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      showToast(err.message || 'Failed to delete category', 'error');
+      showToast(err.message || t('categoryDeleteError', 'Failed to delete category'), 'error');
     } finally {
       setSaving(false);
       setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
@@ -396,7 +415,7 @@ export default function AdminIngredientCategoriesPage() {
         body: JSON.stringify({ action: 'reset' })
       });
 
-      if (!res.ok) throw new Error('Failed to reset categories');
+      if (!res.ok) throw new Error(t('categorySaveError', 'Failed to reset categories'));
 
       setCategories(DEFAULT_CATEGORIES);
       setHasReordered(false);
@@ -406,7 +425,7 @@ export default function AdminIngredientCategoriesPage() {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      showToast(err.message || 'Failed to reset categories', 'error');
+      showToast(err.message || t('categorySaveError', 'Failed to reset categories'), 'error');
     } finally {
       setSaving(false);
       setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
@@ -460,7 +479,7 @@ export default function AdminIngredientCategoriesPage() {
         body: JSON.stringify({ categories, ingredientCategories: categories })
       });
 
-      if (!res.ok) throw new Error('Failed to save order');
+      if (!res.ok) throw new Error(t('categorySaveError', 'Failed to save order'));
 
       setHasReordered(false);
       showToast(t('categoryOrderSuccess', 'Display order updated successfully!'), 'success');
@@ -469,7 +488,7 @@ export default function AdminIngredientCategoriesPage() {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      showToast(err.message || 'Failed to save order', 'error');
+      showToast(err.message || t('categorySaveError', 'Failed to save order'), 'error');
     } finally {
       setSaving(false);
       setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
@@ -478,8 +497,17 @@ export default function AdminIngredientCategoriesPage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-ingredient-categories-canvas"
+      role="region"
+      aria-label={t('ingredientCategoriesTitle', 'Ingredient Categories')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)' 
+      }}
     >
       {/* Toast Alert Banner */}
       {toast && (
@@ -535,10 +563,11 @@ export default function AdminIngredientCategoriesPage() {
       <div 
         role="region"
         data-lpignore="true"
-        className="p-4 rounded-3xl border shadow-sm space-y-3.5 transition-colors duration-200"
+        className="w-full max-w-full p-4 rounded-3xl border shadow-sm space-y-3.5 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
+          borderColor: 'var(--color-border)',
+          boxSizing: 'border-box'
         }}
       >
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
@@ -547,9 +576,13 @@ export default function AdminIngredientCategoriesPage() {
             <input
               type="text"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               data-form-type="other"
-              spellCheck="false"
               value={quickAddName}
               onChange={(e) => setQuickAddName(e.target.value)}
               onKeyDown={(e) => {
@@ -602,9 +635,13 @@ export default function AdminIngredientCategoriesPage() {
             <input
               type="text"
               data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               data-form-type="other"
               autoComplete="off"
-              spellCheck="false"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('searchIngredientCategoriesPlaceholder', 'Search ingredient categories...')}
@@ -621,7 +658,7 @@ export default function AdminIngredientCategoriesPage() {
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100 cursor-pointer"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -678,21 +715,22 @@ export default function AdminIngredientCategoriesPage() {
         </div>
       </div>
 
-      {/* Main Table / Grid View (Autofill Safe Container) */}
+      {/* Main Table View (Autofill Safe Accessible Container) */}
       <div 
         role="region"
         data-lpignore="true"
-        className="rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
+        className="w-full max-w-full rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
+          borderColor: 'var(--color-border)',
+          boxSizing: 'border-box'
         }}
       >
         {loading ? (
           <div className="py-20 flex flex-col items-center justify-center gap-3">
             <RefreshCw className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
             <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-              Loading ingredient categories...
+              {t('loadingIngredientCategories', 'Loading ingredient categories...')}
             </p>
           </div>
         ) : filteredCategories.length === 0 ? (
@@ -705,7 +743,7 @@ export default function AdminIngredientCategoriesPage() {
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90"
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90 cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {t('clearSearchBtn', 'Clear Search')}
@@ -724,10 +762,10 @@ export default function AdminIngredientCategoriesPage() {
                     color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {reorderMode && <th className="p-3.5 w-12 text-center">#</th>}
+                  {reorderMode && <th className="p-3.5 w-12 text-center">{t('categoryOrderColumn', '#')}</th>}
                   <th className="p-3.5 font-bold">{t('categoryNameColumn', 'Category Name')}</th>
                   <th className="p-3.5 font-bold">{t('categorySlugColumn', 'Slug / Identifier')}</th>
-                  <th className="p-3.5 font-bold text-center w-28">{t('categoryStatusActive', 'Status')}</th>
+                  <th className="p-3.5 font-bold text-center w-28">{t('categoryStatusColumn', 'Status')}</th>
                   <th className="p-3.5 font-bold text-right pr-6 w-32">{t('actionsColumn', 'Actions')}</th>
                 </tr>
               </thead>
@@ -792,7 +830,12 @@ export default function AdminIngredientCategoriesPage() {
                                 type="text"
                                 autoFocus
                                 autoComplete="off"
+                                autoCorrect="off"
+                                autoCapitalize="off"
+                                spellCheck={false}
                                 data-lpignore="true"
+                                data-1p-ignore="true"
+                                data-bwignore="true"
                                 data-form-type="other"
                                 value={inlineEditingName}
                                 onChange={(e) => setInlineEditingName(e.target.value)}
@@ -811,7 +854,7 @@ export default function AdminIngredientCategoriesPage() {
                                 type="button"
                                 onClick={() => handleSaveInlineEdit(item)}
                                 className="p-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
-                                title="Save"
+                                title={t('saveTooltip', 'Save')}
                               >
                                 <Check className="h-3.5 w-3.5" />
                               </button>
@@ -819,7 +862,7 @@ export default function AdminIngredientCategoriesPage() {
                                 type="button"
                                 onClick={() => setInlineEditingId(null)}
                                 className="p-1 rounded-lg border text-gray-400 hover:text-white cursor-pointer"
-                                title="Cancel"
+                                title={t('cancelTooltip', 'Cancel')}
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -863,7 +906,7 @@ export default function AdminIngredientCategoriesPage() {
                           }}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${item.isActive ? 'bg-emerald-500' : 'bg-red-400'}`} />
-                          <span>{item.isActive ? t('activeCategoriesBadge', 'Active') : 'Inactive'}</span>
+                          <span>{item.isActive ? t('activeCategoriesBadge', 'Active') : t('inactiveCategoriesBadge', 'Inactive')}</span>
                         </button>
                       </td>
 
@@ -882,7 +925,7 @@ export default function AdminIngredientCategoriesPage() {
                               borderColor: 'var(--color-border)',
                               color: 'var(--color-text)'
                             }}
-                            title="Quick Edit"
+                            title={t('quickEditTooltip', 'Quick Edit')}
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
@@ -927,13 +970,12 @@ export default function AdminIngredientCategoriesPage() {
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setIsModalOpen(false);
-          }}
         >
           <div 
             role="region"
             data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
             data-form-type="other"
             className="w-full max-w-lg rounded-3xl border shadow-2xl p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -950,7 +992,7 @@ export default function AdminIngredientCategoriesPage() {
               <button 
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -963,11 +1005,21 @@ export default function AdminIngredientCategoriesPage() {
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   value={formData.name}
                   onChange={(e) => handleNameChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveModal();
+                    }
+                  }}
                   placeholder={t('categoryNamePlaceholder', 'e.g., Produce, Dairy, Spices & Seasonings')}
                   className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-medium"
                   style={{
@@ -987,11 +1039,21 @@ export default function AdminIngredientCategoriesPage() {
                   <input
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
                     value={formData.slug}
                     onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveModal();
+                      }
+                    }}
                     placeholder={t('categorySlugPlaceholder', 'e.g., produce, dairy-eggs, spices')}
                     className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px]"
                     style={{
@@ -1008,11 +1070,21 @@ export default function AdminIngredientCategoriesPage() {
                   <input
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
                     value={formData.icon}
                     onChange={(e) => setFormData(prev => ({ ...prev, icon: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveModal();
+                      }
+                    }}
                     placeholder={t('categoryIconPlaceholder', 'e.g., 🥬, 🥩, 🧀, 🧂')}
                     className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-center font-emoji"
                     style={{
@@ -1032,11 +1104,21 @@ export default function AdminIngredientCategoriesPage() {
                 <textarea
                   rows={2}
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveModal();
+                    }
+                  }}
                   placeholder={t('categoryDescriptionPlaceholder', 'Department description or shelf location...')}
                   className="w-full px-3.5 py-2.5 rounded-xl border outline-none resize-none font-normal"
                   style={{
@@ -1069,7 +1151,7 @@ export default function AdminIngredientCategoriesPage() {
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -1082,7 +1164,7 @@ export default function AdminIngredientCategoriesPage() {
                 type="button"
                 disabled={saving || !formData.name.trim()}
                 onClick={handleSaveModal}
-                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95"
+                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95 cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {saving ? '...' : t('saveBtn', 'Save Category')}
@@ -1098,13 +1180,13 @@ export default function AdminIngredientCategoriesPage() {
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setIsDeleteModalOpen(false);
-          }}
         >
           <div 
             role="region"
             data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
+            data-form-type="other"
             className="w-full max-w-md rounded-3xl border shadow-2xl p-6 space-y-4 transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
@@ -1137,7 +1219,7 @@ export default function AdminIngredientCategoriesPage() {
                   setIsDeleteModalOpen(false);
                   setItemToDelete(null);
                 }}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -1150,7 +1232,7 @@ export default function AdminIngredientCategoriesPage() {
                 type="button"
                 disabled={saving}
                 onClick={handleConfirmDelete}
-                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50 cursor-pointer"
               >
                 {saving ? '...' : t('confirmDeleteBtn', 'Confirm Delete')}
               </button>
