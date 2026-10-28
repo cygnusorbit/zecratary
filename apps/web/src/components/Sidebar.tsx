@@ -79,6 +79,71 @@ const isImageIcon = (icon?: unknown): boolean =>
   );
 
 /**
+ * Robust Normalizer & Active Status Evaluator for Languages
+ */
+const normalizeLanguageItem = (item: any): DynamicLanguageItem => {
+  if (!item) {
+    return { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true };
+  }
+  if (typeof item === 'string') {
+    const c = item.toLowerCase().trim();
+    return {
+      id: `lang_${c}`,
+      code: c,
+      name: c.toUpperCase(),
+      native: DEFAULT_LANGUAGE_FLAG_MAP[c]?.native || c.toUpperCase(),
+      flag: DEFAULT_LANGUAGE_FLAG_MAP[c]?.flag || '🌐',
+      status: 'active',
+      is_default: c === 'en'
+    };
+  }
+  const rawCode = item.code || item.locale || item.lang || item.id || 'en';
+  const code = typeof rawCode === 'string' ? rawCode.toLowerCase().trim() : 'en';
+  const name = item.name || item.label || code.toUpperCase();
+  const flagMeta = DEFAULT_LANGUAGE_FLAG_MAP[code];
+  const native = item.native || item.nativeName || item.native_name || flagMeta?.native || name;
+  const flag = item.flag || flagMeta?.flag || '🌐';
+  
+  let status = 'active';
+  if (typeof item.status === 'string') {
+    status = item.status.toLowerCase().trim();
+  } else if (item.is_active === false || item.isActive === false || item.active === false) {
+    status = 'inactive';
+  } else if (item.is_active === true || item.isActive === true || item.active === true) {
+    status = 'active';
+  }
+
+  return {
+    id: item.id || `lang_${code}`,
+    code,
+    name,
+    native,
+    flag,
+    direction: item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr'),
+    status,
+    is_default: Boolean(item.is_default || item.isDefault)
+  };
+};
+
+const isLanguageActive = (item: any): boolean => {
+  if (!item) return false;
+  const status = typeof item.status === 'string' ? item.status.toLowerCase().trim() : '';
+  if (status === 'inactive' || status === 'disabled' || status === 'draft' || status === 'hidden') {
+    return false;
+  }
+  if (item.is_active === false || item.isActive === false || item.active === false) {
+    return false;
+  }
+  if (status === 'active' || item.is_default === true || item.isDefault === true) {
+    return true;
+  }
+  if (item.is_active === true || item.isActive === true || item.active === true) {
+    return true;
+  }
+  return status !== 'inactive' && status !== 'disabled';
+};
+
+/**
  * Universal Dynamic Token Icon Renderer
  */
 function DynamicTokenIcon({ icon, symbol, size = 16, className = '' }: { icon?: any; symbol?: any; size?: number; className?: string }) {
@@ -142,14 +207,29 @@ export default function Sidebar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
-  // Dynamic Currencies & Languages States (from Admin Settings)
+  // Dynamic Currencies & Languages States (Synchronized from /admin/language & LanguageProvider)
   const [currencySymbols, setCurrencySymbols] = useState<Record<string, string>>(DEFAULT_CURRENCY_SYMBOLS);
   const [dynamicLanguages, setDynamicLanguages] = useState<DynamicLanguageItem[]>(() => {
-    return (langContext as any)?.availableLanguages || [
-      { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
-      { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
-      { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
-      { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
+    const ctxLangs = (langContext as any)?.availableLanguages || (langContext as any)?.languages;
+    if (Array.isArray(ctxLangs) && ctxLangs.length > 0) {
+      return ctxLangs.map(normalizeLanguageItem);
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('zecratary_languages');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed.map(normalizeLanguageItem);
+          }
+        }
+      } catch (_) {}
+    }
+    return [
+      { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+      { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active', is_default: false },
+      { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+      { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active', is_default: false }
     ];
   });
 
@@ -173,20 +253,50 @@ export default function Sidebar() {
     return dynamicFlagMap[c] || { flag: '🌐', native: code.toUpperCase() };
   }, [dynamicFlagMap]);
 
-  // Active Languages Filtered by Status
-  const activeLanguages = useMemo(() => {
-    const list = dynamicLanguages.length > 0 ? dynamicLanguages : (langContext as any)?.availableLanguages || [];
-    if (!Array.isArray(list) || list.length === 0) {
-      return [
-        { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
-        { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
-        { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
-        { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
-      ];
+  // Synchronize dynamicLanguages whenever langContext updates
+  useEffect(() => {
+    const ctxLangs = (langContext as any)?.availableLanguages || (langContext as any)?.languages;
+    if (Array.isArray(ctxLangs) && ctxLangs.length > 0) {
+      setDynamicLanguages(ctxLangs.map(normalizeLanguageItem));
     }
-    const filtered = list.filter((l: any) => l.status !== 'inactive');
-    return filtered.length > 0 ? filtered : list;
+  }, [langContext]);
+
+  // Active Languages Filtered by Status (ONLY show language that is active)
+  const activeLanguages = useMemo(() => {
+    const sourceList = Array.isArray(dynamicLanguages) && dynamicLanguages.length > 0
+      ? dynamicLanguages
+      : ((langContext as any)?.availableLanguages || []);
+
+    const normalizedList = (Array.isArray(sourceList) && sourceList.length > 0
+      ? sourceList
+      : [
+          { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+          { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active', is_default: false },
+          { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+          { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active', is_default: false }
+        ]
+    ).map(normalizeLanguageItem);
+
+    const activeOnly = normalizedList.filter(isLanguageActive);
+    return activeOnly.length > 0 
+      ? activeOnly 
+      : [{ code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true }];
   }, [dynamicLanguages, langContext]);
+
+  // Auto-switch to active default language if currentLanguage was deactivated in /admin/language
+  useEffect(() => {
+    if (activeLanguages.length > 0) {
+      const isCurrentActive = activeLanguages.some(
+        l => l.code && l.code.toLowerCase().trim() === currentLanguage.toLowerCase().trim()
+      );
+      if (!isCurrentActive) {
+        const fallbackLang = activeLanguages.find(l => l.is_default) || activeLanguages[0];
+        if (fallbackLang?.code && typeof changeLanguage === 'function') {
+          changeLanguage(fallbackLang.code);
+        }
+      }
+    }
+  }, [activeLanguages, currentLanguage, changeLanguage]);
 
   // Accordion Sections
   const [openSections, setOpenSections] = useState<{
@@ -235,6 +345,32 @@ export default function Sidebar() {
 
   const topbarRef = useRef<HTMLDivElement>(null);
 
+  // Dedicated Language Synchronizer (Immediate response to /admin/language updates)
+  const syncLanguages = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/admin/languages?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const incoming = data.languages || data.supported_languages || data.data;
+        if (Array.isArray(incoming) && incoming.length > 0) {
+          const normalized = incoming.map(normalizeLanguageItem);
+          setDynamicLanguages(normalized);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('zecratary_languages', JSON.stringify(normalized));
+            } catch (_) {}
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+
+    const ctxLangs = (langContext as any)?.availableLanguages || (langContext as any)?.languages;
+    if (Array.isArray(ctxLangs) && ctxLangs.length > 0) {
+      setDynamicLanguages(ctxLangs.map(normalizeLanguageItem));
+    }
+  }, [langContext]);
+
   // Dynamic Telemetry & Settings Fetcher (PostgreSQL & MySQL Synced)
   const fetchBalancesAndTelemetry = useCallback(async (activeU?: any) => {
     try {
@@ -265,8 +401,15 @@ export default function Sidebar() {
 
       if (langRes.status === 'fulfilled' && langRes.value.ok) {
         const lData = await langRes.value.json();
-        if (Array.isArray(lData.languages) && lData.languages.length > 0) {
-          setDynamicLanguages(lData.languages);
+        const incoming = lData.languages || lData.supported_languages || lData.data;
+        if (Array.isArray(incoming) && incoming.length > 0) {
+          const normalized = incoming.map(normalizeLanguageItem);
+          setDynamicLanguages(normalized);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('zecratary_languages', JSON.stringify(normalized));
+            } catch (_) {}
+          }
         }
       }
 
@@ -342,6 +485,16 @@ export default function Sidebar() {
             setOpenSections(prev => ({ ...prev, ...JSON.parse(storedSections) }));
           } catch (_) {}
         }
+
+        const storedLangs = localStorage.getItem('zecratary_languages');
+        if (storedLangs) {
+          try {
+            const parsed = JSON.parse(storedLangs);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setDynamicLanguages(parsed.map(normalizeLanguageItem));
+            }
+          } catch (_) {}
+        }
       }
 
       if (u?.id || u?.email) {
@@ -359,7 +512,7 @@ export default function Sidebar() {
     } catch (_) {}
   }, [currencySymbols, fetchBalancesAndTelemetry]);
 
-  // Route Auto-Expansion: Synchronized with canonical routes
+  // Route Auto-Expansion
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -379,8 +532,14 @@ export default function Sidebar() {
   useEffect(() => {
     setMounted(true);
     syncUserState();
+    syncLanguages();
 
     const handleSync = () => syncUserState();
+    const handleLangSync = () => {
+      syncLanguages();
+      fetchBalancesAndTelemetry();
+    };
+
     const handleWalletUpdate = (e?: any) => {
       if (e?.detail) {
         const b = e.detail.wallet_balance ?? e.detail.walletBalance ?? e.detail.balance;
@@ -406,20 +565,23 @@ export default function Sidebar() {
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_site_settings_changed', handleSync);
     window.addEventListener('zecratary_site_config_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleLangSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleWalletUpdate);
     window.addEventListener('zecratary_tokens_updated', handleTokensUpdate);
     window.addEventListener('zecratary_token_settings_updated', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleLangSync);
+    window.addEventListener('zecratary_locale_changed', handleLangSync);
     window.addEventListener('zecratary_currency_updated', handleSync);
-    window.addEventListener('focus', () => fetchBalancesAndTelemetry());
+    window.addEventListener('focus', handleLangSync);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') fetchBalancesAndTelemetry();
+      if (document.visibilityState === 'visible') {
+        handleLangSync();
+      }
     });
 
     let balanceChannel: BroadcastChannel | null = null;
+    let languageChannel: BroadcastChannel | null = null;
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
         balanceChannel = new BroadcastChannel('zecratary_balance_channel');
@@ -430,6 +592,11 @@ export default function Sidebar() {
           if (msg.data?.token_balance !== undefined || msg.data?.tokens !== undefined) {
             setTokenBalance(Number(msg.data.token_balance ?? msg.data.tokens));
           }
+        };
+
+        languageChannel = new BroadcastChannel('zecratary_language_channel');
+        languageChannel.onmessage = () => {
+          syncLanguages();
         };
       } catch (_) {}
     }
@@ -442,13 +609,15 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_wallet_updated', handleWalletUpdate);
       window.removeEventListener('zecratary_tokens_updated', handleTokensUpdate);
       window.removeEventListener('zecratary_token_settings_updated', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleLangSync);
+      window.removeEventListener('zecratary_locale_changed', handleLangSync);
       window.removeEventListener('zecratary_currency_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleLangSync);
+      window.removeEventListener('focus', handleLangSync);
       if (balanceChannel) balanceChannel.close();
+      if (languageChannel) languageChannel.close();
     };
-  }, [syncUserState, fetchBalancesAndTelemetry]);
+  }, [syncUserState, syncLanguages, fetchBalancesAndTelemetry]);
 
   // Click Outside & Escape Key Listener
   useEffect(() => {
@@ -599,7 +768,6 @@ export default function Sidebar() {
     ? t('topbarPlanPro', 'Pro Plan') 
     : t('topbarPlanFree', 'Free Tier');
 
-  // Task 1: Robust fallback resolving to 'Wallet' across all locales
   const financeWalletLabel = t('navWallet', t('wallet') === 'Wallet Settings' ? 'Wallet' : t('wallet', 'Wallet'));
 
   return (
@@ -815,7 +983,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. DYNAMIC QUICK LANGUAGE SELECTOR */}
+          {/* 4. DYNAMIC QUICK LANGUAGE SELECTOR (ONLY SHOW ACTIVE LANGUAGES) */}
           <div className="relative">
             <button
               type="button"
@@ -1292,7 +1460,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY ACCORDION (Task 1: Clean 'Wallet' Link) */}
+          {/* 4. FINANCIAL & UTILITY ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1313,7 +1481,6 @@ export default function Sidebar() {
                   <Coins className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('token', 'Token')}</span>}
                 </Link>
-                {/* Finance Hub: Text changed to 'Wallet' */}
                 <Link 
                   href="/wallet" 
                   className={navClass('/wallet')} 
@@ -1335,7 +1502,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION (Task 2: Added /admin/language Menu Link) */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -1361,7 +1528,6 @@ export default function Sidebar() {
                     <Globe className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('pageBuilder', 'Page Builder')}</span>}
                   </Link>
-                  {/* Task 2: Language Setting Menu Link */}
                   <Link href="/admin/language" className={navClass('/admin/language')} style={navStyle('/admin/language')} title={t('languageSetting', 'Language Setting')}>
                     <Languages className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('languageSetting', 'Language Setting')}</span>}
