@@ -1,11 +1,11 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Languages, Globe, Plus, Search, Check, Trash2, Edit2, 
   RefreshCw, CheckCircle2, AlertCircle, Save, Undo2, ArrowRightLeft,
-  Database, ShieldCheck
+  Database, ShieldCheck, ChevronDown, Sparkles, X
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -13,11 +13,51 @@ interface SupportedLanguage {
   code: string;
   name: string;
   native: string;
+  nativeName?: string;
   flag: string;
   dir: 'ltr' | 'rtl';
+  direction?: 'ltr' | 'rtl';
   status: 'active' | 'inactive';
   isDefault?: boolean;
 }
+
+interface CountryOption {
+  name: string;
+  code: string;
+  flag: string;
+}
+
+const COMMON_COUNTRIES: CountryOption[] = [
+  { name: 'United States', code: 'en', flag: '🇺🇸' },
+  { name: 'United Kingdom', code: 'en', flag: '🇬🇧' },
+  { name: 'Thailand', code: 'th', flag: '🇹🇭' },
+  { name: 'Spain', code: 'es', flag: '🇪🇸' },
+  { name: 'France', code: 'fr', flag: '🇫🇷' },
+  { name: 'Germany', code: 'de', flag: '🇩🇪' },
+  { name: 'Italy', code: 'it', flag: '🇮🇹' },
+  { name: 'Japan', code: 'ja', flag: '🇯🇵' },
+  { name: 'China', code: 'zh', flag: '🇨🇳' },
+  { name: 'South Korea', code: 'ko', flag: '🇰🇷' },
+  { name: 'Portugal', code: 'pt', flag: '🇵🇹' },
+  { name: 'Brazil', code: 'pt', flag: '🇧🇷' },
+  { name: 'Netherlands', code: 'nl', flag: '🇳🇱' },
+  { name: 'India', code: 'hi', flag: '🇮🇳' },
+  { name: 'Vietnam', code: 'vi', flag: '🇻🇳' },
+  { name: 'Indonesia', code: 'id', flag: '🇮🇩' },
+  { name: 'Turkey', code: 'tr', flag: '🇹🇷' },
+  { name: 'Saudi Arabia', code: 'ar', flag: '🇸🇦' },
+  { name: 'United Arab Emirates', code: 'ar', flag: '🇦🇪' },
+  { name: 'Canada', code: 'en', flag: '🇨🇦' },
+  { name: 'Australia', code: 'en', flag: '🇦🇺' },
+  { name: 'Mexico', code: 'es', flag: '🇲🇽' },
+  { name: 'Sweden', code: 'sv', flag: '🇸🇪' },
+  { name: 'Norway', code: 'no', flag: '🇳🇴' },
+  { name: 'Denmark', code: 'da', flag: '🇩🇰' },
+  { name: 'Finland', code: 'fi', flag: '🇫🇮' },
+  { name: 'Poland', code: 'pl', flag: '🇵🇱' },
+  { name: 'Greece', code: 'el', flag: '🇬🇷' },
+  { name: 'Russia', code: 'ru', flag: '🇷🇺' }
+];
 
 const DEFAULT_LOCALES: SupportedLanguage[] = [
   { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', dir: 'ltr', status: 'active', isDefault: true },
@@ -60,6 +100,10 @@ export default function AdminLanguagePage() {
     isDefault: false
   });
 
+  // Flag Picker Dropdown State
+  const [showFlagPicker, setShowFlagPicker] = useState(false);
+  const [flagCountrySearch, setFlagCountrySearch] = useState('');
+
   // Word Modal States
   const [wordModalOpen, setWordModalOpen] = useState(false);
   const [newWordKey, setNewWordKey] = useState('');
@@ -81,8 +125,13 @@ export default function AdminLanguagePage() {
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.supportedLanguages) && data.supportedLanguages.length > 0) {
-          setLanguages(data.supportedLanguages);
-          const def = data.supportedLanguages.find((l: any) => l.isDefault)?.code || data.defaultLanguage || 'en';
+          const normalized = data.supportedLanguages.map((l: any) => ({
+            ...l,
+            native: l.native || l.nativeName || l.name,
+            dir: l.dir || l.direction || 'ltr'
+          }));
+          setLanguages(normalized);
+          const def = normalized.find((l: any) => l.isDefault)?.code || data.defaultLanguage || 'en';
           setDefaultLang(def);
         }
         if (data.translations && typeof data.translations === 'object') {
@@ -128,6 +177,7 @@ export default function AdminLanguagePage() {
     window.dispatchEvent(new Event('zecratary_languages_updated'));
     window.dispatchEvent(new Event('zecratary_dictionary_updated'));
     window.dispatchEvent(new Event('zecratary_locale_changed'));
+    window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
     window.dispatchEvent(new Event('storage'));
   };
 
@@ -254,9 +304,15 @@ export default function AdminLanguagePage() {
 
   // Open Language Modal for Add or Edit
   const openLangModal = (lang?: SupportedLanguage) => {
+    setShowFlagPicker(false);
+    setFlagCountrySearch('');
     if (lang) {
       setEditingLangCode(lang.code);
-      setLangForm({ ...lang });
+      setLangForm({ 
+        ...lang,
+        native: lang.native || lang.nativeName || lang.name,
+        dir: lang.dir || lang.direction || 'ltr'
+      });
     } else {
       setEditingLangCode(null);
       setLangForm({
@@ -279,7 +335,10 @@ export default function AdminLanguagePage() {
     const cleanNative = langForm.native.trim() || cleanName;
     const cleanFlag = langForm.flag.trim() || '🌐';
 
-    if (!cleanCode || !cleanName) return;
+    if (!cleanCode || !cleanName) {
+      alert(t('codeAndNameRequired', 'Language code and name are required.'));
+      return;
+    }
 
     let updated: SupportedLanguage[];
     if (editingLangCode) {
@@ -287,27 +346,30 @@ export default function AdminLanguagePage() {
         ...l,
         name: cleanName,
         native: cleanNative,
+        nativeName: cleanNative,
         flag: cleanFlag,
         dir: langForm.dir,
+        direction: langForm.dir,
         status: langForm.status
       } : l);
     } else {
       if (languages.some(l => l.code === cleanCode)) {
-        alert('Language code already exists!');
+        alert(`"${cleanCode}" ${t('languageAlreadyExists', 'already exists.')}`);
         return;
       }
       const newLang: SupportedLanguage = {
         code: cleanCode,
         name: cleanName,
         native: cleanNative,
+        nativeName: cleanNative,
         flag: cleanFlag,
         dir: langForm.dir,
+        direction: langForm.dir,
         status: langForm.status,
         isDefault: false
       };
       updated = [...languages, newLang];
 
-      // Initialize empty dictionary if missing
       if (!dictionaries[cleanCode]) {
         setDictionaries(prev => ({ ...prev, [cleanCode]: {} }));
       }
@@ -325,7 +387,6 @@ export default function AdminLanguagePage() {
 
     setDictionaries(prev => {
       const copy = { ...prev };
-      // Inject to current dictionary and ensure fallback across others
       languages.forEach(l => {
         copy[l.code] = {
           ...(copy[l.code] || {}),
@@ -369,12 +430,22 @@ export default function AdminLanguagePage() {
     );
   }, [currentDict, searchTerm]);
 
+  const filteredCountries = useMemo(() => {
+    const q = flagCountrySearch.toLowerCase().trim();
+    if (!q) return COMMON_COUNTRIES;
+    return COMMON_COUNTRIES.filter(c => 
+      c.name.toLowerCase().includes(q) || 
+      c.code.toLowerCase().includes(q) || 
+      c.flag.includes(q)
+    );
+  }, [flagCountrySearch]);
+
   const activeLocalesCount = languages.filter(l => l.status === 'active').length;
   const totalWordsCount = Object.keys(currentDict).length;
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
       {/* Top Header & System Badges */}
@@ -384,7 +455,8 @@ export default function AdminLanguagePage() {
       >
         <div>
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-            <Languages className="h-6 w-6" /> {t('langPageTitle', 'Language & Localization')}
+            <Languages className="h-6 w-6 shrink-0" /> 
+            <span>{t('langPageTitle', 'Language & Localization')}</span>
           </h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             {t('langPageSubtitle', 'Manage supported languages, default locale, and system translation dictionaries.')}
@@ -393,6 +465,18 @@ export default function AdminLanguagePage() {
 
         {/* Telemetry Status Badges & Controls */}
         <div className="flex flex-wrap items-center gap-2.5">
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+            <span>{t('fluidLayoutBadge', 'Full-Width Canvas')}</span>
+          </div>
+
           <div 
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
             style={{ 
@@ -426,13 +510,14 @@ export default function AdminLanguagePage() {
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
+            title="Reload from server store"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
-      {/* Main Accessible Form-Free Region Container (Constraint 9) */}
+      {/* Main Accessible Form-Free Region Container */}
       <div 
         role="region"
         data-lpignore="true"
@@ -474,7 +559,7 @@ export default function AdminLanguagePage() {
                   color: 'var(--color-text-secondary)'
                 }}
               >
-                <tab.icon className="h-4 w-4" />
+                <tab.icon className="h-4 w-4 shrink-0" />
                 <span>{tab.label}</span>
                 <span 
                   className="px-2 py-0.5 rounded-full text-[10px] font-mono border"
@@ -523,7 +608,7 @@ export default function AdminLanguagePage() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
-                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colLanguage', 'Language')}</th>
+                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colLanguage', 'Language & Identifier')}</th>
                       <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colCode', 'Code')}</th>
                       <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colNative', 'Native Name')}</th>
                       <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colDirection', 'Direction')}</th>
@@ -541,11 +626,11 @@ export default function AdminLanguagePage() {
                           style={{ backgroundColor: 'transparent' }}
                         >
                           <td className="py-3 px-4 font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                            <span className="text-xl">{lang.flag || '🌐'}</span>
+                            <span className="text-xl leading-none">{lang.flag || '🌐'}</span>
                             <span>{lang.name}</span>
                             {isDef && (
                               <span 
-                                className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border"
+                                className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ml-1.5"
                                 style={{
                                   backgroundColor: 'var(--color-card)',
                                   borderColor: 'var(--color-primary)',
@@ -560,10 +645,10 @@ export default function AdminLanguagePage() {
                             {lang.code}
                           </td>
                           <td className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>
-                            {lang.native || lang.name}
+                            {lang.native || lang.nativeName || lang.name}
                           </td>
                           <td className="py-3 px-4 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                            {lang.dir?.toUpperCase() || 'LTR'}
+                            {(lang.dir || lang.direction || 'ltr').toUpperCase()}
                           </td>
                           <td className="py-3 px-4">
                             <button
@@ -671,8 +756,8 @@ export default function AdminLanguagePage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="relative flex-1 md:w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} />
+                <div className="relative flex-1 md:w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="text"
                     autoComplete="off"
@@ -718,7 +803,7 @@ export default function AdminLanguagePage() {
                 }}
               >
                 <div className="flex items-center gap-2 font-bold">
-                  <AlertCircle className="h-4 w-4" />
+                  <AlertCircle className="h-4 w-4 shrink-0" />
                   <span>{t('unsavedNotice', 'You have unsaved dictionary modifications.')}</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -752,7 +837,7 @@ export default function AdminLanguagePage() {
               className="rounded-2xl border overflow-hidden shadow-sm transition-colors duration-200"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
             >
-              <div className="max-h-[550px] overflow-y-auto">
+              <div className="max-h-[580px] overflow-y-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="sticky top-0 z-10 shadow-sm" style={{ backgroundColor: 'var(--color-card)' }}>
                     <tr className="border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -903,37 +988,127 @@ export default function AdminLanguagePage() {
             className="w-full max-w-md p-6 rounded-3xl border shadow-2xl space-y-4 animate-in zoom-in-95"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <Globe className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              {editingLangCode ? t('modalEditLangTitle', 'Edit Supported Language') : t('modalAddLangTitle', 'Add Supported Language')}
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Globe className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                <span>{editingLangCode ? t('modalEditLangTitle', 'Edit Supported Language') : t('modalAddLangTitle', 'Add Supported Language')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setLangModalOpen(false)}
+                className="p-1 rounded-xl transition hover:opacity-80 cursor-pointer"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                  {t('langNameLabel', 'Language Name (English)')}
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  placeholder="e.g. Japanese"
-                  value={langForm.name}
-                  onChange={(e) => setLangForm({ ...langForm, name: e.target.value })}
-                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
+              {/* Flag Picker & Language Name */}
+              <div className="flex gap-2.5 items-end">
+                <div className="relative">
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langFlagLabel', 'Flag')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowFlagPicker(!showFlagPicker)}
+                    className="w-16 h-[38px] border rounded-xl flex items-center justify-center gap-1 text-xl transition cursor-pointer shadow-sm hover:border-[var(--color-primary)]"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: showFlagPicker ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    title={t('flagPickerTitle', 'Select Flag')}
+                  >
+                    <span>{langForm.flag || '🌐'}</span>
+                    <ChevronDown className="h-3 w-3 opacity-60 pointer-events-none" />
+                  </button>
+
+                  {/* Harmonized Searchable Flag Dropdown */}
+                  {showFlagPicker && (
+                    <div 
+                      className="absolute top-full left-0 mt-1.5 w-72 p-3 border rounded-2xl space-y-2 shadow-2xl z-30 transition-colors duration-200 animate-in fade-in"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="relative">
+                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+                        <input
+                          type="text"
+                          data-lpignore="true"
+                          data-form-type="other"
+                          autoComplete="off"
+                          spellCheck="false"
+                          placeholder={t('searchCountryPlaceholder', 'Search country or ISO code...')}
+                          value={flagCountrySearch}
+                          onChange={(e) => setFlagCountrySearch(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-xs outline-none transition"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        />
+                      </div>
+                      <div className="max-h-44 overflow-y-auto grid grid-cols-2 gap-1.5 pr-1">
+                        {filteredCountries.map((c) => (
+                          <button
+                            key={`${c.name}-${c.flag}-${c.code}`}
+                            type="button"
+                            onClick={() => {
+                              setLangForm({
+                                ...langForm,
+                                flag: c.flag,
+                                code: editingLangCode ? langForm.code : (langForm.code || c.code),
+                                name: langForm.name || c.name
+                              });
+                              setShowFlagPicker(false);
+                              setFlagCountrySearch('');
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-left transition text-xs cursor-pointer hover:opacity-80"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              color: 'var(--color-text)'
+                            }}
+                          >
+                            <span className="text-base leading-none">{c.flag}</span>
+                            <span className="truncate text-[11px] font-medium">{c.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1">
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langNameLabel', 'Language Name (English)')}
+                  </label>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    placeholder="e.g. Japanese"
+                    value={langForm.name}
+                    onChange={(e) => setLangForm({ ...langForm, name: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
                     {t('langCodeLabel', 'Language Code')}
                   </label>
                   <input
@@ -946,7 +1121,7 @@ export default function AdminLanguagePage() {
                     placeholder="ja"
                     maxLength={5}
                     value={langForm.code}
-                    onChange={(e) => setLangForm({ ...langForm, code: e.target.value })}
+                    onChange={(e) => setLangForm({ ...langForm, code: e.target.value.toLowerCase() })}
                     className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-mono font-bold uppercase disabled:opacity-50"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -957,8 +1132,8 @@ export default function AdminLanguagePage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                    {t('langFlagLabel', 'Flag Emoji')}
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langNativeLabel', 'Native Display Name')}
                   </label>
                   <input
                     type="text"
@@ -966,11 +1141,10 @@ export default function AdminLanguagePage() {
                     data-lpignore="true"
                     data-form-type="other"
                     spellCheck="false"
-                    placeholder="🇯🇵"
-                    maxLength={4}
-                    value={langForm.flag}
-                    onChange={(e) => setLangForm({ ...langForm, flag: e.target.value })}
-                    className="w-full border rounded-xl px-3 py-2 text-xs text-center outline-none text-base font-bold"
+                    placeholder="日本語"
+                    value={langForm.native}
+                    onChange={(e) => setLangForm({ ...langForm, native: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -980,45 +1154,59 @@ export default function AdminLanguagePage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                  {t('langNativeLabel', 'Native Display Name')}
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  placeholder="日本語"
-                  value={langForm.native}
-                  onChange={(e) => setLangForm({ ...langForm, native: e.target.value })}
-                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
-              </div>
+              {/* Harmonized Text Direction & Status Dropdowns with Custom Carets */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langDirectionLabel', 'Text Direction')}
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={langForm.dir}
+                      onChange={(e) => setLangForm({ ...langForm, dir: e.target.value as 'ltr' | 'rtl' })}
+                      className="w-full appearance-none rounded-xl border px-3.5 py-2 pr-9 text-xs font-bold outline-none cursor-pointer transition focus:ring-1 focus:ring-[var(--color-primary)] shadow-sm"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <option value="ltr" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {t('dirLtr', 'Left-to-Right (LTR)')}
+                      </option>
+                      <option value="rtl" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {t('dirRtl', 'Right-to-Left (RTL)')}
+                      </option>
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 opacity-70" style={{ color: 'var(--color-text)' }} />
+                  </div>
+                </div>
 
-              <div>
-                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                  {t('langDirectionLabel', 'Text Direction')}
-                </label>
-                <select
-                  value={langForm.dir}
-                  onChange={(e) => setLangForm({ ...langForm, dir: e.target.value as 'ltr' | 'rtl' })}
-                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <option value="ltr">{t('dirLtr', 'Left-to-Right (LTR)')}</option>
-                  <option value="rtl">{t('dirRtl', 'Right-to-Left (RTL)')}</option>
-                </select>
+                <div>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('statusLabel', 'Status')}
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={langForm.status}
+                      onChange={(e) => setLangForm({ ...langForm, status: e.target.value as 'active' | 'inactive' })}
+                      className="w-full appearance-none rounded-xl border px-3.5 py-2 pr-9 text-xs font-bold outline-none cursor-pointer transition focus:ring-1 focus:ring-[var(--color-primary)] shadow-sm"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <option value="active" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {t('statusActive', 'Active')}
+                      </option>
+                      <option value="inactive" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {t('statusInactive', 'Inactive')}
+                      </option>
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 opacity-70" style={{ color: 'var(--color-text)' }} />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1061,10 +1249,20 @@ export default function AdminLanguagePage() {
             className="w-full max-w-md p-6 rounded-3xl border shadow-2xl space-y-4 animate-in zoom-in-95"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <Languages className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              {t('modalAddWordTitle', 'Add System Phrase')}
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Languages className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                <span>{t('modalAddWordTitle', 'Add System Phrase')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setWordModalOpen(false)}
+                className="p-1 rounded-xl transition hover:opacity-80 cursor-pointer"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
             <div className="space-y-3">
               <div>

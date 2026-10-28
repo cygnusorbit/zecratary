@@ -48,6 +48,11 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "searchCountryPlaceholder": "Search country or ISO code...",
+    "flagPickerTitle": "Select Flag",
+    "fluidLayoutBadge": "Full-Width Canvas",
+    "codeAndNameRequired": "Language code and name are required.",
+    "languageAlreadyExists": "already exists.",
     "languageSetting": "Language Setting",
     "navWallet": "Wallet",
     "walletSettings": "Wallet Settings",
