@@ -1,9 +1,15 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { BellRing, Bell, Send, CheckCircle2, AlertCircle, Save, RefreshCw, Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, Clock, Volume2, ShieldAlert, Sparkles, Filter, Search, X, VolumeX, Mail, Smartphone, ExternalLink, Moon, ArrowRight, UserCheck, Users, Megaphone, Info, Eye } from 'lucide-react';
+import { 
+  BellRing, Bell, Send, CheckCircle2, AlertCircle, Save, RefreshCw, 
+  RotateCcw, Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, 
+  Clock, Volume2, ShieldAlert, Sparkles, Filter, Search, X, 
+  VolumeX, Mail, Smartphone, ExternalLink, Moon, ArrowRight,
+  UserCheck, Users, Megaphone, Info, Eye
+} from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
 export interface NotificationSettingsState {
@@ -106,6 +112,7 @@ export default function AdminNotificationSettingsPage() {
   const [broadcastMessage, setBroadcastMessage] = useState<string>('');
   const [broadcastCategory, setBroadcastCategory] = useState<'info' | 'warning' | 'urgent' | 'promo' | 'success'>('info');
   const [broadcastAudience, setBroadcastAudience] = useState<'all' | 'subscribers' | 'free' | 'admins'>('all');
+  const [broadcastChannels, setBroadcastChannels] = useState<string[]>(['in_app']);
   const [broadcastActionLabel, setBroadcastActionLabel] = useState<string>('');
   const [broadcastActionUrl, setBroadcastActionUrl] = useState<string>('');
   const [savingBroadcast, setSavingBroadcast] = useState<boolean>(false);
@@ -212,7 +219,6 @@ export default function AdminNotificationSettingsPage() {
       });
 
       if (res.ok) {
-        // Dispatch live event to update topbar bell in real time
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('zecratary_new_notification', {
             detail: {
@@ -285,6 +291,7 @@ export default function AdminNotificationSettingsPage() {
       message: broadcastMessage.trim(),
       category: broadcastCategory,
       targetAudience: broadcastAudience,
+      channels: broadcastChannels,
       actionLabel: broadcastActionLabel.trim(),
       actionUrl: broadcastActionUrl.trim()
     };
@@ -334,11 +341,12 @@ export default function AdminNotificationSettingsPage() {
 
   const handleOpenCreateModal = () => {
     setEditingBroadcastId(null);
-    setBroadcastTitle('Special Culinary Announcement');
-    setBroadcastMessage('Explore new high-protein recipes curated by our AI Chef formulator!');
+    setBroadcastTitle(tr('notifPreviewDefaultTitle', 'Special Culinary Announcement'));
+    setBroadcastMessage(tr('notifPreviewDefaultMessage', 'Explore new high-protein recipes curated by our AI Chef formulator!'));
     setBroadcastCategory('info');
     setBroadcastAudience('all');
-    setBroadcastActionLabel('Explore Chef');
+    setBroadcastChannels(['in_app']);
+    setBroadcastActionLabel(tr('notifPreviewDefaultAction', 'Explore Chef'));
     setBroadcastActionUrl('/chef');
     setShowModal(true);
   };
@@ -349,15 +357,26 @@ export default function AdminNotificationSettingsPage() {
     setBroadcastMessage(b.message);
     setBroadcastCategory(b.category);
     setBroadcastAudience(b.targetAudience);
+    setBroadcastChannels(Array.isArray(b.channels) && b.channels.length > 0 ? b.channels : ['in_app']);
     setBroadcastActionLabel(b.actionLabel || '');
     setBroadcastActionUrl(b.actionUrl || '');
     setShowModal(true);
   };
 
   const handleResetDefaults = () => {
-    if (!confirm('Reset notification rules and thresholds to defaults?')) return;
+    if (!confirm(tr('notifConfirmReset', 'Reset notification rules and thresholds to defaults?'))) return;
     setSettings(DEFAULT_SETTINGS);
-    showToast('success', 'Notification rules reset to initial defaults.');
+    showToast('success', tr('notifResetSuccess', 'Notification rules reset to initial defaults.'));
+  };
+
+  const toggleChannelSelection = (ch: string) => {
+    setBroadcastChannels(prev => {
+      if (prev.includes(ch)) {
+        if (prev.length === 1) return prev; // keep at least 1 channel
+        return prev.filter(c => c !== ch);
+      }
+      return [...prev, ch];
+    });
   };
 
   const filteredBroadcasts = useMemo(() => {
@@ -376,21 +395,22 @@ export default function AdminNotificationSettingsPage() {
   const getCategoryBadge = (cat: string) => {
     switch (cat) {
       case 'urgent':
-        return { label: 'URGENT', bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', color: '#ef4444' };
+        return { label: tr('notifFilterUrgent', 'URGENT'), bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', color: '#ef4444' };
       case 'warning':
-        return { label: 'WARNING', bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', color: '#f59e0b' };
+        return { label: tr('notifFilterWarning', 'WARNING'), bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', color: '#f59e0b' };
       case 'promo':
-        return { label: 'PROMO', bg: 'rgba(168, 85, 247, 0.1)', border: '#a855f7', color: '#c084fc' };
+        return { label: tr('notifFilterPromo', 'PROMO'), bg: 'rgba(168, 85, 247, 0.1)', border: '#a855f7', color: '#c084fc' };
       case 'success':
-        return { label: 'SUCCESS', bg: 'rgba(16, 185, 129, 0.1)', border: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' };
+        return { label: tr('notifFilterSuccess', 'SUCCESS'), bg: 'rgba(16, 185, 129, 0.1)', border: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' };
       default:
-        return { label: 'INFO', bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', color: '#60a5fa' };
+        return { label: tr('notifFilterInfo', 'INFO'), bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', color: '#60a5fa' };
     }
   };
 
   return (
+    // TASK 1: Full-Width (100%) Fluid Canvas with Responsive Padding
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="w-full max-w-full space-y-6 pb-24 px-4 sm:px-6 lg:px-8 xl:px-10 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
       {/* 1. Top Header & Action Cluster */}
@@ -434,6 +454,20 @@ export default function AdminNotificationSettingsPage() {
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>{tr('notifBtnReload', 'Reload')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetDefaults}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>{tr('notifBtnResetDefaults', 'Reset Defaults')}</span>
           </button>
 
           <button
@@ -588,17 +622,19 @@ export default function AdminNotificationSettingsPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
               <div className="p-4 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div>
                   <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifMealDailyReminder', 'Daily Meal Plan Reminder')}</span>
-                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>Trigger daily recipe lineup notice</span>
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifMealDailyDesc', 'Trigger daily recipe lineup notice')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
                     type="time"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-form-type="other"
+                    data-1p-ignore="true"
                     value={settings.plannerMealReminderTime}
                     onChange={(e) => setSettings({ ...settings, plannerMealReminderTime: e.target.value })}
                     className="px-2 py-1 rounded-lg border font-mono font-bold text-xs"
@@ -608,7 +644,7 @@ export default function AdminNotificationSettingsPage() {
                     type="checkbox"
                     checked={settings.plannerMealReminder}
                     onChange={(e) => setSettings({ ...settings, plannerMealReminder: e.target.checked })}
-                    className="rounded h-4 w-4"
+                    className="rounded h-4 w-4 cursor-pointer"
                   />
                 </div>
               </div>
@@ -616,13 +652,27 @@ export default function AdminNotificationSettingsPage() {
               <div className="p-4 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div>
                   <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifPrepTimeAlert', 'Pre-Prep Cooking Advance Alert')}</span>
-                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>30 minutes prior to scheduled prep slot</span>
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifPrepTimeDesc', '30 minutes prior to scheduled prep slot')}</span>
                 </div>
                 <input
                   type="checkbox"
                   checked={settings.prepTimeAlert}
                   onChange={(e) => setSettings({ ...settings, prepTimeAlert: e.target.checked })}
-                  className="rounded h-4 w-4"
+                  className="rounded h-4 w-4 cursor-pointer"
+                />
+              </div>
+
+              {/* RESTORED CONTROL: Weekly Intake Nudge */}
+              <div className="p-4 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifWeeklyNudge', 'Weekly Meal Plan Intake Wizard Nudge')}</span>
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifWeeklyNudgeDesc', 'Prompt users every Sunday to plan their weekly menu')}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.weeklyIntakeNudge}
+                  onChange={(e) => setSettings({ ...settings, weeklyIntakeNudge: e.target.checked })}
+                  className="rounded h-4 w-4 cursor-pointer"
                 />
               </div>
             </div>
@@ -647,13 +697,19 @@ export default function AdminNotificationSettingsPage() {
 
               <div className="space-y-3 text-xs">
                 <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifTokenLowAlert', 'Low Token Balance Warning')}</span>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifTokenLowAlert', 'Low Token Balance Warning')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifTokenLowThreshold', 'Warning Threshold (Remaining Tokens)')}</span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
                       min="1"
                       autoComplete="off"
                       data-lpignore="true"
+                      data-form-type="other"
+                      data-1p-ignore="true"
+                      spellCheck={false}
                       value={settings.tokenLowThreshold}
                       onChange={(e) => setSettings({ ...settings, tokenLowThreshold: parseInt(e.target.value, 10) || 50 })}
                       className="w-16 px-2 py-1 rounded-lg border font-mono font-bold text-center"
@@ -663,18 +719,35 @@ export default function AdminNotificationSettingsPage() {
                       type="checkbox"
                       checked={settings.tokenLowAlert}
                       onChange={(e) => setSettings({ ...settings, tokenLowAlert: e.target.checked })}
-                      className="rounded h-4 w-4"
+                      className="rounded h-4 w-4 cursor-pointer"
                     />
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifTokenExhaustion', 'Zero-Token Exhaustion Notice')}</span>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifTokenExhaustion', 'Zero-Token Exhaustion Notice')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifTokenExhaustionDesc', 'Immediate alert when balance hits zero')}</span>
+                  </div>
                   <input
                     type="checkbox"
                     checked={settings.tokenExhaustionAlert}
                     onChange={(e) => setSettings({ ...settings, tokenExhaustionAlert: e.target.checked })}
-                    className="rounded h-4 w-4"
+                    className="rounded h-4 w-4 cursor-pointer"
+                  />
+                </div>
+
+                {/* RESTORED CONTROL: Monthly Allowance Notice */}
+                <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifTokenAllowance', 'Monthly Plan Allowance Credit Confirmation')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifTokenAllowanceDesc', 'Notify when monthly token balance refreshes')}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.monthlyAllowanceNotice}
+                    onChange={(e) => setSettings({ ...settings, monthlyAllowanceNotice: e.target.checked })}
+                    className="rounded h-4 w-4 cursor-pointer"
                   />
                 </div>
               </div>
@@ -697,7 +770,10 @@ export default function AdminNotificationSettingsPage() {
 
               <div className="space-y-3 text-xs">
                 <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifWalletLowAlert', 'Low Wallet Balance Warning')}</span>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifWalletLowAlert', 'Low Wallet Balance Warning')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifWalletLowThreshold', 'Warning Threshold ($)')}</span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -705,6 +781,9 @@ export default function AdminNotificationSettingsPage() {
                       min="0.5"
                       autoComplete="off"
                       data-lpignore="true"
+                      data-form-type="other"
+                      data-1p-ignore="true"
+                      spellCheck={false}
                       value={settings.walletLowThreshold}
                       onChange={(e) => setSettings({ ...settings, walletLowThreshold: parseFloat(e.target.value) || 5.00 })}
                       className="w-16 px-2 py-1 rounded-lg border font-mono font-bold text-center"
@@ -714,18 +793,35 @@ export default function AdminNotificationSettingsPage() {
                       type="checkbox"
                       checked={settings.walletLowAlert}
                       onChange={(e) => setSettings({ ...settings, walletLowAlert: e.target.checked })}
-                      className="rounded h-4 w-4"
+                      className="rounded h-4 w-4 cursor-pointer"
                     />
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifWalletDepositReceipt', 'Top-Up Deposit Settlement Receipt')}</span>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifWalletDepositReceipt', 'Top-Up Deposit Settlement Receipt')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifWalletDepositDesc', 'Instant receipt for wallet additions')}</span>
+                  </div>
                   <input
                     type="checkbox"
                     checked={settings.topupReceiptAlert}
                     onChange={(e) => setSettings({ ...settings, topupReceiptAlert: e.target.checked })}
-                    className="rounded h-4 w-4"
+                    className="rounded h-4 w-4 cursor-pointer"
+                  />
+                </div>
+
+                {/* RESTORED CONTROL: Payment Decline Warning */}
+                <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifWalletPaymentDecline', 'Payment Method Decline & Retry Warning')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifWalletPaymentDeclineDesc', 'Alert on recurring subscription charge failures')}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.paymentDeclineAlert}
+                    onChange={(e) => setSettings({ ...settings, paymentDeclineAlert: e.target.checked })}
+                    className="rounded h-4 w-4 cursor-pointer"
                   />
                 </div>
               </div>
@@ -742,13 +838,16 @@ export default function AdminNotificationSettingsPage() {
                 <Megaphone className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                 {tr('notifSubHeading', 'Subscription & Expiry Lifecycle Notices')}
               </h2>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('notifSubDesc', 'Advance warnings and confirmation notices for billing renewals.')}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
               <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div>
                   <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSubExpiryAlert', 'Upcoming Renewal Notice')}</span>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Advance warning days</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSubExpiryDesc', 'Advance warning days')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -757,6 +856,9 @@ export default function AdminNotificationSettingsPage() {
                     max="14"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-form-type="other"
+                    data-1p-ignore="true"
+                    spellCheck={false}
                     value={settings.subscriptionExpiryDays}
                     onChange={(e) => setSettings({ ...settings, subscriptionExpiryDays: parseInt(e.target.value, 10) || 3 })}
                     className="w-12 px-2 py-1 rounded-lg border font-mono font-bold text-center"
@@ -766,28 +868,62 @@ export default function AdminNotificationSettingsPage() {
                     type="checkbox"
                     checked={settings.subscriptionExpiryAlert}
                     onChange={(e) => setSettings({ ...settings, subscriptionExpiryAlert: e.target.checked })}
-                    className="rounded h-4 w-4"
+                    className="rounded h-4 w-4 cursor-pointer"
                   />
                 </div>
               </div>
 
+              {/* RESTORED CONTROL: Subscription Cancel Receipt */}
               <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifSystemUpdates', 'Feature Releases & Platform Updates')}</span>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSubCancelReceipt', 'Subscription Cancellation & Grace Period Notice')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSubCancelDesc', 'Confirm cancellation and communicate expiry terms')}</span>
+                </div>
                 <input
                   type="checkbox"
-                  checked={settings.systemUpdatesAlert}
-                  onChange={(e) => setSettings({ ...settings, systemUpdatesAlert: e.target.checked })}
-                  className="rounded h-4 w-4"
+                  checked={settings.subscriptionCancelReceipt}
+                  onChange={(e) => setSettings({ ...settings, subscriptionCancelReceipt: e.target.checked })}
+                  className="rounded h-4 w-4 cursor-pointer"
                 />
               </div>
 
               <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifSystemMaintenance', 'Scheduled Server Maintenance')}</span>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSystemUpdates', 'Feature Releases & Platform Updates')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSystemUpdatesDesc', 'Notify users of new recipes and chef upgrades')}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.systemUpdatesAlert}
+                  onChange={(e) => setSettings({ ...settings, systemUpdatesAlert: e.target.checked })}
+                  className="rounded h-4 w-4 cursor-pointer"
+                />
+              </div>
+
+              <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSystemMaintenance', 'Scheduled Server Maintenance')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSystemMaintenanceDesc', 'Advance warning for system downtime windows')}</span>
+                </div>
                 <input
                   type="checkbox"
                   checked={settings.maintenanceDowntimeAlert}
                   onChange={(e) => setSettings({ ...settings, maintenanceDowntimeAlert: e.target.checked })}
-                  className="rounded h-4 w-4"
+                  className="rounded h-4 w-4 cursor-pointer"
+                />
+              </div>
+
+              {/* RESTORED CONTROL: Unusual Login Alerts */}
+              <div className="p-3.5 rounded-2xl border flex items-center justify-between sm:col-span-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSystemSecurity', 'Unusual Account Login & Password Alerts')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSystemSecurityDesc', 'Security notices on new device or location logins')}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.securityLoginAlert}
+                  onChange={(e) => setSettings({ ...settings, securityLoginAlert: e.target.checked })}
+                  className="rounded h-4 w-4 cursor-pointer"
                 />
               </div>
             </div>
@@ -844,6 +980,8 @@ export default function AdminNotificationSettingsPage() {
                   type="time"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
                   value={settings.dndStartTime}
                   onChange={(e) => setSettings({ ...settings, dndStartTime: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border font-bold"
@@ -859,6 +997,8 @@ export default function AdminNotificationSettingsPage() {
                   type="time"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
                   value={settings.dndEndTime}
                   onChange={(e) => setSettings({ ...settings, dndEndTime: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border font-bold"
@@ -888,7 +1028,7 @@ export default function AdminNotificationSettingsPage() {
                 type="checkbox"
                 checked={settings.soundChimesEnabled}
                 onChange={(e) => setSettings({ ...settings, soundChimesEnabled: e.target.checked })}
-                className="rounded h-4 w-4"
+                className="rounded h-4 w-4 cursor-pointer"
               />
             </div>
           </div>
@@ -899,7 +1039,7 @@ export default function AdminNotificationSettingsPage() {
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
             <div className="border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
                 <Sliders className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                 {tr('notifRetentionHeading', 'Notification Storage & Rate Limiting')}
               </h2>
@@ -919,6 +1059,9 @@ export default function AdminNotificationSettingsPage() {
                   max="365"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
+                  spellCheck={false}
                   value={settings.retentionDays}
                   onChange={(e) => setSettings({ ...settings, retentionDays: parseInt(e.target.value, 10) || 30 })}
                   className="w-full px-3.5 py-2.5 rounded-xl border font-bold"
@@ -936,6 +1079,9 @@ export default function AdminNotificationSettingsPage() {
                   max="50"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
+                  spellCheck={false}
                   value={settings.dailyRateLimit}
                   onChange={(e) => setSettings({ ...settings, dailyRateLimit: parseInt(e.target.value, 10) || 10 })}
                   className="w-full px-3.5 py-2.5 rounded-xl border font-bold"
@@ -986,6 +1132,9 @@ export default function AdminNotificationSettingsPage() {
                 type="text"
                 autoComplete="off"
                 data-lpignore="true"
+                data-form-type="other"
+                data-1p-ignore="true"
+                spellCheck={false}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('notifSearchPlaceholder', 'Search broadcasts by title, message, or category...')}
@@ -1001,11 +1150,11 @@ export default function AdminNotificationSettingsPage() {
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               <option value="all">{tr('notifFilterAll', 'All Categories')}</option>
-              <option value="info">Info</option>
-              <option value="warning">Warning</option>
-              <option value="urgent">Urgent</option>
-              <option value="promo">Promo</option>
-              <option value="success">Success</option>
+              <option value="info">{tr('notifFilterInfo', 'Info')}</option>
+              <option value="warning">{tr('notifFilterWarning', 'Warning')}</option>
+              <option value="urgent">{tr('notifFilterUrgent', 'Urgent')}</option>
+              <option value="promo">{tr('notifFilterPromo', 'Promo')}</option>
+              <option value="success">{tr('notifFilterSuccess', 'Success')}</option>
             </select>
           </div>
 
@@ -1024,6 +1173,7 @@ export default function AdminNotificationSettingsPage() {
                     <th className="px-5 py-4">{tr('notifColTitle', 'Announcement Title & Message')}</th>
                     <th className="px-5 py-4">{tr('notifColCategory', 'Category')}</th>
                     <th className="px-5 py-4">{tr('notifColAudience', 'Target Audience')}</th>
+                    <th className="px-5 py-4">{tr('notifColChannels', 'Channels')}</th>
                     <th className="px-5 py-4 text-center">{tr('notifColSendCount', 'Dispatched')}</th>
                     <th className="px-5 py-4">{tr('notifColSentAt', 'Last Sent')}</th>
                     <th className="px-5 py-4 text-right">{tr('notifColActions', 'Actions')}</th>
@@ -1032,21 +1182,23 @@ export default function AdminNotificationSettingsPage() {
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                   {filteredBroadcasts.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={7} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
                         {tr('notifNoBroadcasts', 'No custom notifications found matching your search.')}
                       </td>
                     </tr>
                   ) : (
                     filteredBroadcasts.map((b) => {
                       const badge = getCategoryBadge(b.category);
+                      const channels = Array.isArray(b.channels) && b.channels.length > 0 ? b.channels : ['in_app'];
+
                       return (
                         <tr key={b.id} className="transition" style={{ borderColor: 'var(--color-border)' }}>
                           <td className="px-5 py-4">
                             <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{b.title}</div>
                             <div className="text-[11px] line-clamp-2 mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{b.message}</div>
                             {b.actionUrl && (
-                              <div className="text-[10px] text-[var(--color-primary)] font-bold mt-1 flex items-center gap-1">
-                                <span>{b.actionLabel || 'Action'}</span>
+                              <div className="text-[10px] font-bold mt-1 flex items-center gap-1" style={{ color: 'var(--color-primary)' }}>
+                                <span>{b.actionLabel || tr('notifPreviewDefaultAction', 'Action')}</span>
                                 <ExternalLink className="h-2.5 w-2.5" />
                               </div>
                             )}
@@ -1062,7 +1214,31 @@ export default function AdminNotificationSettingsPage() {
                           </td>
 
                           <td className="px-5 py-4 font-mono font-bold uppercase text-[10px]" style={{ color: 'var(--color-text)' }}>
-                            {b.targetAudience}
+                            {b.targetAudience === 'all' && tr('notifAudienceAll', 'All Users')}
+                            {b.targetAudience === 'subscribers' && tr('notifAudienceSubscribers', 'Subscribers')}
+                            {b.targetAudience === 'free' && tr('notifAudienceFree', 'Free Tier')}
+                            {b.targetAudience === 'admins' && tr('notifAudienceAdmins', 'Admins')}
+                            {!['all', 'subscribers', 'free', 'admins'].includes(b.targetAudience) && b.targetAudience}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {channels.includes('in_app') && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                                  App
+                                </span>
+                              )}
+                              {channels.includes('email') && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                                  Email
+                                </span>
+                              )}
+                              {channels.includes('push') && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                                  Push
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           <td className="px-5 py-4 text-center font-mono font-bold">
@@ -1084,7 +1260,7 @@ export default function AdminNotificationSettingsPage() {
                                 title="Dispatch this announcement now"
                               >
                                 <Send className="h-3 w-3" />
-                                <span>{sendingBroadcastId === b.id ? 'Sending...' : tr('notifBtnSendNow', 'Send Alert Now')}</span>
+                                <span>{sendingBroadcastId === b.id ? tr('notifBtnSending', 'Sending...') : tr('notifBtnSendNow', 'Send Alert Now')}</span>
                               </button>
 
                               <button
@@ -1160,6 +1336,8 @@ export default function AdminNotificationSettingsPage() {
                     autoComplete="off"
                     data-lpignore="true"
                     data-form-type="other"
+                    data-1p-ignore="true"
+                    spellCheck={false}
                     value={broadcastTitle}
                     onChange={(e) => setBroadcastTitle(e.target.value)}
                     placeholder="e.g. Special Holiday Tasting Blueprint"
@@ -1179,11 +1357,11 @@ export default function AdminNotificationSettingsPage() {
                       className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
                       style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     >
-                      <option value="info">Info</option>
-                      <option value="warning">Warning</option>
-                      <option value="urgent">Urgent</option>
-                      <option value="promo">Promo</option>
-                      <option value="success">Success</option>
+                      <option value="info">{tr('notifFilterInfo', 'Info')}</option>
+                      <option value="warning">{tr('notifFilterWarning', 'Warning')}</option>
+                      <option value="urgent">{tr('notifFilterUrgent', 'Urgent')}</option>
+                      <option value="promo">{tr('notifFilterPromo', 'Promo')}</option>
+                      <option value="success">{tr('notifFilterSuccess', 'Success')}</option>
                     </select>
                   </div>
 
@@ -1197,12 +1375,48 @@ export default function AdminNotificationSettingsPage() {
                       className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
                       style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     >
-                      <option value="all">All Users</option>
-                      <option value="subscribers">Subscribers Only</option>
-                      <option value="free">Free Tier Only</option>
-                      <option value="admins">Admins Only</option>
+                      <option value="all">{tr('notifAudienceAll', 'All Users')}</option>
+                      <option value="subscribers">{tr('notifAudienceSubscribers', 'Subscribers Only')}</option>
+                      <option value="free">{tr('notifAudienceFree', 'Free Tier Only')}</option>
+                      <option value="admins">{tr('notifAudienceAdmins', 'Admins Only')}</option>
                     </select>
                   </div>
+                </div>
+              </div>
+
+              {/* ACTIVE DELIVERY CHANNELS MULTI-SELECT CHIPS */}
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                  {tr('notifLabelChannels', 'Active Delivery Channels *')}
+                </label>
+                <div className="flex items-center gap-2">
+                  {[
+                    { id: 'in_app', label: tr('notifChannelInApp', 'In-App Bell'), icon: Bell },
+                    { id: 'email', label: tr('notifChannelEmail', 'Transactional Email'), icon: Mail },
+                    { id: 'push', label: tr('notifChannelPush', 'Web Push'), icon: Smartphone }
+                  ].map(ch => {
+                    const active = broadcastChannels.includes(ch.id);
+                    return (
+                      <button
+                        key={ch.id}
+                        type="button"
+                        onClick={() => toggleChannelSelection(ch.id)}
+                        className="px-3 py-1.5 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                        style={active ? {
+                          backgroundColor: 'var(--color-primary)',
+                          borderColor: 'var(--color-primary)',
+                          color: '#ffffff'
+                        } : {
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                      >
+                        <ch.icon className="h-3.5 w-3.5" />
+                        <span>{ch.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1213,6 +1427,9 @@ export default function AdminNotificationSettingsPage() {
                 <textarea
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
+                  spellCheck={false}
                   rows={3}
                   value={broadcastMessage}
                   onChange={(e) => setBroadcastMessage(e.target.value)}
@@ -1231,6 +1448,9 @@ export default function AdminNotificationSettingsPage() {
                     type="text"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-form-type="other"
+                    data-1p-ignore="true"
+                    spellCheck={false}
                     value={broadcastActionLabel}
                     onChange={(e) => setBroadcastActionLabel(e.target.value)}
                     placeholder="e.g. View Recipe / Open Planner"
@@ -1247,6 +1467,9 @@ export default function AdminNotificationSettingsPage() {
                     type="text"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-form-type="other"
+                    data-1p-ignore="true"
+                    spellCheck={false}
                     value={broadcastActionUrl}
                     onChange={(e) => setBroadcastActionUrl(e.target.value)}
                     placeholder="e.g. /chef or /planner"
@@ -1259,7 +1482,7 @@ export default function AdminNotificationSettingsPage() {
               {/* LIVE USER NOTIFICATION PREVIEW FLYOUT BOX */}
               <div className="space-y-1.5 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <span className="font-bold text-[11px] flex items-center gap-1.5 opacity-80">
-                  <Eye className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                  <Eye className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                   {tr('notifPreviewHeading', 'Live Top-Bar Flyout Preview')}
                 </span>
 
@@ -1272,24 +1495,24 @@ export default function AdminNotificationSettingsPage() {
                       className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border"
                       style={getCategoryBadge(broadcastCategory)}
                     >
-                      {broadcastCategory}
+                      {getCategoryBadge(broadcastCategory).label}
                     </span>
-                    <span className="text-[10px] opacity-60 font-mono">Just now</span>
+                    <span className="text-[10px] opacity-60 font-mono">{tr('notifPreviewJustNow', 'Just now')}</span>
                   </div>
 
                   <div>
                     <h4 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                      {broadcastTitle || 'Notification Headline'}
+                      {broadcastTitle || tr('notifPreviewDefaultTitle', 'Notification Headline')}
                     </h4>
                     <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                      {broadcastMessage || 'Your announcement body copy will render here as users inspect their top navigation bell...'}
+                      {broadcastMessage || tr('notifPreviewDefaultMessage', 'Your announcement body copy will render here as users inspect their top navigation bell...')}
                     </p>
                   </div>
 
                   {broadcastActionUrl && (
                     <div className="pt-1">
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold underline" style={{ color: 'var(--color-primary)' }}>
-                        <span>{broadcastActionLabel || 'View Details'}</span>
+                        <span>{broadcastActionLabel || tr('notifPreviewDefaultAction', 'View Details')}</span>
                         <ExternalLink className="h-2.5 w-2.5" />
                       </span>
                     </div>
