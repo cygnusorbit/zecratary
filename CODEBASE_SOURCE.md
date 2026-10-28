@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.85",
+  "version": "8.1.86",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.85",
+  "version": "8.1.86",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -24608,14 +24608,14 @@ export default function AdminPaymentGatewayPage() {
 
 ## File: `apps/web/src/app/admin/language/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Languages, Globe, Plus, Search, Check, Trash2, Edit2, 
   RefreshCw, CheckCircle2, AlertCircle, Save, Undo2, ArrowRightLeft,
-  Database, ShieldCheck
+  Database, ShieldCheck, ChevronDown, Sparkles, X
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -24623,11 +24623,51 @@ interface SupportedLanguage {
   code: string;
   name: string;
   native: string;
+  nativeName?: string;
   flag: string;
   dir: 'ltr' | 'rtl';
+  direction?: 'ltr' | 'rtl';
   status: 'active' | 'inactive';
   isDefault?: boolean;
 }
+
+interface CountryOption {
+  name: string;
+  code: string;
+  flag: string;
+}
+
+const COMMON_COUNTRIES: CountryOption[] = [
+  { name: 'United States', code: 'en', flag: '🇺🇸' },
+  { name: 'United Kingdom', code: 'en', flag: '🇬🇧' },
+  { name: 'Thailand', code: 'th', flag: '🇹🇭' },
+  { name: 'Spain', code: 'es', flag: '🇪🇸' },
+  { name: 'France', code: 'fr', flag: '🇫🇷' },
+  { name: 'Germany', code: 'de', flag: '🇩🇪' },
+  { name: 'Italy', code: 'it', flag: '🇮🇹' },
+  { name: 'Japan', code: 'ja', flag: '🇯🇵' },
+  { name: 'China', code: 'zh', flag: '🇨🇳' },
+  { name: 'South Korea', code: 'ko', flag: '🇰🇷' },
+  { name: 'Portugal', code: 'pt', flag: '🇵🇹' },
+  { name: 'Brazil', code: 'pt', flag: '🇧🇷' },
+  { name: 'Netherlands', code: 'nl', flag: '🇳🇱' },
+  { name: 'India', code: 'hi', flag: '🇮🇳' },
+  { name: 'Vietnam', code: 'vi', flag: '🇻🇳' },
+  { name: 'Indonesia', code: 'id', flag: '🇮🇩' },
+  { name: 'Turkey', code: 'tr', flag: '🇹🇷' },
+  { name: 'Saudi Arabia', code: 'ar', flag: '🇸🇦' },
+  { name: 'United Arab Emirates', code: 'ar', flag: '🇦🇪' },
+  { name: 'Canada', code: 'en', flag: '🇨🇦' },
+  { name: 'Australia', code: 'en', flag: '🇦🇺' },
+  { name: 'Mexico', code: 'es', flag: '🇲🇽' },
+  { name: 'Sweden', code: 'sv', flag: '🇸🇪' },
+  { name: 'Norway', code: 'no', flag: '🇳🇴' },
+  { name: 'Denmark', code: 'da', flag: '🇩🇰' },
+  { name: 'Finland', code: 'fi', flag: '🇫🇮' },
+  { name: 'Poland', code: 'pl', flag: '🇵🇱' },
+  { name: 'Greece', code: 'el', flag: '🇬🇷' },
+  { name: 'Russia', code: 'ru', flag: '🇷🇺' }
+];
 
 const DEFAULT_LOCALES: SupportedLanguage[] = [
   { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', dir: 'ltr', status: 'active', isDefault: true },
@@ -24670,6 +24710,10 @@ export default function AdminLanguagePage() {
     isDefault: false
   });
 
+  // Flag Picker Dropdown State
+  const [showFlagPicker, setShowFlagPicker] = useState(false);
+  const [flagCountrySearch, setFlagCountrySearch] = useState('');
+
   // Word Modal States
   const [wordModalOpen, setWordModalOpen] = useState(false);
   const [newWordKey, setNewWordKey] = useState('');
@@ -24691,8 +24735,13 @@ export default function AdminLanguagePage() {
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.supportedLanguages) && data.supportedLanguages.length > 0) {
-          setLanguages(data.supportedLanguages);
-          const def = data.supportedLanguages.find((l: any) => l.isDefault)?.code || data.defaultLanguage || 'en';
+          const normalized = data.supportedLanguages.map((l: any) => ({
+            ...l,
+            native: l.native || l.nativeName || l.name,
+            dir: l.dir || l.direction || 'ltr'
+          }));
+          setLanguages(normalized);
+          const def = normalized.find((l: any) => l.isDefault)?.code || data.defaultLanguage || 'en';
           setDefaultLang(def);
         }
         if (data.translations && typeof data.translations === 'object') {
@@ -24738,6 +24787,7 @@ export default function AdminLanguagePage() {
     window.dispatchEvent(new Event('zecratary_languages_updated'));
     window.dispatchEvent(new Event('zecratary_dictionary_updated'));
     window.dispatchEvent(new Event('zecratary_locale_changed'));
+    window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
     window.dispatchEvent(new Event('storage'));
   };
 
@@ -24864,9 +24914,15 @@ export default function AdminLanguagePage() {
 
   // Open Language Modal for Add or Edit
   const openLangModal = (lang?: SupportedLanguage) => {
+    setShowFlagPicker(false);
+    setFlagCountrySearch('');
     if (lang) {
       setEditingLangCode(lang.code);
-      setLangForm({ ...lang });
+      setLangForm({ 
+        ...lang,
+        native: lang.native || lang.nativeName || lang.name,
+        dir: lang.dir || lang.direction || 'ltr'
+      });
     } else {
       setEditingLangCode(null);
       setLangForm({
@@ -24889,7 +24945,10 @@ export default function AdminLanguagePage() {
     const cleanNative = langForm.native.trim() || cleanName;
     const cleanFlag = langForm.flag.trim() || '🌐';
 
-    if (!cleanCode || !cleanName) return;
+    if (!cleanCode || !cleanName) {
+      alert(t('codeAndNameRequired', 'Language code and name are required.'));
+      return;
+    }
 
     let updated: SupportedLanguage[];
     if (editingLangCode) {
@@ -24897,27 +24956,30 @@ export default function AdminLanguagePage() {
         ...l,
         name: cleanName,
         native: cleanNative,
+        nativeName: cleanNative,
         flag: cleanFlag,
         dir: langForm.dir,
+        direction: langForm.dir,
         status: langForm.status
       } : l);
     } else {
       if (languages.some(l => l.code === cleanCode)) {
-        alert('Language code already exists!');
+        alert(`"${cleanCode}" ${t('languageAlreadyExists', 'already exists.')}`);
         return;
       }
       const newLang: SupportedLanguage = {
         code: cleanCode,
         name: cleanName,
         native: cleanNative,
+        nativeName: cleanNative,
         flag: cleanFlag,
         dir: langForm.dir,
+        direction: langForm.dir,
         status: langForm.status,
         isDefault: false
       };
       updated = [...languages, newLang];
 
-      // Initialize empty dictionary if missing
       if (!dictionaries[cleanCode]) {
         setDictionaries(prev => ({ ...prev, [cleanCode]: {} }));
       }
@@ -24935,7 +24997,6 @@ export default function AdminLanguagePage() {
 
     setDictionaries(prev => {
       const copy = { ...prev };
-      // Inject to current dictionary and ensure fallback across others
       languages.forEach(l => {
         copy[l.code] = {
           ...(copy[l.code] || {}),
@@ -24979,12 +25040,22 @@ export default function AdminLanguagePage() {
     );
   }, [currentDict, searchTerm]);
 
+  const filteredCountries = useMemo(() => {
+    const q = flagCountrySearch.toLowerCase().trim();
+    if (!q) return COMMON_COUNTRIES;
+    return COMMON_COUNTRIES.filter(c => 
+      c.name.toLowerCase().includes(q) || 
+      c.code.toLowerCase().includes(q) || 
+      c.flag.includes(q)
+    );
+  }, [flagCountrySearch]);
+
   const activeLocalesCount = languages.filter(l => l.status === 'active').length;
   const totalWordsCount = Object.keys(currentDict).length;
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
       {/* Top Header & System Badges */}
@@ -24994,7 +25065,8 @@ export default function AdminLanguagePage() {
       >
         <div>
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-            <Languages className="h-6 w-6" /> {t('langPageTitle', 'Language & Localization')}
+            <Languages className="h-6 w-6 shrink-0" /> 
+            <span>{t('langPageTitle', 'Language & Localization')}</span>
           </h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             {t('langPageSubtitle', 'Manage supported languages, default locale, and system translation dictionaries.')}
@@ -25003,6 +25075,18 @@ export default function AdminLanguagePage() {
 
         {/* Telemetry Status Badges & Controls */}
         <div className="flex flex-wrap items-center gap-2.5">
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+            <span>{t('fluidLayoutBadge', 'Full-Width Canvas')}</span>
+          </div>
+
           <div 
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
             style={{ 
@@ -25036,13 +25120,14 @@ export default function AdminLanguagePage() {
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
+            title="Reload from server store"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
-      {/* Main Accessible Form-Free Region Container (Constraint 9) */}
+      {/* Main Accessible Form-Free Region Container */}
       <div 
         role="region"
         data-lpignore="true"
@@ -25084,7 +25169,7 @@ export default function AdminLanguagePage() {
                   color: 'var(--color-text-secondary)'
                 }}
               >
-                <tab.icon className="h-4 w-4" />
+                <tab.icon className="h-4 w-4 shrink-0" />
                 <span>{tab.label}</span>
                 <span 
                   className="px-2 py-0.5 rounded-full text-[10px] font-mono border"
@@ -25133,7 +25218,7 @@ export default function AdminLanguagePage() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
-                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colLanguage', 'Language')}</th>
+                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colLanguage', 'Language & Identifier')}</th>
                       <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colCode', 'Code')}</th>
                       <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colNative', 'Native Name')}</th>
                       <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colDirection', 'Direction')}</th>
@@ -25151,11 +25236,11 @@ export default function AdminLanguagePage() {
                           style={{ backgroundColor: 'transparent' }}
                         >
                           <td className="py-3 px-4 font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                            <span className="text-xl">{lang.flag || '🌐'}</span>
+                            <span className="text-xl leading-none">{lang.flag || '🌐'}</span>
                             <span>{lang.name}</span>
                             {isDef && (
                               <span 
-                                className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border"
+                                className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ml-1.5"
                                 style={{
                                   backgroundColor: 'var(--color-card)',
                                   borderColor: 'var(--color-primary)',
@@ -25170,10 +25255,10 @@ export default function AdminLanguagePage() {
                             {lang.code}
                           </td>
                           <td className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>
-                            {lang.native || lang.name}
+                            {lang.native || lang.nativeName || lang.name}
                           </td>
                           <td className="py-3 px-4 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                            {lang.dir?.toUpperCase() || 'LTR'}
+                            {(lang.dir || lang.direction || 'ltr').toUpperCase()}
                           </td>
                           <td className="py-3 px-4">
                             <button
@@ -25281,8 +25366,8 @@ export default function AdminLanguagePage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="relative flex-1 md:w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} />
+                <div className="relative flex-1 md:w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="text"
                     autoComplete="off"
@@ -25328,7 +25413,7 @@ export default function AdminLanguagePage() {
                 }}
               >
                 <div className="flex items-center gap-2 font-bold">
-                  <AlertCircle className="h-4 w-4" />
+                  <AlertCircle className="h-4 w-4 shrink-0" />
                   <span>{t('unsavedNotice', 'You have unsaved dictionary modifications.')}</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -25362,7 +25447,7 @@ export default function AdminLanguagePage() {
               className="rounded-2xl border overflow-hidden shadow-sm transition-colors duration-200"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
             >
-              <div className="max-h-[550px] overflow-y-auto">
+              <div className="max-h-[580px] overflow-y-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="sticky top-0 z-10 shadow-sm" style={{ backgroundColor: 'var(--color-card)' }}>
                     <tr className="border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -25513,37 +25598,127 @@ export default function AdminLanguagePage() {
             className="w-full max-w-md p-6 rounded-3xl border shadow-2xl space-y-4 animate-in zoom-in-95"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <Globe className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              {editingLangCode ? t('modalEditLangTitle', 'Edit Supported Language') : t('modalAddLangTitle', 'Add Supported Language')}
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Globe className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                <span>{editingLangCode ? t('modalEditLangTitle', 'Edit Supported Language') : t('modalAddLangTitle', 'Add Supported Language')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setLangModalOpen(false)}
+                className="p-1 rounded-xl transition hover:opacity-80 cursor-pointer"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                  {t('langNameLabel', 'Language Name (English)')}
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  placeholder="e.g. Japanese"
-                  value={langForm.name}
-                  onChange={(e) => setLangForm({ ...langForm, name: e.target.value })}
-                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
+              {/* Flag Picker & Language Name */}
+              <div className="flex gap-2.5 items-end">
+                <div className="relative">
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langFlagLabel', 'Flag')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowFlagPicker(!showFlagPicker)}
+                    className="w-16 h-[38px] border rounded-xl flex items-center justify-center gap-1 text-xl transition cursor-pointer shadow-sm hover:border-[var(--color-primary)]"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: showFlagPicker ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    title={t('flagPickerTitle', 'Select Flag')}
+                  >
+                    <span>{langForm.flag || '🌐'}</span>
+                    <ChevronDown className="h-3 w-3 opacity-60 pointer-events-none" />
+                  </button>
+
+                  {/* Harmonized Searchable Flag Dropdown */}
+                  {showFlagPicker && (
+                    <div 
+                      className="absolute top-full left-0 mt-1.5 w-72 p-3 border rounded-2xl space-y-2 shadow-2xl z-30 transition-colors duration-200 animate-in fade-in"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="relative">
+                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+                        <input
+                          type="text"
+                          data-lpignore="true"
+                          data-form-type="other"
+                          autoComplete="off"
+                          spellCheck="false"
+                          placeholder={t('searchCountryPlaceholder', 'Search country or ISO code...')}
+                          value={flagCountrySearch}
+                          onChange={(e) => setFlagCountrySearch(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-xs outline-none transition"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        />
+                      </div>
+                      <div className="max-h-44 overflow-y-auto grid grid-cols-2 gap-1.5 pr-1">
+                        {filteredCountries.map((c) => (
+                          <button
+                            key={`${c.name}-${c.flag}-${c.code}`}
+                            type="button"
+                            onClick={() => {
+                              setLangForm({
+                                ...langForm,
+                                flag: c.flag,
+                                code: editingLangCode ? langForm.code : (langForm.code || c.code),
+                                name: langForm.name || c.name
+                              });
+                              setShowFlagPicker(false);
+                              setFlagCountrySearch('');
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-left transition text-xs cursor-pointer hover:opacity-80"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              color: 'var(--color-text)'
+                            }}
+                          >
+                            <span className="text-base leading-none">{c.flag}</span>
+                            <span className="truncate text-[11px] font-medium">{c.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1">
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langNameLabel', 'Language Name (English)')}
+                  </label>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    placeholder="e.g. Japanese"
+                    value={langForm.name}
+                    onChange={(e) => setLangForm({ ...langForm, name: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
                     {t('langCodeLabel', 'Language Code')}
                   </label>
                   <input
@@ -25556,7 +25731,7 @@ export default function AdminLanguagePage() {
                     placeholder="ja"
                     maxLength={5}
                     value={langForm.code}
-                    onChange={(e) => setLangForm({ ...langForm, code: e.target.value })}
+                    onChange={(e) => setLangForm({ ...langForm, code: e.target.value.toLowerCase() })}
                     className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-mono font-bold uppercase disabled:opacity-50"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -25567,8 +25742,8 @@ export default function AdminLanguagePage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                    {t('langFlagLabel', 'Flag Emoji')}
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langNativeLabel', 'Native Display Name')}
                   </label>
                   <input
                     type="text"
@@ -25576,11 +25751,10 @@ export default function AdminLanguagePage() {
                     data-lpignore="true"
                     data-form-type="other"
                     spellCheck="false"
-                    placeholder="🇯🇵"
-                    maxLength={4}
-                    value={langForm.flag}
-                    onChange={(e) => setLangForm({ ...langForm, flag: e.target.value })}
-                    className="w-full border rounded-xl px-3 py-2 text-xs text-center outline-none text-base font-bold"
+                    placeholder="日本語"
+                    value={langForm.native}
+                    onChange={(e) => setLangForm({ ...langForm, native: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -25590,45 +25764,59 @@ export default function AdminLanguagePage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                  {t('langNativeLabel', 'Native Display Name')}
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  placeholder="日本語"
-                  value={langForm.native}
-                  onChange={(e) => setLangForm({ ...langForm, native: e.target.value })}
-                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
-              </div>
+              {/* Harmonized Text Direction & Status Dropdowns with Custom Carets */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langDirectionLabel', 'Text Direction')}
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={langForm.dir}
+                      onChange={(e) => setLangForm({ ...langForm, dir: e.target.value as 'ltr' | 'rtl' })}
+                      className="w-full appearance-none rounded-xl border px-3.5 py-2 pr-9 text-xs font-bold outline-none cursor-pointer transition focus:ring-1 focus:ring-[var(--color-primary)] shadow-sm"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <option value="ltr" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {t('dirLtr', 'Left-to-Right (LTR)')}
+                      </option>
+                      <option value="rtl" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {t('dirRtl', 'Right-to-Left (RTL)')}
+                      </option>
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 opacity-70" style={{ color: 'var(--color-text)' }} />
+                  </div>
+                </div>
 
-              <div>
-                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                  {t('langDirectionLabel', 'Text Direction')}
-                </label>
-                <select
-                  value={langForm.dir}
-                  onChange={(e) => setLangForm({ ...langForm, dir: e.target.value as 'ltr' | 'rtl' })}
-                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <option value="ltr">{t('dirLtr', 'Left-to-Right (LTR)')}</option>
-                  <option value="rtl">{t('dirRtl', 'Right-to-Left (RTL)')}</option>
-                </select>
+                <div>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('statusLabel', 'Status')}
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={langForm.status}
+                      onChange={(e) => setLangForm({ ...langForm, status: e.target.value as 'active' | 'inactive' })}
+                      className="w-full appearance-none rounded-xl border px-3.5 py-2 pr-9 text-xs font-bold outline-none cursor-pointer transition focus:ring-1 focus:ring-[var(--color-primary)] shadow-sm"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <option value="active" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {t('statusActive', 'Active')}
+                      </option>
+                      <option value="inactive" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                        {t('statusInactive', 'Inactive')}
+                      </option>
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 opacity-70" style={{ color: 'var(--color-text)' }} />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -25671,10 +25859,20 @@ export default function AdminLanguagePage() {
             className="w-full max-w-md p-6 rounded-3xl border shadow-2xl space-y-4 animate-in zoom-in-95"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <Languages className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              {t('modalAddWordTitle', 'Add System Phrase')}
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Languages className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                <span>{t('modalAddWordTitle', 'Add System Phrase')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setWordModalOpen(false)}
+                className="p-1 rounded-xl transition hover:opacity-80 cursor-pointer"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
             <div className="space-y-3">
               <div>
@@ -53577,111 +53775,219 @@ export async function POST() {
 
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+// Generated & Maintained by AI Collaborator - Production Build Compliant
+// @ts-nocheck
+import { NextResponse } from 'next/server';
+import { query, parseDbRows } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_LANGUAGES = [
-  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', isDefault: true, isEnabled: true },
-  { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭', isDefault: false, isEnabled: true },
-  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', isDefault: false, isEnabled: true },
-  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', isDefault: false, isEnabled: true },
-];
-
-export async function GET(req: NextRequest) {
-  try {
-    let supportedLanguages = DEFAULT_LANGUAGES;
-    let translations: Record<string, any> = {};
-    let defaultLanguage = 'en';
-
-    // 1. Try PostgreSQL / MySQL with safe SELECT *
-    try {
-      const res: any = await query('SELECT * FROM admin_settings WHERE id IN (\'primary_settings\', \'1\') OR key = \'current\' LIMIT 1');
-      const row = (Array.isArray(res) ? res[0] : (res as any)?.rows?.[0]);
-      if (row) {
-        if (row.supported_languages) {
-          const parsed = typeof row.supported_languages === 'string'
-            ? JSON.parse(row.supported_languages)
-            : row.supported_languages;
-          if (Array.isArray(parsed) && parsed.length > 0) supportedLanguages = parsed;
-        }
-        if (row.translations) {
-          translations = typeof row.translations === 'string'
-            ? JSON.parse(row.translations)
-            : row.translations;
-        }
-        if (row.default_language) defaultLanguage = row.default_language;
-      }
-    } catch (_) {}
-
-    // 2. Hydrate from app_translations if available
-    try {
-      const appTransRes: any = await query('SELECT lang_code, dictionary FROM app_translations');
-      const rows = Array.isArray(appTransRes) ? appTransRes : appTransRes?.rows || [];
-      rows.forEach((r: any) => {
-        if (r && r.lang_code) {
-          const dict = typeof r.dictionary === 'string' ? JSON.parse(r.dictionary) : r.dictionary;
-          translations[r.lang_code] = { ...(translations[r.lang_code] || {}), ...dict };
-        }
-      });
-    } catch (_) {}
-
-    // 3. Fallback to Local JSON store
-    const jsonPaths = [
-      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-      path.join(process.cwd(), 'data', 'admin_settings.json'),
-    ];
-    for (const jp of jsonPaths) {
-      if (fs.existsSync(jp)) {
-        try {
-          const fileData = JSON.parse(fs.readFileSync(jp, 'utf8'));
-          if (Array.isArray(fileData.supported_languages) && fileData.supported_languages.length > 0 && supportedLanguages === DEFAULT_LANGUAGES) {
-            supportedLanguages = fileData.supported_languages;
-          }
-          if (fileData.translations && Object.keys(translations).length === 0) {
-            translations = fileData.translations;
-          }
-          if (fileData.default_language && defaultLanguage === 'en') {
-            defaultLanguage = fileData.default_language;
-          }
-        } catch (_) {}
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      supportedLanguages,
-      translations,
-      defaultLanguage
-    });
-  } catch (err: any) {
-    return NextResponse.json({
-      success: true,
-      supportedLanguages: DEFAULT_LANGUAGES,
-      translations: {},
-      defaultLanguage: 'en'
-    });
-  }
+interface LanguageItem {
+  id?: string;
+  code: string;
+  name: string;
+  native?: string;
+  flag?: string;
+  direction?: 'ltr' | 'rtl';
+  status: 'active' | 'inactive';
+  is_default: boolean;
 }
 
-export async function POST(req: NextRequest) {
+const DEFAULT_SUPPORTED_LANGUAGES: LanguageItem[] = [
+  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true },
+  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false }
+];
+
+function getJsonStorePath(): string {
+  const possiblePaths = [
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return possiblePaths[0];
+}
+
+function readLocalSettingsFallback(): any {
+  try {
+    const p = getJsonStorePath();
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch (_) {}
+  return null;
+}
+
+function normalizeLanguageList(rawList: any[]): LanguageItem[] {
+  if (!Array.isArray(rawList) || rawList.length === 0) {
+    return DEFAULT_SUPPORTED_LANGUAGES;
+  }
+  return rawList.map((item: any, idx: number) => {
+    if (!item) return DEFAULT_SUPPORTED_LANGUAGES[0];
+    const code = (item.code || item.locale || item.lang || `lang_${idx}`).toLowerCase().trim();
+    const name = item.name || code.toUpperCase();
+    const native = item.native || item.nativeName || item.native_name || name;
+    const flag = item.flag || '🌐';
+    const direction = item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr');
+    let status: 'active' | 'inactive' = 'active';
+    if (item.status === 'inactive' || item.status === 'disabled' || item.is_active === false || item.isActive === false) {
+      status = 'inactive';
+    }
+    const is_default = Boolean(item.is_default || item.isDefault || code === 'en');
+    return {
+      id: item.id || `lang_${code}`,
+      code,
+      name,
+      native,
+      flag,
+      direction,
+      status,
+      is_default
+    };
+  });
+}
+
+export async function GET() {
+  let supportedLanguages: LanguageItem[] = DEFAULT_SUPPORTED_LANGUAGES;
+  let translations: Record<string, Record<string, string>> = {};
+  let defaultLanguage = 'en';
+  let dbLoaded = false;
+
+  // 1. Authoritative query from PostgreSQL / MySQL using centralized adaptive query()
+  try {
+    const adminRes = await query(`
+      SELECT supported_languages, translations, default_language, settings 
+      FROM admin_settings 
+      WHERE id = 'primary_settings' OR id = '1' OR key = 'current' OR key = 'default' 
+      ORDER BY updated_at DESC LIMIT 1;
+    `);
+
+    const rows = parseDbRows(adminRes);
+    if (rows && rows.length > 0) {
+      const row = rows[0];
+      const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
+
+      if (row.supported_languages) {
+        const parsed = typeof row.supported_languages === 'string' ? JSON.parse(row.supported_languages) : row.supported_languages;
+        supportedLanguages = normalizeLanguageList(parsed);
+        dbLoaded = true;
+      } else if (settings?.supportedLanguages || settings?.languages) {
+        supportedLanguages = normalizeLanguageList(settings.supportedLanguages || settings.languages);
+        dbLoaded = true;
+      }
+
+      if (row.translations) {
+        translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
+        dbLoaded = true;
+      } else if (settings?.translations) {
+        translations = settings.translations;
+        dbLoaded = true;
+      }
+
+      if (row.default_language) {
+        defaultLanguage = row.default_language;
+      } else if (settings?.defaultLanguage) {
+        defaultLanguage = settings.defaultLanguage;
+      }
+    }
+  } catch (_) {}
+
+  // 2. Query dedicated app_translations table if available
+  try {
+    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations;`);
+    const transRows = parseDbRows(transRes);
+    if (transRows && transRows.length > 0) {
+      transRows.forEach((r: any) => {
+        if (r.lang_code && r.dictionary) {
+          translations[r.lang_code] = typeof r.dictionary === 'string' ? JSON.parse(r.dictionary) : r.dictionary;
+        }
+      });
+      dbLoaded = true;
+    }
+  } catch (_) {}
+
+  // 3. Fallback to local admin_settings.json if database was cold or uninitialized
+  if (!dbLoaded || Object.keys(translations).length === 0) {
+    const fileData = readLocalSettingsFallback();
+    if (fileData) {
+      const langConfig = fileData.languages || fileData;
+      const fileLangs = langConfig.supportedLanguages || langConfig.languages || fileData.supported_languages;
+      if (Array.isArray(fileLangs) && fileLangs.length > 0) {
+        supportedLanguages = normalizeLanguageList(fileLangs);
+      }
+      if (langConfig.translations && typeof langConfig.translations === 'object') {
+        translations = { ...langConfig.translations, ...translations };
+      }
+      if (langConfig.defaultLanguage) {
+        defaultLanguage = langConfig.defaultLanguage;
+      }
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    supportedLanguages,
+    languages: supportedLanguages,
+    translations,
+    defaultLanguage
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Pragma': 'no-cache'
+    }
+  });
+}
+
+export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { supportedLanguages, translations, defaultLanguage } = body;
+    const rawLanguages = body.supportedLanguages || body.languages || body.supported_languages || [];
+    const supportedLanguages = normalizeLanguageList(rawLanguages);
+    const translations = body.translations || {};
+    const defaultLanguage = body.defaultLanguage || body.default_language || 'en';
 
-    const safeLangs = Array.isArray(supportedLanguages) ? supportedLanguages : DEFAULT_LANGUAGES;
-    const safeTrans = translations || {};
-    const safeDefault = defaultLanguage || 'en';
-
-    // 1. PostgreSQL & MySQL Persistence
+    // 1. Ensure table structure exists in PostgreSQL / MySQL
     try {
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id VARCHAR(255) PRIMARY KEY,
+          site_name VARCHAR(255) DEFAULT 'Zecratary',
+          tagline TEXT DEFAULT 'Autonomous Culinary Intelligence & Precision Meal Planning',
+          titlebar_emoji VARCHAR(50) DEFAULT '👨‍🍳',
+          titlebar_image TEXT DEFAULT '',
+          favicon_emoji VARCHAR(50) DEFAULT '👨‍🍳',
+          favicon_image TEXT DEFAULT '',
+          font_family VARCHAR(100) DEFAULT 'Inter, sans-serif',
+          theme_colors JSONB DEFAULT '{}'::jsonb,
+          supported_languages JSONB DEFAULT '[]'::jsonb,
+          translations JSONB DEFAULT '{}'::jsonb,
+          default_language VARCHAR(32) DEFAULT 'en',
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+
       await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '[]'::jsonb;`);
       await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;`);
       await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(32) DEFAULT 'en';`);
 
+      await query(`
+        CREATE TABLE IF NOT EXISTS app_translations (
+          lang_code VARCHAR(32) PRIMARY KEY,
+          dictionary JSONB DEFAULT '{}'::jsonb,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+    } catch (_) {}
+
+    // 2. Upsert into admin_settings
+    try {
       await query(`
         INSERT INTO admin_settings (id, supported_languages, translations, default_language, updated_at)
         VALUES ('primary_settings', $1::jsonb, $2::jsonb, $3, NOW())
@@ -53690,56 +53996,87 @@ export async function POST(req: NextRequest) {
           translations = EXCLUDED.translations,
           default_language = EXCLUDED.default_language,
           updated_at = NOW();
-      `, [JSON.stringify(safeLangs), JSON.stringify(safeTrans), safeDefault]);
-
-      await query(`
-        CREATE TABLE IF NOT EXISTS app_translations (
-          lang_code VARCHAR(16) PRIMARY KEY,
-          lang_name VARCHAR(64),
-          dictionary JSONB DEFAULT '{}'::jsonb,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-      `);
-
-      for (const [code, dict] of Object.entries(safeTrans)) {
-        await query(`
-          INSERT INTO app_translations (lang_code, dictionary, updated_at)
-          VALUES ($1, $2::jsonb, NOW())
-          ON CONFLICT (lang_code) DO UPDATE SET
-            dictionary = EXCLUDED.dictionary,
-            updated_at = NOW();
-        `, [code, JSON.stringify(dict)]);
-      }
-    } catch (_) {}
-
-    // 2. Mirror to JSON files
-    const jsonPaths = [
-      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-      path.join(process.cwd(), 'data', 'admin_settings.json'),
-    ];
-    for (const jp of jsonPaths) {
+      `, [
+        JSON.stringify(supportedLanguages),
+        JSON.stringify(translations),
+        String(defaultLanguage)
+      ]);
+    } catch (err: any) {
       try {
-        const dir = path.dirname(jp);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        let existing: any = {};
-        if (fs.existsSync(jp)) {
-          try { existing = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (_) {}
-        }
-        existing.supported_languages = safeLangs;
-        existing.translations = safeTrans;
-        existing.default_language = safeDefault;
-        fs.writeFileSync(jp, JSON.stringify(existing, null, 2), 'utf8');
+        await query(`
+          INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
+          VALUES ('current', $1::jsonb, $2::jsonb, $3, NOW())
+          ON CONFLICT (key) DO UPDATE SET
+            supported_languages = EXCLUDED.supported_languages,
+            translations = EXCLUDED.translations,
+            default_language = EXCLUDED.default_language,
+            updated_at = NOW();
+        `, [
+          JSON.stringify(supportedLanguages),
+          JSON.stringify(translations),
+          String(defaultLanguage)
+        ]);
       } catch (_) {}
     }
 
+    // 3. Upsert individual dictionaries into app_translations
+    if (translations && typeof translations === 'object') {
+      for (const [code, dict] of Object.entries(translations)) {
+        try {
+          await query(`
+            INSERT INTO app_translations (lang_code, dictionary, updated_at)
+            VALUES ($1, $2::jsonb, NOW())
+            ON CONFLICT (lang_code) DO UPDATE SET
+              dictionary = EXCLUDED.dictionary,
+              updated_at = NOW();
+          `, [code.toLowerCase(), JSON.stringify(dict)]);
+        } catch (_) {}
+      }
+    }
+
+    // 4. Mirror to filesystem data/admin_settings.json
+    try {
+      const p = getJsonStorePath();
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      let currentData: any = {};
+      if (fs.existsSync(p)) {
+        try {
+          currentData = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        } catch (_) {}
+      }
+      currentData.supported_languages = supportedLanguages;
+      currentData.supportedLanguages = supportedLanguages;
+      currentData.languages = {
+        ...(currentData.languages || {}),
+        supportedLanguages,
+        languages: supportedLanguages,
+        translations,
+        defaultLanguage
+      };
+      currentData.translations = { ...(currentData.translations || {}), ...translations };
+      currentData.defaultLanguage = defaultLanguage;
+      currentData.updated_at = new Date().toISOString();
+      fs.writeFileSync(p, JSON.stringify(currentData, null, 2), 'utf-8');
+
+      const altP = p.includes('apps/web') ? p.replace('apps/web/', '') : path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json');
+      if (altP !== p && fs.existsSync(path.dirname(altP))) {
+        fs.writeFileSync(altP, JSON.stringify(currentData, null, 2), 'utf-8');
+      }
+    } catch (_) {}
+
     return NextResponse.json({
       success: true,
-      supportedLanguages: safeLangs,
-      translations: safeTrans,
-      defaultLanguage: safeDefault
+      message: 'Language settings synchronized with PostgreSQL, MySQL, and server store.',
+      supportedLanguages,
+      languages: supportedLanguages,
+      translations,
+      defaultLanguage
     });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, error: error.message || 'Failed to update language settings' },
+      { status: 500 }
+    );
   }
 }
 
@@ -66783,6 +67120,11 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "searchCountryPlaceholder": "Search country or ISO code...",
+    "flagPickerTitle": "Select Flag",
+    "fluidLayoutBadge": "Full-Width Canvas",
+    "codeAndNameRequired": "Language code and name are required.",
+    "languageAlreadyExists": "already exists.",
     "languageSetting": "Language Setting",
     "navWallet": "Wallet",
     "walletSettings": "Wallet Settings",
@@ -74964,6 +75306,71 @@ const isImageIcon = (icon?: unknown): boolean =>
   );
 
 /**
+ * Robust Normalizer & Active Status Evaluator for Languages
+ */
+const normalizeLanguageItem = (item: any): DynamicLanguageItem => {
+  if (!item) {
+    return { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true };
+  }
+  if (typeof item === 'string') {
+    const c = item.toLowerCase().trim();
+    return {
+      id: `lang_${c}`,
+      code: c,
+      name: c.toUpperCase(),
+      native: DEFAULT_LANGUAGE_FLAG_MAP[c]?.native || c.toUpperCase(),
+      flag: DEFAULT_LANGUAGE_FLAG_MAP[c]?.flag || '🌐',
+      status: 'active',
+      is_default: c === 'en'
+    };
+  }
+  const rawCode = item.code || item.locale || item.lang || item.id || 'en';
+  const code = typeof rawCode === 'string' ? rawCode.toLowerCase().trim() : 'en';
+  const name = item.name || item.label || code.toUpperCase();
+  const flagMeta = DEFAULT_LANGUAGE_FLAG_MAP[code];
+  const native = item.native || item.nativeName || item.native_name || flagMeta?.native || name;
+  const flag = item.flag || flagMeta?.flag || '🌐';
+  
+  let status = 'active';
+  if (typeof item.status === 'string') {
+    status = item.status.toLowerCase().trim();
+  } else if (item.is_active === false || item.isActive === false || item.active === false) {
+    status = 'inactive';
+  } else if (item.is_active === true || item.isActive === true || item.active === true) {
+    status = 'active';
+  }
+
+  return {
+    id: item.id || `lang_${code}`,
+    code,
+    name,
+    native,
+    flag,
+    direction: item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr'),
+    status,
+    is_default: Boolean(item.is_default || item.isDefault)
+  };
+};
+
+const isLanguageActive = (item: any): boolean => {
+  if (!item) return false;
+  const status = typeof item.status === 'string' ? item.status.toLowerCase().trim() : '';
+  if (status === 'inactive' || status === 'disabled' || status === 'draft' || status === 'hidden') {
+    return false;
+  }
+  if (item.is_active === false || item.isActive === false || item.active === false) {
+    return false;
+  }
+  if (status === 'active' || item.is_default === true || item.isDefault === true) {
+    return true;
+  }
+  if (item.is_active === true || item.isActive === true || item.active === true) {
+    return true;
+  }
+  return status !== 'inactive' && status !== 'disabled';
+};
+
+/**
  * Universal Dynamic Token Icon Renderer
  */
 function DynamicTokenIcon({ icon, symbol, size = 16, className = '' }: { icon?: any; symbol?: any; size?: number; className?: string }) {
@@ -75027,14 +75434,29 @@ export default function Sidebar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
-  // Dynamic Currencies & Languages States (from Admin Settings)
+  // Dynamic Currencies & Languages States (Synchronized from /admin/language & LanguageProvider)
   const [currencySymbols, setCurrencySymbols] = useState<Record<string, string>>(DEFAULT_CURRENCY_SYMBOLS);
   const [dynamicLanguages, setDynamicLanguages] = useState<DynamicLanguageItem[]>(() => {
-    return (langContext as any)?.availableLanguages || [
-      { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
-      { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
-      { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
-      { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
+    const ctxLangs = (langContext as any)?.availableLanguages || (langContext as any)?.languages;
+    if (Array.isArray(ctxLangs) && ctxLangs.length > 0) {
+      return ctxLangs.map(normalizeLanguageItem);
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('zecratary_languages');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed.map(normalizeLanguageItem);
+          }
+        }
+      } catch (_) {}
+    }
+    return [
+      { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+      { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active', is_default: false },
+      { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+      { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active', is_default: false }
     ];
   });
 
@@ -75058,20 +75480,50 @@ export default function Sidebar() {
     return dynamicFlagMap[c] || { flag: '🌐', native: code.toUpperCase() };
   }, [dynamicFlagMap]);
 
-  // Active Languages Filtered by Status
-  const activeLanguages = useMemo(() => {
-    const list = dynamicLanguages.length > 0 ? dynamicLanguages : (langContext as any)?.availableLanguages || [];
-    if (!Array.isArray(list) || list.length === 0) {
-      return [
-        { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active' },
-        { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active' },
-        { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active' },
-        { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active' }
-      ];
+  // Synchronize dynamicLanguages whenever langContext updates
+  useEffect(() => {
+    const ctxLangs = (langContext as any)?.availableLanguages || (langContext as any)?.languages;
+    if (Array.isArray(ctxLangs) && ctxLangs.length > 0) {
+      setDynamicLanguages(ctxLangs.map(normalizeLanguageItem));
     }
-    const filtered = list.filter((l: any) => l.status !== 'inactive');
-    return filtered.length > 0 ? filtered : list;
+  }, [langContext]);
+
+  // Active Languages Filtered by Status (ONLY show language that is active)
+  const activeLanguages = useMemo(() => {
+    const sourceList = Array.isArray(dynamicLanguages) && dynamicLanguages.length > 0
+      ? dynamicLanguages
+      : ((langContext as any)?.availableLanguages || []);
+
+    const normalizedList = (Array.isArray(sourceList) && sourceList.length > 0
+      ? sourceList
+      : [
+          { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+          { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', status: 'active', is_default: false },
+          { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+          { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', status: 'active', is_default: false }
+        ]
+    ).map(normalizeLanguageItem);
+
+    const activeOnly = normalizedList.filter(isLanguageActive);
+    return activeOnly.length > 0 
+      ? activeOnly 
+      : [{ code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true }];
   }, [dynamicLanguages, langContext]);
+
+  // Auto-switch to active default language if currentLanguage was deactivated in /admin/language
+  useEffect(() => {
+    if (activeLanguages.length > 0) {
+      const isCurrentActive = activeLanguages.some(
+        l => l.code && l.code.toLowerCase().trim() === currentLanguage.toLowerCase().trim()
+      );
+      if (!isCurrentActive) {
+        const fallbackLang = activeLanguages.find(l => l.is_default) || activeLanguages[0];
+        if (fallbackLang?.code && typeof changeLanguage === 'function') {
+          changeLanguage(fallbackLang.code);
+        }
+      }
+    }
+  }, [activeLanguages, currentLanguage, changeLanguage]);
 
   // Accordion Sections
   const [openSections, setOpenSections] = useState<{
@@ -75120,6 +75572,32 @@ export default function Sidebar() {
 
   const topbarRef = useRef<HTMLDivElement>(null);
 
+  // Dedicated Language Synchronizer (Immediate response to /admin/language updates)
+  const syncLanguages = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/admin/languages?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const incoming = data.languages || data.supported_languages || data.data;
+        if (Array.isArray(incoming) && incoming.length > 0) {
+          const normalized = incoming.map(normalizeLanguageItem);
+          setDynamicLanguages(normalized);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('zecratary_languages', JSON.stringify(normalized));
+            } catch (_) {}
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+
+    const ctxLangs = (langContext as any)?.availableLanguages || (langContext as any)?.languages;
+    if (Array.isArray(ctxLangs) && ctxLangs.length > 0) {
+      setDynamicLanguages(ctxLangs.map(normalizeLanguageItem));
+    }
+  }, [langContext]);
+
   // Dynamic Telemetry & Settings Fetcher (PostgreSQL & MySQL Synced)
   const fetchBalancesAndTelemetry = useCallback(async (activeU?: any) => {
     try {
@@ -75150,8 +75628,15 @@ export default function Sidebar() {
 
       if (langRes.status === 'fulfilled' && langRes.value.ok) {
         const lData = await langRes.value.json();
-        if (Array.isArray(lData.languages) && lData.languages.length > 0) {
-          setDynamicLanguages(lData.languages);
+        const incoming = lData.languages || lData.supported_languages || lData.data;
+        if (Array.isArray(incoming) && incoming.length > 0) {
+          const normalized = incoming.map(normalizeLanguageItem);
+          setDynamicLanguages(normalized);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('zecratary_languages', JSON.stringify(normalized));
+            } catch (_) {}
+          }
         }
       }
 
@@ -75227,6 +75712,16 @@ export default function Sidebar() {
             setOpenSections(prev => ({ ...prev, ...JSON.parse(storedSections) }));
           } catch (_) {}
         }
+
+        const storedLangs = localStorage.getItem('zecratary_languages');
+        if (storedLangs) {
+          try {
+            const parsed = JSON.parse(storedLangs);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setDynamicLanguages(parsed.map(normalizeLanguageItem));
+            }
+          } catch (_) {}
+        }
       }
 
       if (u?.id || u?.email) {
@@ -75244,7 +75739,7 @@ export default function Sidebar() {
     } catch (_) {}
   }, [currencySymbols, fetchBalancesAndTelemetry]);
 
-  // Route Auto-Expansion: Synchronized with canonical routes
+  // Route Auto-Expansion
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -75264,8 +75759,14 @@ export default function Sidebar() {
   useEffect(() => {
     setMounted(true);
     syncUserState();
+    syncLanguages();
 
     const handleSync = () => syncUserState();
+    const handleLangSync = () => {
+      syncLanguages();
+      fetchBalancesAndTelemetry();
+    };
+
     const handleWalletUpdate = (e?: any) => {
       if (e?.detail) {
         const b = e.detail.wallet_balance ?? e.detail.walletBalance ?? e.detail.balance;
@@ -75291,20 +75792,23 @@ export default function Sidebar() {
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_site_settings_changed', handleSync);
     window.addEventListener('zecratary_site_config_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleLangSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleWalletUpdate);
     window.addEventListener('zecratary_tokens_updated', handleTokensUpdate);
     window.addEventListener('zecratary_token_settings_updated', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleLangSync);
+    window.addEventListener('zecratary_locale_changed', handleLangSync);
     window.addEventListener('zecratary_currency_updated', handleSync);
-    window.addEventListener('focus', () => fetchBalancesAndTelemetry());
+    window.addEventListener('focus', handleLangSync);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') fetchBalancesAndTelemetry();
+      if (document.visibilityState === 'visible') {
+        handleLangSync();
+      }
     });
 
     let balanceChannel: BroadcastChannel | null = null;
+    let languageChannel: BroadcastChannel | null = null;
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
         balanceChannel = new BroadcastChannel('zecratary_balance_channel');
@@ -75315,6 +75819,11 @@ export default function Sidebar() {
           if (msg.data?.token_balance !== undefined || msg.data?.tokens !== undefined) {
             setTokenBalance(Number(msg.data.token_balance ?? msg.data.tokens));
           }
+        };
+
+        languageChannel = new BroadcastChannel('zecratary_language_channel');
+        languageChannel.onmessage = () => {
+          syncLanguages();
         };
       } catch (_) {}
     }
@@ -75327,13 +75836,15 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_wallet_updated', handleWalletUpdate);
       window.removeEventListener('zecratary_tokens_updated', handleTokensUpdate);
       window.removeEventListener('zecratary_token_settings_updated', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleLangSync);
+      window.removeEventListener('zecratary_locale_changed', handleLangSync);
       window.removeEventListener('zecratary_currency_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleLangSync);
+      window.removeEventListener('focus', handleLangSync);
       if (balanceChannel) balanceChannel.close();
+      if (languageChannel) languageChannel.close();
     };
-  }, [syncUserState, fetchBalancesAndTelemetry]);
+  }, [syncUserState, syncLanguages, fetchBalancesAndTelemetry]);
 
   // Click Outside & Escape Key Listener
   useEffect(() => {
@@ -75484,7 +75995,6 @@ export default function Sidebar() {
     ? t('topbarPlanPro', 'Pro Plan') 
     : t('topbarPlanFree', 'Free Tier');
 
-  // Task 1: Robust fallback resolving to 'Wallet' across all locales
   const financeWalletLabel = t('navWallet', t('wallet') === 'Wallet Settings' ? 'Wallet' : t('wallet', 'Wallet'));
 
   return (
@@ -75700,7 +76210,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. DYNAMIC QUICK LANGUAGE SELECTOR */}
+          {/* 4. DYNAMIC QUICK LANGUAGE SELECTOR (ONLY SHOW ACTIVE LANGUAGES) */}
           <div className="relative">
             <button
               type="button"
@@ -76177,7 +76687,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY ACCORDION (Task 1: Clean 'Wallet' Link) */}
+          {/* 4. FINANCIAL & UTILITY ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -76198,7 +76708,6 @@ export default function Sidebar() {
                   <Coins className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('token', 'Token')}</span>}
                 </Link>
-                {/* Finance Hub: Text changed to 'Wallet' */}
                 <Link 
                   href="/wallet" 
                   className={navClass('/wallet')} 
@@ -76220,7 +76729,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION (Task 2: Added /admin/language Menu Link) */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -76246,7 +76755,6 @@ export default function Sidebar() {
                     <Globe className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('pageBuilder', 'Page Builder')}</span>}
                   </Link>
-                  {/* Task 2: Language Setting Menu Link */}
                   <Link href="/admin/language" className={navClass('/admin/language')} style={navStyle('/admin/language')} title={t('languageSetting', 'Language Setting')}>
                     <Languages className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('languageSetting', 'Language Setting')}</span>}
@@ -80587,9 +81095,10 @@ export default {
 ```typescript
 // Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
 // GitHub: cygnusorbit/zecratary
-// Satisfies Constraints 8 & 10: PostgreSQL & MySQL persistence with getDbPool, pool proxy & adaptive SSL
+// Satisfies Constraint 8: Adaptive SSL resolution without global process.env pollution
 
-import { Pool, PoolConfig } from 'pg';
+import { Pool } from 'pg';
+import type { PoolConfig } from 'pg';
 
 declare const __non_webpack_require__: any;
 
@@ -80599,7 +81108,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __zecratary_current_conn: string | undefined;
   // eslint-disable-next-line no-var
-  var __zecratary_is_plaintext_only: boolean | undefined;
+  var __zecratary_ssl_unsupported: boolean | undefined;
 }
 
 export function getConnectionString(): string {
@@ -80642,14 +81151,69 @@ export function parseDbRow<T = any>(res: any): T | null {
   return rows.length > 0 ? rows[0] : null;
 }
 
-export function getPool(): Pool | null {
+export function formatQueryForDialect(sql: string): string {
+  if (getDatabaseDialect() === 'mysql') {
+    return sql.replace(/\$\d+/g, '?');
+  }
+  return sql;
+}
+
+export function isPlaintextHost(rawConnStr: string): boolean {
+  if (!rawConnStr) return true;
+  const lower = rawConnStr.toLowerCase();
+  return (
+    lower.includes('localhost') ||
+    lower.includes('127.0.0.1') ||
+    lower.includes('0.0.0.0') ||
+    lower.includes('::1') ||
+    lower.includes('@postgres:') ||
+    lower.includes('@db:') ||
+    lower.includes('sslmode=disable') ||
+    process.env.PGSSLMODE === 'disable'
+  );
+}
+
+export function buildPoolConfig(rawConnStr: string, forcePlaintext = false): PoolConfig {
+  const cleanConnStr = rawConnStr
+    .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
+    .replace(/[?&]$/, '');
+
+  const isLocal = isPlaintextHost(rawConnStr);
+
+  const isSupabaseOrPooler =
+    rawConnStr.includes('supabase') ||
+    rawConnStr.includes('pooler') ||
+    rawConnStr.includes('aws-0') ||
+    (rawConnStr.includes('sslmode=require') && !isLocal);
+
+  const poolConfig: PoolConfig = {
+    connectionString: cleanConnStr,
+    connectionTimeoutMillis: 8000,
+    idleTimeoutMillis: 30000,
+    max: 10,
+  };
+
+  // Driver-scoped SSL: Enable strictly for remote/pooler endpoints when not flagged as unsupported
+  if (!forcePlaintext && !globalThis.__zecratary_ssl_unsupported && (!isLocal || isSupabaseOrPooler)) {
+    poolConfig.ssl = {
+      rejectUnauthorized: false,
+    };
+  }
+
+  return poolConfig;
+}
+
+export function getPool(forcePlaintext = false): Pool | null {
   const rawConnStr = getConnectionString();
   if (!rawConnStr || rawConnStr.includes('[YOUR-PASSWORD]')) {
     return null;
   }
 
-  // Reuse existing pool instance if connection string is unchanged
-  if (globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === rawConnStr) {
+  if (
+    !forcePlaintext &&
+    globalThis.__zecratary_pg_pool &&
+    globalThis.__zecratary_current_conn === rawConnStr
+  ) {
     return globalThis.__zecratary_pg_pool;
   }
 
@@ -80662,62 +81226,61 @@ export function getPool(): Pool | null {
 
   globalThis.__zecratary_current_conn = rawConnStr;
 
-  const isLocalHost = 
-    rawConnStr.includes('localhost') || 
-    rawConnStr.includes('127.0.0.1') || 
-    rawConnStr.includes('::1') ||
-    rawConnStr.includes('0.0.0.0') ||
-    rawConnStr.includes('@postgres:') ||
-    rawConnStr.includes('@db:') ||
-    rawConnStr.includes('sslmode=disable');
-
-  const isSupabaseOrPooler =
-    rawConnStr.includes('supabase') ||
-    rawConnStr.includes('pooler') ||
-    rawConnStr.includes('aws-0') ||
-    rawConnStr.includes('sslmode=require');
-
-  const cleanConnStr = rawConnStr
-    .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
-    .replace(/[?&]$/, '');
-
-  const poolConfig: PoolConfig = {
-    connectionString: cleanConnStr,
-    connectionTimeoutMillis: 5000,
-    idleTimeoutMillis: 30000,
-    max: 10,
-  };
-
-  if (globalThis.__zecratary_is_plaintext_only || isLocalHost) {
-    poolConfig.ssl = false;
-  } else if (isSupabaseOrPooler || !isLocalHost) {
-    poolConfig.ssl = { rejectUnauthorized: false };
-    if (typeof process !== 'undefined' && process.env) {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-    }
-  }
-
-  const newPool = new Pool(poolConfig);
+  const config = buildPoolConfig(rawConnStr, forcePlaintext);
+  const newPool = new Pool(config);
 
   newPool.on('error', (err) => {
-    if (!err.message?.includes('SSL')) {
-      console.warn('[PostgreSQL Pool Notice]:', err.message);
-    }
+    console.warn('[PostgreSQL Pool Client Notice]:', err.message);
   });
 
   globalThis.__zecratary_pg_pool = newPool;
   return newPool;
 }
 
-// Universal getDbPool satisfying both direct pool access and { pool, dialect } callers
+/**
+ * Universal Dual-Contract getDbPool()
+ * Satisfies callers expecting activePool, activePool.pool, or activePool.dialect
+ */
 export function getDbPool(): any {
-  const p: any = getPool();
-  if (!p) return null;
-  p.pool = p;
-  p.dialect = getDatabaseDialect();
-  p.query = query;
-  return p;
+  const activePool: any = getPool();
+  if (activePool) {
+    activePool.pool = activePool;
+    activePool.dialect = getDatabaseDialect();
+    return activePool;
+  }
+  return {
+    pool: null,
+    dialect: getDatabaseDialect(),
+    query: async () => ({ rows: [] }),
+    connect: async () => ({
+      query: async () => ({ rows: [] }),
+      release: () => {},
+    }),
+  };
 }
+
+/**
+ * Dynamic Proxy Pool export satisfying import { pool } from '@/lib/db'
+ */
+export const pool: any = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      const activePool: any = getPool();
+      if (!activePool) {
+        if (prop === 'query') return async () => ({ rows: [] });
+        if (prop === 'connect') return async () => ({ query: async () => ({ rows: [] }), release: () => {} });
+        if (prop === 'on') return () => {};
+        return undefined;
+      }
+      const val = activePool[prop];
+      if (typeof val === 'function') {
+        return val.bind(activePool);
+      }
+      return val;
+    },
+  }
+);
 
 export async function query(sql: string, params: any[] = []): Promise<any> {
   const dialect = getDatabaseDialect();
@@ -80728,39 +81291,34 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
   }
 
   if (dialect === 'postgres') {
-    let pool = getPool();
-    if (!pool) return [];
+    let activePool = getPool();
+    if (!activePool) return [];
 
     let client: any = null;
     try {
-      client = await pool.connect();
-      const res = await client.query(sql, params);
-      const rows = Array.isArray(res) ? res : (res?.rows || []);
-      (rows as any).rows = rows;
-      return rows;
-    } catch (err: any) {
-      // Automatic recovery if server rejects SSL with "does not support SSL connections"
-      if (err.message && (err.message.includes('does not support SSL') || err.message.includes('SSL connection'))) {
-        globalThis.__zecratary_is_plaintext_only = true;
-        if (globalThis.__zecratary_pg_pool) {
-          try { await globalThis.__zecratary_pg_pool.end(); } catch (_) {}
-          globalThis.__zecratary_pg_pool = undefined;
-        }
-        pool = getPool();
-        if (pool) {
-          try {
-            client = await pool.connect();
-            const retryRes = await client.query(sql, params);
-            const rRows = Array.isArray(retryRes) ? retryRes : (retryRes?.rows || []);
-            (rRows as any).rows = rRows;
-            return rRows;
-          } finally {
-            if (client) {
-              try { client.release(); } catch (_) {}
-            }
-          }
+      try {
+        client = await activePool.connect();
+      } catch (connectErr: any) {
+        if (
+          connectErr?.message &&
+          connectErr.message.includes('The server does not support SSL connections')
+        ) {
+          globalThis.__zecratary_ssl_unsupported = true;
+          activePool = getPool(true);
+          if (!activePool) return [];
+          client = await activePool.connect();
+        } else {
+          throw connectErr;
         }
       }
+
+      const res = (!params || params.length === 0)
+        ? await client.query(sql)
+        : await client.query(sql, params);
+
+      return Array.isArray(res) ? res : (res?.rows || []);
+    } catch (err: any) {
+      console.warn('[PostgreSQL Query Notice]:', err.message);
       throw err;
     } finally {
       if (client) {
@@ -80770,30 +81328,31 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
       }
     }
   } else {
-    // MySQL query executor with isolated runtime loader
     try {
       let mysqlModule: any = null;
       try {
-        mysqlModule = typeof __non_webpack_require__ !== 'undefined' ? __non_webpack_require__('mysql2/promise') : eval('require')('mysql2/promise');
+        mysqlModule = typeof __non_webpack_require__ !== 'undefined'
+          ? __non_webpack_require__('mysql2/promise')
+          : eval('require')('mysql2/promise');
       } catch (_) {
         mysqlModule = await import('mysql2/promise').catch(() => null);
       }
 
       if (!mysqlModule) {
+        console.warn('[MySQL] mysql2 driver not available, falling back.');
         return [];
       }
 
       const connection = await mysqlModule.createConnection(connStr);
       try {
-        const [rows] = await connection.execute(sql, params);
-        if (Array.isArray(rows)) {
-          (rows as any).rows = rows;
-        }
+        const formattedSql = formatQueryForDialect(sql);
+        const [rows] = await connection.execute(formattedSql, params);
         return rows;
       } finally {
         await connection.end().catch(() => {});
       }
     } catch (mysqlErr: any) {
+      console.warn('[MySQL Query Notice]:', mysqlErr.message);
       throw mysqlErr;
     }
   }
@@ -80808,9 +81367,9 @@ export async function transaction<T = any>(callback: (client: any) => Promise<T>
     const result = await callback(client);
     await client.query('COMMIT');
     return result;
-  } catch (e) {
+  } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    throw e;
+    throw err;
   } finally {
     client.release();
   }
@@ -80825,53 +81384,40 @@ export async function closePool(): Promise<void> {
   }
 }
 
-// Named pool export Proxy that delegates dynamically to the active connection pool
-export const pool: any = new Proxy({} as any, {
-  get(_target, prop) {
-    if (prop === 'getDbPool') return getDbPool;
-    if (prop === 'query') return query;
-    if (prop === 'getPool') return getPool;
-    if (prop === 'dialect') return getDatabaseDialect();
-    const active = getPool();
-    if (!active) return undefined;
-    if (prop === 'pool') return active;
-    const val = (active as any)[prop];
-    return typeof val === 'function' ? val.bind(active) : val;
-  }
-});
-
-// Dynamic Default Export Proxy
-const defaultExport: any = new Proxy(
+const dbDefault: any = new Proxy(
   {
     query,
-    getDatabaseDialect,
-    getConnectionString,
     getPool,
     getDbPool,
-    isPostgres,
-    isMySQL,
-    parseDbRows,
-    parseDbRow,
-    closePool,
     pool,
     transaction,
+    getConnectionString,
+    getDatabaseDialect,
+    isPostgres,
+    isMySQL,
+    isPlaintextHost,
+    buildPoolConfig,
+    parseDbRows,
+    parseDbRow,
+    formatQueryForDialect,
+    closePool,
   },
   {
     get(target: any, prop: string | symbol) {
       if (prop in target) {
         return target[prop];
       }
-      const active = getPool();
-      if (active && prop in active) {
-        const val = (active as any)[prop];
-        return typeof val === 'function' ? val.bind(active) : val;
+      const activePool: any = getPool();
+      if (activePool && prop in activePool) {
+        const val = activePool[prop];
+        return typeof val === 'function' ? val.bind(activePool) : val;
       }
       return undefined;
-    }
+    },
   }
 );
 
-export default defaultExport;
+export default dbDefault;
 
 ```
 

@@ -83,7 +83,7 @@
       "isDefault": false
     }
   ],
-  "updatedAt": "2026-10-27T19:35:35.924Z",
+  "updatedAt": "2026-10-28T18:32:59.612Z",
   "chefAiSettings": {
     "model": "gemini-3.5-flash-lite",
     "apiKey": "AQ.Ab8RN6IhH6iaU_4chRKwnTIyKxG4bBTJURnex1GtD9nPAttcOQ",
@@ -568,44 +568,46 @@
     "tokenSymbol": "💎",
     "startingBalance": 100,
     "isEnabled": true,
-    "importUrlCost": 5,
+    "importUrlCost": 10,
     "importTextCost": 2,
     "importPhotoCost": 10,
-    "aiChefCost": 2,
+    "aiChefCost": 8,
     "mealPlannerCost": 5,
     "macroAnalysisCost": 3,
     "planAllocations": {
       "free": 50,
       "nutrition-pro": 750,
-      "vip-chef": 3000
+      "vip-chef": 3000,
+      "taster": 500,
+      "pro-max": 2000
     },
     "packages": [
       {
         "id": "pkg_starter",
         "name": "Starter Spark",
-        "tokenAmount": 250,
-        "priceDollars": 4.99,
         "badge": "Popular",
+        "isPopular": true,
         "bonusTokens": 0,
-        "isPopular": true
+        "tokenAmount": 250,
+        "priceDollars": 4.99
       },
       {
         "id": "pkg_chef",
         "name": "Culinary Master",
-        "tokenAmount": 1000,
-        "priceDollars": 14.99,
         "badge": "Best Value",
+        "isPopular": false,
         "bonusTokens": 150,
-        "isPopular": false
+        "tokenAmount": 1000,
+        "priceDollars": 14.99
       },
       {
         "id": "pkg_executive",
         "name": "Kitchen Enterprise",
-        "tokenAmount": 5000,
-        "priceDollars": 49.99,
         "badge": "VIP",
+        "isPopular": false,
         "bonusTokens": 1000,
-        "isPopular": false
+        "tokenAmount": 5000,
+        "priceDollars": 49.99
       }
     ]
   },
