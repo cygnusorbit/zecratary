@@ -48,6 +48,10 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "envProduction": "Production",
+    "envSandbox": "Sandbox / Testing",
+    "appleClientIdPlaceholder": "e.g. com.zecratary.service",
+    "loadingConfig": "Loading configuration...",
     "filterStatusAll": "All Statuses",
     "filterStatusActive": "Active Only",
     "filterStatusInactive": "Inactive Only",

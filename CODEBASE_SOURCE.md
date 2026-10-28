@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.78",
+  "version": "8.1.79",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.78",
+  "version": "8.1.79",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -19317,8 +19317,8 @@ export default function AdminPluginsPage() {
 
 ## File: `apps/web/src/app/admin/recipe-type/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
@@ -19358,10 +19358,12 @@ export default function AdminRecipeTypePage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [sortOption, setSortOption] = useState<'order' | 'name' | 'slug'>('order');
   const [reorderMode, setReorderMode] = useState<boolean>(false);
   const [hasReordered, setHasReordered] = useState<boolean>(false);
 
-  // Modal Dialog States (Autofill Safe Accessible <div> Containers)
+  // Modal Dialog States (Accessible <div> Containers with Zero <form> Tags)
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<RecipeTypeItem | null>(null);
   const [formData, setFormData] = useState<{
@@ -19382,7 +19384,6 @@ export default function AdminRecipeTypePage() {
   const [itemToDelete, setItemToDelete] = useState<RecipeTypeItem | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Self-update guard to prevent race conditions from own window events
   const isSelfUpdatingRef = useRef<boolean>(false);
   const draggedIndexRef = useRef<number | null>(null);
 
@@ -19449,14 +19450,35 @@ export default function AdminRecipeTypePage() {
   }, [fetchRecipeTypes, t]);
 
   const filteredTypes = useMemo(() => {
+    let list = [...recipeTypes];
+
+    if (statusFilter === 'active') {
+      list = list.filter(item => item.isActive);
+    } else if (statusFilter === 'inactive') {
+      list = list.filter(item => !item.isActive);
+    }
+
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return recipeTypes;
-    return recipeTypes.filter(item => 
-      item.name.toLowerCase().includes(q) || 
-      item.slug.toLowerCase().includes(q) ||
-      (item.description && item.description.toLowerCase().includes(q))
-    );
-  }, [recipeTypes, searchQuery]);
+    if (q) {
+      list = list.filter(item => 
+        item.name.toLowerCase().includes(q) || 
+        item.slug.toLowerCase().includes(q) ||
+        (item.description && item.description.toLowerCase().includes(q))
+      );
+    }
+
+    if (!reorderMode) {
+      if (sortOption === 'name') {
+        list.sort((a, b) => a.name.localeCompare(b.name));
+      } else if (sortOption === 'slug') {
+        list.sort((a, b) => a.slug.localeCompare(b.slug));
+      } else {
+        list.sort((a, b) => (a.order || 0) - (b.order || 0));
+      }
+    }
+
+    return list;
+  }, [recipeTypes, searchQuery, statusFilter, sortOption, reorderMode]);
 
   const stats = useMemo(() => {
     const total = recipeTypes.length;
@@ -19596,7 +19618,6 @@ export default function AdminRecipeTypePage() {
     }
   };
 
-  // Accessible Touch-Friendly Reordering Controls
   const moveItem = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= recipeTypes.length) return;
@@ -19610,7 +19631,6 @@ export default function AdminRecipeTypePage() {
     setHasReordered(true);
   };
 
-  // Drag and Drop Handlers
   const handleDragStart = (index: number) => {
     draggedIndexRef.current = index;
   };
@@ -19662,8 +19682,12 @@ export default function AdminRecipeTypePage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-recipe-types-canvas"
+      role="region"
+      aria-label={t('recipeTypesTitle', 'Recipe Types')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ boxSizing: 'border-box', color: 'var(--color-text)' }}
     >
       {/* Toast Alert Banner */}
       {toast && (
@@ -19684,8 +19708,8 @@ export default function AdminRecipeTypePage() {
         </div>
       )}
 
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div>
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2.5" style={{ color: 'var(--color-primary)' }}>
             <UtensilsCrossed className="h-6 w-6" />
@@ -19722,16 +19746,19 @@ export default function AdminRecipeTypePage() {
         </div>
       </div>
 
-      {/* Action Bar (Search, Reorder Toggle, and Add Type) */}
-      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+      {/* Action Bar (Search, Harmonized Select Controls & Add Type) */}
+      <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+        {/* Search Input */}
         <div className="relative flex-1">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} />
           <input
             type="text"
             data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
             data-form-type="other"
             autoComplete="off"
-            spellCheck="false"
+            spellCheck={false}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('searchRecipeTypesPlaceholder', 'Search recipe types by name or slug...')}
@@ -19748,17 +19775,75 @@ export default function AdminRecipeTypePage() {
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100 cursor-pointer"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Harmonized Controls & Action Buttons */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status Filter Dropdown */}
+          <div className="relative">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              aria-label={t('filterByStatus', 'Filter by Status')}
+              className="appearance-none pl-3.5 pr-8 py-2.5 text-xs font-bold rounded-xl border outline-none cursor-pointer transition-colors duration-200"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('filterStatusAll', 'All Statuses')}
+              </option>
+              <option value="active" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('filterStatusActive', 'Active Only')}
+              </option>
+              <option value="inactive" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('filterStatusInactive', 'Inactive Only')}
+              </option>
+            </select>
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+          </div>
+
+          {/* Sort Dropdown */}
+          <div className="relative">
+            <select
+              value={sortOption}
+              disabled={reorderMode}
+              onChange={(e) => setSortOption(e.target.value as any)}
+              aria-label={t('sortBy', 'Sort by')}
+              className="appearance-none pl-3.5 pr-8 py-2.5 text-xs font-bold rounded-xl border outline-none cursor-pointer transition-colors duration-200 disabled:opacity-40"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <option value="order" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('sortByOrder', 'Custom Order')}
+              </option>
+              <option value="name" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('sortByName', 'Name (A-Z)')}
+              </option>
+              <option value="slug" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                {t('sortBySlug', 'Slug (A-Z)')}
+              </option>
+            </select>
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+          </div>
+
+          {/* Reorder Mode Button */}
           <button
             type="button"
-            onClick={() => setReorderMode(!reorderMode)}
+            onClick={() => {
+              if (!reorderMode) setSortOption('order');
+              setReorderMode(!reorderMode);
+            }}
             className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
             style={reorderMode ? {
               backgroundColor: 'var(--color-primary)',
@@ -19774,6 +19859,7 @@ export default function AdminRecipeTypePage() {
             <span>{t('reorderModeBtn', 'Reorder Mode')}</span>
           </button>
 
+          {/* Save Order Action */}
           {hasReordered && (
             <button
               type="button"
@@ -19787,6 +19873,7 @@ export default function AdminRecipeTypePage() {
             </button>
           )}
 
+          {/* Add Recipe Type */}
           <button
             type="button"
             onClick={handleOpenAddModal}
@@ -19799,11 +19886,11 @@ export default function AdminRecipeTypePage() {
         </div>
       </div>
 
-      {/* Main Table / Card View (Autofill Safe Container) */}
+      {/* Main Table Container */}
       <div 
         role="region"
         data-lpignore="true"
-        className="rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
+        className="w-full rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
@@ -19820,21 +19907,24 @@ export default function AdminRecipeTypePage() {
           <div className="py-16 text-center space-y-3 px-4">
             <UtensilsCrossed className="h-10 w-10 mx-auto stroke-1" style={{ color: 'var(--color-text-secondary)' }} />
             <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('noRecipeTypesFound', 'No recipe types found matching your search.')}
+              {t('noRecipeTypesFound', 'No recipe types found matching your criteria.')}
             </p>
-            {searchQuery && (
+            {(searchQuery || statusFilter !== 'all') && (
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90"
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter('all');
+                }}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90 cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {t('clearSearchBtn', 'Clear Search')}
+                {t('clearSearchBtn', 'Clear Filters')}
               </button>
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto w-full">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr 
@@ -19845,7 +19935,7 @@ export default function AdminRecipeTypePage() {
                     color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {reorderMode && <th className="p-3.5 w-12 text-center">#</th>}
+                  {reorderMode && <th className="p-3.5 w-14 text-center">#</th>}
                   <th className="p-3.5 font-bold">{t('typeNameColumn', 'Type Name')}</th>
                   <th className="p-3.5 font-bold">{t('slugColumn', 'Slug / Identifier')}</th>
                   <th className="p-3.5 font-bold hidden md:table-cell">{t('descriptionColumn', 'Description')}</th>
@@ -19896,7 +19986,8 @@ export default function AdminRecipeTypePage() {
                     {/* Name & Icon */}
                     <td className="p-3.5 font-semibold">
                       <div className="flex items-center gap-3">
-                        <span className="w-8 h-8 rounded-xl border flex items-center justify-center text-sm shadow-xs shrink-0"
+                        <span 
+                          className="w-8 h-8 rounded-xl border flex items-center justify-center text-sm shadow-xs shrink-0"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
                             borderColor: 'var(--color-border)'
@@ -19978,7 +20069,7 @@ export default function AdminRecipeTypePage() {
         )}
       </div>
 
-      {/* Add / Edit Recipe Type Modal (Accessible <div> Container) */}
+      {/* Add / Edit Recipe Type Modal (Zero <form> Accessible <div> Container) */}
       {isModalOpen && (
         <div 
           role="dialog"
@@ -19991,6 +20082,8 @@ export default function AdminRecipeTypePage() {
           <div 
             role="region"
             data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
             data-form-type="other"
             className="w-full max-w-lg rounded-3xl border shadow-2xl p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -20007,7 +20100,7 @@ export default function AdminRecipeTypePage() {
               <button 
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -20021,8 +20114,10 @@ export default function AdminRecipeTypePage() {
                   type="text"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={formData.name}
                   onChange={(e) => handleNameChange(e.target.value)}
                   placeholder={t('typeNamePlaceholder', 'e.g., Breakfast, Main Dish, Dessert')}
@@ -20045,8 +20140,10 @@ export default function AdminRecipeTypePage() {
                     type="text"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    spellCheck={false}
                     value={formData.slug}
                     onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
                     placeholder={t('typeSlugPlaceholder', 'e.g., breakfast, main-dish, dessert')}
@@ -20066,12 +20163,14 @@ export default function AdminRecipeTypePage() {
                     type="text"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    spellCheck={false}
                     value={formData.icon}
                     onChange={(e) => setFormData(prev => ({ ...prev, icon: e.target.value }))}
                     placeholder={t('typeIconPlaceholder', 'e.g., 🍳, 🥗, 🍰')}
-                    className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-center font-emoji"
+                    className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-center"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -20090,8 +20189,10 @@ export default function AdminRecipeTypePage() {
                   rows={2}
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   placeholder={t('typeDescriptionPlaceholder', 'Brief summary of this recipe type...')}
@@ -20126,7 +20227,7 @@ export default function AdminRecipeTypePage() {
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -20139,7 +20240,7 @@ export default function AdminRecipeTypePage() {
                 type="button"
                 disabled={saving || !formData.name.trim()}
                 onClick={handleSaveModal}
-                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95"
+                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95 cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {saving ? '...' : t('saveBtn', 'Save Recipe Type')}
@@ -20149,7 +20250,7 @@ export default function AdminRecipeTypePage() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal (Accessible <div> Container) */}
+      {/* Delete Confirmation Modal (Zero <form> Accessible <div> Container) */}
       {isDeleteModalOpen && itemToDelete && (
         <div 
           role="dialog"
@@ -20194,7 +20295,7 @@ export default function AdminRecipeTypePage() {
                   setIsDeleteModalOpen(false);
                   setItemToDelete(null);
                 }}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -20207,7 +20308,7 @@ export default function AdminRecipeTypePage() {
                 type="button"
                 disabled={saving}
                 onClick={handleConfirmDelete}
-                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50 cursor-pointer"
               >
                 {saving ? '...' : t('confirmDeleteBtn', 'Confirm Delete')}
               </button>
@@ -51346,9 +51447,8 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/recipe-type/route.ts`
 ```typescript
-import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
+import { query, isPostgres } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
@@ -51369,16 +51469,63 @@ const DEFAULT_TYPES = [
   { id: 'rt_11', name: 'Beverages', slug: 'beverages', icon: '🍹', description: 'Cocktails, mocktails, juices, teas, and specialty drinks', isActive: true, order: 11 }
 ];
 
-function getPgPool(): Pool | null {
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) return null;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  const cleanConn = connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '');
-  return new Pool({
-    connectionString: cleanConn,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000
-  });
+let schemaEnsured = false;
+async function ensureSchema() {
+  if (schemaEnsured) return;
+  try {
+    if (isPostgres()) {
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id VARCHAR(64) PRIMARY KEY,
+          recipe_types JSONB DEFAULT '[]'::jsonb,
+          translations JSONB DEFAULT '{}'::jsonb,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS recipe_types JSONB DEFAULT '[]'::jsonb;`);
+      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;`);
+      await query(`
+        CREATE TABLE IF NOT EXISTS recipe_types (
+          id VARCHAR(64) PRIMARY KEY,
+          name VARCHAR(255) NOT NULL UNIQUE,
+          slug VARCHAR(255) NOT NULL UNIQUE,
+          icon VARCHAR(64) DEFAULT '🍽️',
+          description TEXT DEFAULT '',
+          sort_order INT DEFAULT 0,
+          is_active BOOLEAN DEFAULT TRUE,
+          is_default BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+    } else {
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id VARCHAR(64) PRIMARY KEY,
+          recipe_types JSON,
+          translations JSON,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        );
+      `);
+      await query(`
+        CREATE TABLE IF NOT EXISTS recipe_types (
+          id VARCHAR(64) PRIMARY KEY,
+          name VARCHAR(255) NOT NULL UNIQUE,
+          slug VARCHAR(255) NOT NULL UNIQUE,
+          icon VARCHAR(64) DEFAULT '🍽️',
+          description TEXT DEFAULT '',
+          sort_order INT DEFAULT 0,
+          is_active BOOLEAN DEFAULT TRUE,
+          is_default BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    }
+    schemaEnsured = true;
+  } catch (err) {
+    // Non-blocking schema note
+  }
 }
 
 function getLocalFallback(): any[] {
@@ -51399,7 +51546,8 @@ function saveLocalFallback(items: any[]) {
   for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
     const full = path.join(process.cwd(), rel);
     try {
-      os_ensure_dir(path.dirname(full));
+      const dir = path.dirname(full);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       let current: any = {};
       if (fs.existsSync(full)) {
         try { current = JSON.parse(fs.readFileSync(full, 'utf8')); } catch (_) {}
@@ -51411,33 +51559,42 @@ function saveLocalFallback(items: any[]) {
   }
 }
 
-function os_ensure_dir(dir: string) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
 export async function GET() {
-  const pool = getPgPool();
-  if (pool) {
-    try {
-      const client = await pool.connect();
-      try {
-        const res = await client.query(`
-          SELECT recipe_types FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;
-        `);
-        let raw = res.rows?.[0]?.recipe_types;
-        if (typeof raw === 'string') {
-          try { raw = JSON.parse(raw); } catch (_) {}
-        }
-        if (Array.isArray(raw) && raw.length > 0) {
-          return NextResponse.json({ success: true, types: raw, recipeTypes: raw });
-        }
-      } finally {
-        client.release();
-        await pool.end();
+  await ensureSchema();
+
+  try {
+    // Defensive SELECT * prevents "column recipe_types does not exist" errors
+    const rows = await query(`SELECT * FROM admin_settings WHERE id = 'primary_settings' LIMIT 1;`);
+    if (rows && rows.length > 0) {
+      const row = rows[0];
+      let raw = row.recipe_types || row.recipeTypes;
+      if (!raw && row.value && typeof row.value === 'object') {
+        raw = row.value.recipe_types || row.value.recipeTypes;
       }
-    } catch (err: any) {
-      console.warn('PostgreSQL recipe-types fetch note:', err.message);
+      if (typeof raw === 'string') {
+        try { raw = JSON.parse(raw); } catch (_) {}
+      }
+      if (Array.isArray(raw) && raw.length > 0) {
+        return NextResponse.json({ success: true, types: raw, recipeTypes: raw });
+      }
     }
+
+    // Try standalone recipe_types table
+    const tableRows = await query(`SELECT * FROM recipe_types ORDER BY sort_order ASC, created_at ASC;`);
+    if (Array.isArray(tableRows) && tableRows.length > 0) {
+      const normalized = tableRows.map((r: any, idx: number) => ({
+        id: String(r.id),
+        name: String(r.name),
+        slug: String(r.slug),
+        icon: r.icon || '🍽️',
+        description: r.description || '',
+        order: Number(r.sort_order ?? idx + 1),
+        isActive: Boolean(r.is_active !== false && r.is_active !== 0)
+      }));
+      return NextResponse.json({ success: true, types: normalized, recipeTypes: normalized });
+    }
+  } catch (err: any) {
+    // Fallback to disk on database read error
   }
 
   const fallback = getLocalFallback();
@@ -51445,10 +51602,13 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  await ensureSchema();
+
   try {
     const body = await req.json();
-    const current = (await (await GET()).json())?.types || DEFAULT_TYPES;
-    
+    const currentRes = await GET();
+    const current = (await currentRes.json())?.types || DEFAULT_TYPES;
+
     let updated: any[] = [];
     if (Array.isArray(body)) {
       updated = body;
@@ -51469,28 +51629,29 @@ export async function POST(req: Request) {
       updated = [...current, newItem];
     }
 
+    // Persist to local JSON fallback
     saveLocalFallback(updated);
 
-    const pool = getPgPool();
-    if (pool) {
-      try {
-        const client = await pool.connect();
-        try {
-          await client.query(`
-            INSERT INTO admin_settings (id, recipe_types, updated_at)
-            VALUES ('primary_settings', $1::jsonb, NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              recipe_types = EXCLUDED.recipe_types,
-              updated_at = NOW();
-          `, [JSON.stringify(updated)]);
-        } finally {
-          client.release();
-          await pool.end();
-        }
-      } catch (err: any) {
-        console.warn('PostgreSQL recipe-types save note:', err.message);
+    // Persist to admin_settings
+    try {
+      if (isPostgres()) {
+        await query(`
+          INSERT INTO admin_settings (id, recipe_types, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            recipe_types = EXCLUDED.recipe_types,
+            updated_at = NOW();
+        `, [JSON.stringify(updated)]);
+      } else {
+        await query(`
+          INSERT INTO admin_settings (id, recipe_types, updated_at)
+          VALUES ('primary_settings', ?, NOW())
+          ON DUPLICATE KEY UPDATE
+            recipe_types = VALUES(recipe_types),
+            updated_at = NOW();
+        `, [JSON.stringify(updated)]);
       }
-    }
+    } catch (_) {}
 
     return NextResponse.json({ success: true, types: updated, recipeTypes: updated });
   } catch (err: any) {
@@ -51503,12 +51664,15 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  await ensureSchema();
+
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     const slug = searchParams.get('slug');
 
-    const current = (await (await GET()).json())?.types || DEFAULT_TYPES;
+    const currentRes = await GET();
+    const current = (await currentRes.json())?.types || DEFAULT_TYPES;
     const filtered = current.filter((item: any) => {
       if (id && item.id === id) return false;
       if (slug && item.slug === slug) return false;
@@ -51517,22 +51681,23 @@ export async function DELETE(req: Request) {
 
     saveLocalFallback(filtered);
 
-    const pool = getPgPool();
-    if (pool) {
-      try {
-        const client = await pool.connect();
-        try {
-          await client.query(`
-            UPDATE admin_settings
-            SET recipe_types = $1::jsonb, updated_at = NOW()
-            WHERE id = 'primary_settings';
-          `, [JSON.stringify(filtered)]);
-        } finally {
-          client.release();
-          await pool.end();
-        }
-      } catch (_) {}
-    }
+    try {
+      if (isPostgres()) {
+        await query(`
+          UPDATE admin_settings
+          SET recipe_types = $1::jsonb, updated_at = NOW()
+          WHERE id = 'primary_settings';
+        `, [JSON.stringify(filtered)]);
+        if (id) await query(`DELETE FROM recipe_types WHERE id = $1;`, [id]);
+      } else {
+        await query(`
+          UPDATE admin_settings
+          SET recipe_types = ?, updated_at = NOW()
+          WHERE id = 'primary_settings';
+        `, [JSON.stringify(filtered)]);
+        if (id) await query(`DELETE FROM recipe_types WHERE id = ?;`, [id]);
+      }
+    } catch (_) {}
 
     return NextResponse.json({ success: true, types: filtered, recipeTypes: filtered });
   } catch (err: any) {
@@ -55080,7 +55245,7 @@ export async function GET() {
 
   // Try PostgreSQL or MySQL if available
   try {
-    const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any }));
+    const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any as any }));
     if (typeof getDbPool === 'function') {
       const pool = await getDbPool();
       if (pool) {
@@ -55155,7 +55320,7 @@ export async function POST(req: Request) {
 
     // Persist to relational DB if available
     try {
-      const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any }));
+      const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any as any }));
       if (typeof getDbPool === 'function') {
         const pool = await getDbPool();
         if (pool) {
@@ -55215,7 +55380,7 @@ export async function DELETE(req: Request) {
 
     // Remove from DB if connected
     try {
-      const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any }));
+      const { getDbPool } = await import('@/lib/db').catch(() => ({ getDbPool: null as any as any }));
       if (typeof getDbPool === 'function') {
         const pool = await getDbPool();
         if (pool) {
@@ -67247,6 +67412,14 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "filterStatusAll": "All Statuses",
+    "filterStatusActive": "Active Only",
+    "filterStatusInactive": "Inactive Only",
+    "filterByStatus": "Filter by Status",
+    "sortBy": "Sort by",
+    "sortByOrder": "Custom Order",
+    "sortByName": "Name (A-Z)",
+    "sortBySlug": "Slug (A-Z)",
     "storageProviderSelect": "Select Active Provider",
     "storageRegionSelect": "Select Cloud Region",
     "storageCustomRegion": "Custom / Other Region",
@@ -81027,12 +81200,11 @@ export default {
 ```typescript
 // Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
 // GitHub: cygnusorbit/zecratary
-// Satisfies Constraint 8: Adaptive SSL resolution without global process.env pollution
+// Satisfies Constraints 8 & 10: PostgreSQL & MySQL persistence with getDbPool, pool proxy & adaptive SSL
+
+import { Pool, PoolConfig } from 'pg';
 
 declare const __non_webpack_require__: any;
-
-import { Pool } from 'pg';
-import type { PoolConfig } from 'pg';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -81040,7 +81212,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __zecratary_current_conn: string | undefined;
   // eslint-disable-next-line no-var
-  var __zecratary_ssl_unsupported: boolean | undefined;
+  var __zecratary_is_plaintext_only: boolean | undefined;
 }
 
 export function getConnectionString(): string {
@@ -81083,54 +81255,14 @@ export function parseDbRow<T = any>(res: any): T | null {
   return rows.length > 0 ? rows[0] : null;
 }
 
-function buildPoolConfig(rawConnStr: string, forcePlaintext = false): PoolConfig {
-  const cleanConnStr = rawConnStr
-    .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
-    .replace(/[?&]$/, '');
-
-  const isLocal =
-    rawConnStr.includes('localhost') ||
-    rawConnStr.includes('127.0.0.1') ||
-    rawConnStr.includes('0.0.0.0') ||
-    rawConnStr.includes('::1') ||
-    rawConnStr.includes('@postgres:') ||
-    rawConnStr.includes('sslmode=disable');
-
-  const isSupabaseOrPooler =
-    rawConnStr.includes('supabase') ||
-    rawConnStr.includes('pooler') ||
-    rawConnStr.includes('aws-0') ||
-    rawConnStr.includes('sslmode=require');
-
-  const poolConfig: PoolConfig = {
-    connectionString: cleanConnStr,
-    connectionTimeoutMillis: 8000,
-    idleTimeoutMillis: 30000,
-    max: 10,
-  };
-
-  // Driver-scoped SSL: Enable strictly for remote/pooler endpoints when not flagged as unsupported
-  if (!forcePlaintext && !globalThis.__zecratary_ssl_unsupported && (!isLocal || isSupabaseOrPooler)) {
-    poolConfig.ssl = {
-      rejectUnauthorized: false,
-    };
-  }
-
-  return poolConfig;
-}
-
-export function getPool(forcePlaintext = false): Pool | null {
+export function getPool(): Pool | null {
   const rawConnStr = getConnectionString();
   if (!rawConnStr || rawConnStr.includes('[YOUR-PASSWORD]')) {
     return null;
   }
 
-  // Reuse existing pool instance if connection string and SSL mode match
-  if (
-    !forcePlaintext &&
-    globalThis.__zecratary_pg_pool &&
-    globalThis.__zecratary_current_conn === rawConnStr
-  ) {
+  // Reuse existing pool instance if connection string is unchanged
+  if (globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === rawConnStr) {
     return globalThis.__zecratary_pg_pool;
   }
 
@@ -81143,129 +81275,105 @@ export function getPool(forcePlaintext = false): Pool | null {
 
   globalThis.__zecratary_current_conn = rawConnStr;
 
-  const config = buildPoolConfig(rawConnStr, forcePlaintext);
-  const newPool = new Pool(config);
+  const isLocalHost = 
+    rawConnStr.includes('localhost') || 
+    rawConnStr.includes('127.0.0.1') || 
+    rawConnStr.includes('::1') ||
+    rawConnStr.includes('0.0.0.0') ||
+    rawConnStr.includes('@postgres:') ||
+    rawConnStr.includes('@db:') ||
+    rawConnStr.includes('sslmode=disable');
+
+  const isSupabaseOrPooler =
+    rawConnStr.includes('supabase') ||
+    rawConnStr.includes('pooler') ||
+    rawConnStr.includes('aws-0') ||
+    rawConnStr.includes('sslmode=require');
+
+  const cleanConnStr = rawConnStr
+    .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
+    .replace(/[?&]$/, '');
+
+  const poolConfig: PoolConfig = {
+    connectionString: cleanConnStr,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
+    max: 10,
+  };
+
+  if (globalThis.__zecratary_is_plaintext_only || isLocalHost) {
+    poolConfig.ssl = false;
+  } else if (isSupabaseOrPooler || !isLocalHost) {
+    poolConfig.ssl = { rejectUnauthorized: false };
+    if (typeof process !== 'undefined' && process.env) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    }
+  }
+
+  const newPool = new Pool(poolConfig);
 
   newPool.on('error', (err) => {
-    console.warn('[PostgreSQL Pool Client Notice]:', err.message);
+    if (!err.message?.includes('SSL')) {
+      console.warn('[PostgreSQL Pool Notice]:', err.message);
+    }
   });
 
   globalThis.__zecratary_pg_pool = newPool;
   return newPool;
 }
 
-// Universal getDbPool export satisfying callers expecting direct pool or { pool, dialect }
-export async function getDbPool(): Promise<any> {
-  const p = getPool();
-  if (!p) {
-    return {
-      pool: null,
-      dialect: getDatabaseDialect(),
-      query: async () => ({ rows: [], rowCount: 0 }),
-      connect: async () => ({
-        query: async () => ({ rows: [], rowCount: 0 }),
-        release: () => {},
-      }),
-    };
-  }
-  (p as any).pool = p;
-  (p as any).dialect = getDatabaseDialect();
+// Universal getDbPool satisfying both direct pool access and { pool, dialect } callers
+export function getDbPool(): any {
+  const p: any = getPool();
+  if (!p) return null;
+  p.pool = p;
+  p.dialect = getDatabaseDialect();
+  p.query = query;
   return p;
 }
-
-// Proxied pool export ensuring full compatibility with both named and default imports
-export const pool: any = new Proxy({}, {
-  get(_target, prop) {
-    const p = getPool();
-    if (!p) {
-      if (prop === 'then') return undefined;
-      if (prop === 'connect') {
-        return async () => ({
-          query: async () => ({ rows: [], rowCount: 0 }),
-          release: () => {},
-        });
-      }
-      if (prop === 'query') {
-        return async () => ({ rows: [], rowCount: 0 });
-      }
-      if (prop === 'on') return () => {};
-      if (prop === 'end') return async () => {};
-      return undefined;
-    }
-    const val = (p as any)[prop];
-    return typeof val === 'function' ? val.bind(p) : val;
-  }
-});
 
 export async function query(sql: string, params: any[] = []): Promise<any> {
   const dialect = getDatabaseDialect();
   const connStr = getConnectionString();
 
   if (!connStr || connStr.includes('[YOUR-PASSWORD]')) {
-    const emptyRows: any = [];
-    Object.defineProperty(emptyRows, 'rows', { get: () => emptyRows, enumerable: false, configurable: true });
-    Object.defineProperty(emptyRows, 'rowCount', { get: () => 0, enumerable: false, configurable: true });
-    return emptyRows;
+    return [];
   }
 
   if (dialect === 'postgres') {
-    let poolInstance = getPool();
-    if (!poolInstance) {
-      const emptyRows: any = [];
-      Object.defineProperty(emptyRows, 'rows', { get: () => emptyRows, enumerable: false, configurable: true });
-      Object.defineProperty(emptyRows, 'rowCount', { get: () => 0, enumerable: false, configurable: true });
-      return emptyRows;
-    }
+    let pool = getPool();
+    if (!pool) return [];
 
     let client: any = null;
     try {
-      try {
-        client = await poolInstance.connect();
-      } catch (connectErr: any) {
-        // Automatic SSL Handshake Fallback: If local PostgreSQL rejects SSL with 'N' packet
-        if (
-          connectErr.message &&
-          connectErr.message.includes('The server does not support SSL connections')
-        ) {
-          globalThis.__zecratary_ssl_unsupported = true;
-          poolInstance = getPool(true);
-          if (!poolInstance) return [];
-          client = await poolInstance.connect();
-        } else {
-          throw connectErr;
-        }
-      }
-
-      // Simple Query Protocol for parameterless DDL, Extended Query Protocol for parameters
-      const res = (!params || params.length === 0)
-        ? await client.query(sql)
-        : await client.query(sql, params);
-
-      const rows: any = Array.isArray(res) ? res : (res?.rows || []);
-
-      // Attach non-enumerable .rows and .rowCount getters for dual-access compatibility
-      if (Array.isArray(rows)) {
-        try {
-          if (!('rows' in rows)) {
-            Object.defineProperty(rows, 'rows', {
-              get: () => rows,
-              enumerable: false,
-              configurable: true,
-            });
-          }
-          if (!('rowCount' in rows)) {
-            Object.defineProperty(rows, 'rowCount', {
-              get: () => (res && typeof res.rowCount === 'number' ? res.rowCount : rows.length),
-              enumerable: false,
-              configurable: true,
-            });
-          }
-        } catch (_) {}
-      }
-
+      client = await pool.connect();
+      const res = await client.query(sql, params);
+      const rows = Array.isArray(res) ? res : (res?.rows || []);
+      (rows as any).rows = rows;
       return rows;
     } catch (err: any) {
-      console.warn('[PostgreSQL Query Notice]:', err.message);
+      // Automatic recovery if server rejects SSL with "does not support SSL connections"
+      if (err.message && (err.message.includes('does not support SSL') || err.message.includes('SSL connection'))) {
+        globalThis.__zecratary_is_plaintext_only = true;
+        if (globalThis.__zecratary_pg_pool) {
+          try { await globalThis.__zecratary_pg_pool.end(); } catch (_) {}
+          globalThis.__zecratary_pg_pool = undefined;
+        }
+        pool = getPool();
+        if (pool) {
+          try {
+            client = await pool.connect();
+            const retryRes = await client.query(sql, params);
+            const rRows = Array.isArray(retryRes) ? retryRes : (retryRes?.rows || []);
+            (rRows as any).rows = rRows;
+            return rRows;
+          } finally {
+            if (client) {
+              try { client.release(); } catch (_) {}
+            }
+          }
+        }
+      }
       throw err;
     } finally {
       if (client) {
@@ -81275,74 +81383,47 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
       }
     }
   } else {
-    // MySQL query executor with isolated Webpack-safe runtime loader
+    // MySQL query executor with isolated runtime loader
     try {
       let mysqlModule: any = null;
       try {
-        if (typeof __non_webpack_require__ !== 'undefined') {
-          mysqlModule = __non_webpack_require__('mysql2/promise');
-        }
+        mysqlModule = typeof __non_webpack_require__ !== 'undefined' ? __non_webpack_require__('mysql2/promise') : eval('require')('mysql2/promise');
       } catch (_) {
-        mysqlModule = null;
+        mysqlModule = await import('mysql2/promise').catch(() => null);
       }
 
       if (!mysqlModule) {
-        console.warn('[MySQL] mysql2 driver not available, returning empty set.');
-        const emptyRows: any = [];
-        Object.defineProperty(emptyRows, 'rows', { get: () => emptyRows, enumerable: false, configurable: true });
-        Object.defineProperty(emptyRows, 'rowCount', { get: () => 0, enumerable: false, configurable: true });
-        return emptyRows;
+        return [];
       }
 
       const connection = await mysqlModule.createConnection(connStr);
       try {
-        const [rawRows] = await connection.execute(sql, params);
-        const rows: any = Array.isArray(rawRows) ? rawRows : [];
-
-        try {
-          if (!('rows' in rows)) {
-            Object.defineProperty(rows, 'rows', {
-              get: () => rows,
-              enumerable: false,
-              configurable: true,
-            });
-          }
-          if (!('rowCount' in rows)) {
-            Object.defineProperty(rows, 'rowCount', {
-              get: () => rows.length,
-              enumerable: false,
-              configurable: true,
-            });
-          }
-        } catch (_) {}
-
+        const [rows] = await connection.execute(sql, params);
+        if (Array.isArray(rows)) {
+          (rows as any).rows = rows;
+        }
         return rows;
       } finally {
         await connection.end().catch(() => {});
       }
     } catch (mysqlErr: any) {
-      console.warn('[MySQL Query Notice]:', mysqlErr.message);
       throw mysqlErr;
     }
   }
 }
 
 export async function transaction<T = any>(callback: (client: any) => Promise<T>): Promise<T> {
-  const poolInstance = getPool();
-  if (!poolInstance) {
-    throw new Error('Database pool is not available for transaction');
-  }
-  const client = await poolInstance.connect();
+  const p = getPool();
+  if (!p) throw new Error('Database pool not available');
+  const client = await p.connect();
   try {
     await client.query('BEGIN');
     const result = await callback(client);
     await client.query('COMMIT');
     return result;
-  } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
-    throw err;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
   } finally {
     client.release();
   }
@@ -81357,31 +81438,50 @@ export async function closePool(): Promise<void> {
   }
 }
 
-const defaultExport: any = {
-  query,
-  transaction,
-  getDatabaseDialect,
-  getConnectionString,
-  getPool,
-  getDbPool,
-  isPostgres,
-  isMySQL,
-  parseDbRows,
-  parseDbRow,
-  closePool,
-  pool,
-};
+// Named pool export Proxy that delegates dynamically to the active connection pool
+export const pool: any = new Proxy({} as any, {
+  get(_target, prop) {
+    if (prop === 'getDbPool') return getDbPool;
+    if (prop === 'query') return query;
+    if (prop === 'getPool') return getPool;
+    if (prop === 'dialect') return getDatabaseDialect();
+    const active = getPool();
+    if (!active) return undefined;
+    if (prop === 'pool') return active;
+    const val = (active as any)[prop];
+    return typeof val === 'function' ? val.bind(active) : val;
+  }
+});
 
-Object.setPrototypeOf(
-  defaultExport,
-  new Proxy({}, {
-    get(_target, prop) {
-      const p = getPool();
-      if (!p) return undefined;
-      const val = (p as any)[prop];
-      return typeof val === 'function' ? val.bind(p) : val;
-    },
-  })
+// Dynamic Default Export Proxy
+const defaultExport: any = new Proxy(
+  {
+    query,
+    getDatabaseDialect,
+    getConnectionString,
+    getPool,
+    getDbPool,
+    isPostgres,
+    isMySQL,
+    parseDbRows,
+    parseDbRow,
+    closePool,
+    pool,
+    transaction,
+  },
+  {
+    get(target: any, prop: string | symbol) {
+      if (prop in target) {
+        return target[prop];
+      }
+      const active = getPool();
+      if (active && prop in active) {
+        const val = (active as any)[prop];
+        return typeof val === 'function' ? val.bind(active) : val;
+      }
+      return undefined;
+    }
+  }
 );
 
 export default defaultExport;

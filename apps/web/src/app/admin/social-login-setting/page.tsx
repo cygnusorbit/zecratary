@@ -5,13 +5,14 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Key, Check, Copy, Eye, EyeOff, RotateCcw, 
-  ArrowLeft, CheckCircle2, AlertCircle, RefreshCw, Sparkles
+  ArrowLeft, CheckCircle2, AlertCircle, RefreshCw, Sparkles,
+  ChevronDown, Settings2, Sliders
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
-import FontAwesomeIcon from '@/components/FontAwesomeIcon';
 
 interface ProviderConfig {
   enabled: boolean;
+  environment: 'production' | 'sandbox';
   clientId?: string;
   clientSecret?: string;
   appId?: string;
@@ -31,18 +32,21 @@ interface SocialLoginSettings {
 const DEFAULT_SETTINGS: SocialLoginSettings = {
   google: {
     enabled: true,
+    environment: 'production',
     clientId: '',
     clientSecret: '',
     callbackUrl: '/api/auth/callback/google'
   },
   facebook: {
     enabled: true,
+    environment: 'production',
     appId: '',
     appSecret: '',
     callbackUrl: '/api/auth/callback/facebook'
   },
   apple: {
     enabled: true,
+    environment: 'production',
     clientId: '',
     teamId: '',
     keyId: '',
@@ -60,7 +64,7 @@ export default function SocialLoginSettingPage() {
   const [saving, setSaving] = useState<boolean>(false);
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
 
-  // Field visibility toggles (secret eye / eye-off)
+  // Field visibility toggles
   const [showGoogleSecret, setShowGoogleSecret] = useState<boolean>(false);
   const [showFacebookSecret, setShowFacebookSecret] = useState<boolean>(false);
   const [showApplePrivateKey, setShowApplePrivateKey] = useState<boolean>(false);
@@ -119,11 +123,17 @@ export default function SocialLoginSettingPage() {
 
     window.addEventListener('zecratary_social_login_updated', handleExternalUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_theme_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_theme_mode_changed', handleExternalUpdates);
+    window.addEventListener('zecratary_theme_changed', handleExternalUpdates);
     window.addEventListener('storage', handleExternalUpdates);
 
     return () => {
       window.removeEventListener('zecratary_social_login_updated', handleExternalUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_theme_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_theme_mode_changed', handleExternalUpdates);
+      window.removeEventListener('zecratary_theme_changed', handleExternalUpdates);
       window.removeEventListener('storage', handleExternalUpdates);
     };
   }, [fetchSettings, t]);
@@ -211,8 +221,12 @@ export default function SocialLoginSettingPage() {
 
   return (
     <div 
-      className="max-w-5xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-social-login-canvas"
+      role="region"
+      aria-label={t('socialLoginTitle', 'Social Login Settings')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)', boxSizing: 'border-box' }}
     >
       {/* Toast Alert Banner */}
       {toast && (
@@ -288,14 +302,15 @@ export default function SocialLoginSettingPage() {
         <div className="py-24 flex flex-col items-center justify-center gap-3">
           <RefreshCw className="h-7 w-7 animate-spin" style={{ color: 'var(--color-primary)' }} />
           <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            Loading configuration...
+            {t('loadingConfig', 'Loading configuration...')}
           </p>
         </div>
       ) : (
         <div className="space-y-6">
-          {/* PROVIDER 1: GOOGLE (Font Awesome: f1a0) */}
+          {/* PROVIDER 1: GOOGLE */}
           <div 
             role="region"
+            aria-label={t('googleProviderTitle', 'Google Identity Services')}
             data-lpignore="true"
             className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -312,12 +327,12 @@ export default function SocialLoginSettingPage() {
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  <FontAwesomeIcon
-                    name="f1a0"
-                    unicode="f1a0"
-                    size={20}
-                    className="shrink-0 text-[#EA4335]"
-                  />
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
                 </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
@@ -329,7 +344,32 @@ export default function SocialLoginSettingPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Harmonized Dropdown: Environment Mode */}
+                <div className="relative">
+                  <select
+                    value={settings.google.environment || 'production'}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      google: { ...prev.google, environment: e.target.value as any }
+                    }))}
+                    className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer transition-colors duration-200"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <option value="production" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envProduction', 'Production')}
+                    </option>
+                    <option value="sandbox" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envSandbox', 'Sandbox / Testing')}
+                    </option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+                </div>
+
                 <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('google').color}`}>
                   {getProviderStatus('google').label}
                 </span>
@@ -358,7 +398,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.google.clientId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -384,7 +424,7 @@ export default function SocialLoginSettingPage() {
                     autoComplete="off"
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    spellCheck={false}
                     value={settings.google.clientSecret || ''}
                     onChange={(e) => setSettings(prev => ({
                       ...prev,
@@ -404,6 +444,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     onClick={() => setShowGoogleSecret(!showGoogleSecret)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition cursor-pointer"
+                    aria-label={showGoogleSecret ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}
                   >
                     {showGoogleSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -413,7 +454,7 @@ export default function SocialLoginSettingPage() {
               {/* Callback URL & Test Connection */}
               <div className="md:col-span-2 space-y-1.5 pt-2">
                 <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     type="text"
                     readOnly
@@ -428,7 +469,7 @@ export default function SocialLoginSettingPage() {
                   <button
                     type="button"
                     onClick={() => handleCopyUrl(settings.google.callbackUrl)}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -442,7 +483,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     disabled={testingProvider === 'google'}
                     onClick={() => handleTestConnection('google')}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -457,9 +498,10 @@ export default function SocialLoginSettingPage() {
             </div>
           </div>
 
-          {/* PROVIDER 2: FACEBOOK (Font Awesome: f09a) */}
+          {/* PROVIDER 2: FACEBOOK */}
           <div 
             role="region"
+            aria-label={t('facebookProviderTitle', 'Facebook Login (Meta Graph)')}
             data-lpignore="true"
             className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -476,12 +518,9 @@ export default function SocialLoginSettingPage() {
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  <FontAwesomeIcon
-                    name="f09a"
-                    unicode="f09a"
-                    size={20}
-                    className="shrink-0 text-[#1877F2]"
-                  />
+                  <svg className="w-5 h-5 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                  </svg>
                 </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
@@ -493,7 +532,32 @@ export default function SocialLoginSettingPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Harmonized Dropdown: Environment Mode */}
+                <div className="relative">
+                  <select
+                    value={settings.facebook.environment || 'production'}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      facebook: { ...prev.facebook, environment: e.target.value as any }
+                    }))}
+                    className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer transition-colors duration-200"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <option value="production" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envProduction', 'Production')}
+                    </option>
+                    <option value="sandbox" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envSandbox', 'Sandbox / Testing')}
+                    </option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+                </div>
+
                 <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('facebook').color}`}>
                   {getProviderStatus('facebook').label}
                 </span>
@@ -522,7 +586,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.facebook.appId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -548,7 +612,7 @@ export default function SocialLoginSettingPage() {
                     autoComplete="off"
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    spellCheck={false}
                     value={settings.facebook.appSecret || ''}
                     onChange={(e) => setSettings(prev => ({
                       ...prev,
@@ -568,6 +632,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     onClick={() => setShowFacebookSecret(!showFacebookSecret)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition cursor-pointer"
+                    aria-label={showFacebookSecret ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}
                   >
                     {showFacebookSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -577,7 +642,7 @@ export default function SocialLoginSettingPage() {
               {/* Callback URL & Test Connection */}
               <div className="md:col-span-2 space-y-1.5 pt-2">
                 <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     type="text"
                     readOnly
@@ -592,7 +657,7 @@ export default function SocialLoginSettingPage() {
                   <button
                     type="button"
                     onClick={() => handleCopyUrl(settings.facebook.callbackUrl)}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -606,7 +671,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     disabled={testingProvider === 'facebook'}
                     onClick={() => handleTestConnection('facebook')}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -621,9 +686,10 @@ export default function SocialLoginSettingPage() {
             </div>
           </div>
 
-          {/* PROVIDER 3: APPLE (Font Awesome: f179) */}
+          {/* PROVIDER 3: APPLE */}
           <div 
             role="region"
+            aria-label={t('appleProviderTitle', 'Sign in with Apple')}
             data-lpignore="true"
             className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
             style={{
@@ -640,13 +706,9 @@ export default function SocialLoginSettingPage() {
                     borderColor: 'var(--color-border)'
                   }}
                 >
-                  <FontAwesomeIcon
-                    name="f179"
-                    unicode="f179"
-                    size={20}
-                    className="shrink-0"
-                    style={{ color: 'var(--color-text)' }}
-                  />
+                  <svg className="w-5 h-5" fill="currentColor" style={{ color: 'var(--color-text)' }} viewBox="0 0 170 170">
+                    <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.69-3.04-7.6-7.77-11.74-14.19-6.3-9.78-11.4-20.91-15.3-33.39-3.9-12.48-5.85-23.95-5.85-34.41 0-14.19 3.69-25.79 11.08-34.79 7.39-9 16.6-13.62 27.64-13.84 4.58 0 9.87 1.15 15.86 3.47 5.99 2.32 10.02 3.54 12.09 3.66 1.84 0 6.04-1.34 12.61-4.02 6.57-2.68 12.09-3.82 16.56-3.41 12.44.8 22.42 5.37 29.93 13.7-10.86 6.53-16.18 15.53-15.96 27.01.22 8.97 3.63 16.48 10.23 22.52 6.6 6.04 14.45 9.49 23.54 10.35-2.23 6.94-5.06 14.07-8.49 21.39zM119.22 31.85c0-7.23 2.61-14.03 7.83-20.41 5.22-6.38 11.66-10.42 19.32-12.12.7 3.58 1.05 6.94 1.05 10.09 0 7.33-2.65 14.18-7.95 20.55-5.3 6.37-11.83 10.42-19.6 12.15-.22-3.47-.65-6.89-.65-10.26z" />
+                  </svg>
                 </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
@@ -658,7 +720,32 @@ export default function SocialLoginSettingPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Harmonized Dropdown: Environment Mode */}
+                <div className="relative">
+                  <select
+                    value={settings.apple.environment || 'production'}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      apple: { ...prev.apple, environment: e.target.value as any }
+                    }))}
+                    className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer transition-colors duration-200"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <option value="production" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envProduction', 'Production')}
+                    </option>
+                    <option value="sandbox" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                      {t('envSandbox', 'Sandbox / Testing')}
+                    </option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none opacity-60" style={{ color: 'var(--color-text)' }} />
+                </div>
+
                 <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('apple').color}`}>
                   {getProviderStatus('apple').label}
                 </span>
@@ -687,13 +774,13 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.apple.clientId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
                     apple: { ...prev.apple, clientId: e.target.value }
                   }))}
-                  placeholder="e.g. com.zecratary.service"
+                  placeholder={t('appleClientIdPlaceholder', 'e.g. com.zecratary.service')}
                   className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -712,7 +799,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.apple.teamId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -737,7 +824,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.apple.keyId || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -763,6 +850,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     onClick={() => setShowApplePrivateKey(!showApplePrivateKey)}
                     className="text-[11px] font-bold opacity-60 hover:opacity-100 flex items-center gap-1 cursor-pointer"
+                    aria-label={showApplePrivateKey ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}
                   >
                     {showApplePrivateKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                     <span>{showApplePrivateKey ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}</span>
@@ -773,7 +861,7 @@ export default function SocialLoginSettingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
+                  spellCheck={false}
                   value={settings.apple.privateKey || ''}
                   onChange={(e) => setSettings(prev => ({
                     ...prev,
@@ -794,7 +882,7 @@ export default function SocialLoginSettingPage() {
               {/* Callback URL & Test Connection */}
               <div className="md:col-span-3 space-y-1.5 pt-2">
                 <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     type="text"
                     readOnly
@@ -809,7 +897,7 @@ export default function SocialLoginSettingPage() {
                   <button
                     type="button"
                     onClick={() => handleCopyUrl(settings.apple.callbackUrl)}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -823,7 +911,7 @@ export default function SocialLoginSettingPage() {
                     type="button"
                     disabled={testingProvider === 'apple'}
                     onClick={() => handleTestConnection('apple')}
-                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
