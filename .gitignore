@@ -28,3 +28,8 @@ node_modules
 # Sensitive environment files and build caches
 .env.*.local
 apps/web/.env
+
+# Schema exceptions (allow version-controlled DDL)
+!scripts/schema.sql
+!scripts/schema.mysql.sql
+!scripts/*.sql

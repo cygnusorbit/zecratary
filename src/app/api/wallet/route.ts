@@ -1,587 +1,299 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import fs from 'fs';
-import path from 'path';
 
-async function ensureWalletSchema() {
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+let isDbInitialized = false;
+
+async function initWalletDb() {
+  if (isDbInitialized) return;
   try {
     await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id INT PRIMARY KEY DEFAULT 1,
-        payment_settings JSONB,
+      CREATE TABLE IF NOT EXISTS wallet_settings (
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
+        is_enabled BOOLEAN DEFAULT true,
         currency VARCHAR(10) DEFAULT 'USD',
-        site_name TEXT,
-        theme_colors JSONB,
-        value JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        min_topup NUMERIC(10,2) DEFAULT 5.00,
+        max_topup NUMERIC(10,2) DEFAULT 1000.00,
+        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
+        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
+        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
+        allow_site_purchases BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-    `);
 
-    await query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        email TEXT UNIQUE,
-        name TEXT,
-        wallet_balance NUMERIC(12,2) DEFAULT 0.00,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
       CREATE TABLE IF NOT EXISTS wallet_transactions (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id TEXT,
-        user_email TEXT,
-        amount NUMERIC(12,2) DEFAULT 0.00,
-        balance_after NUMERIC(12,2) DEFAULT 0.00,
-        type VARCHAR(50) DEFAULT 'topup',
-        gateway VARCHAR(50) DEFAULT 'stripe',
-        gateway_tx_id TEXT,
-        status VARCHAR(50) DEFAULT 'succeeded',
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        user_email VARCHAR(255) NOT NULL,
+        type VARCHAR(32) NOT NULL,
+        amount NUMERIC(10,2) NOT NULL,
+        balance_after NUMERIC(10,2) NOT NULL,
+        gateway VARCHAR(32) DEFAULT 'stripe',
+        gateway_tx_id VARCHAR(255),
+        status VARCHAR(32) DEFAULT 'succeeded',
         description TEXT,
-        metadata JSONB DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-    `);
 
-    await query(`
+      CREATE INDEX IF NOT EXISTS idx_wallet_tx_user ON wallet_transactions(user_id, user_email);
+
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(255) PRIMARY KEY,
         customer_name TEXT,
         customer_email TEXT,
         plan_name TEXT,
         plan_slug TEXT,
-        amount NUMERIC(12,2) DEFAULT 0.00,
+        amount NUMERIC DEFAULT 0,
         currency VARCHAR(10) DEFAULT 'USD',
         gateway VARCHAR(50) DEFAULT 'stripe',
         status VARCHAR(50) DEFAULT 'succeeded',
-        transfer_reference TEXT,
-        notes TEXT,
+        test_mode BOOLEAN DEFAULT false,
+        failure_reason TEXT,
+        is_recurring BOOLEAN DEFAULT false,
+        recurring_interval VARCHAR(20) DEFAULT 'ONE_TIME',
+        auto_renew BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        gateway_transaction_id TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ
       );
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
+
+      INSERT INTO wallet_settings (id, is_enabled, currency, min_topup, max_topup, preset_amounts, bonus_rules, allowed_gateways, allow_site_purchases)
+      VALUES ('current', true, 'USD', 5.00, 1000.00, '[10, 25, 50, 100, 250]', '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]', '["stripe", "paypal", "manual"]', true)
+      ON CONFLICT (id) DO UPDATE SET min_topup = LEAST(wallet_settings.min_topup, 5.00);
     `);
-  } catch (err) {
-    console.warn('[Wallet API] Schema initialization notice:', err);
+    isDbInitialized = true;
+  } catch (err: any) {
+    console.warn('[Wallet DB init notice]:', err.message);
+    isDbInitialized = true;
   }
 }
 
-async function getMasterGatewaySettings() {
-  await ensureWalletSchema();
-
-  let settings: any = {
-    currency: 'USD',
-    testMode: true,
-    stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
-    paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
-    manualSettlement: {
-      enabled: false,
-      bankName: '',
-      accountHolder: '',
-      accountNumber: '',
-      routingNumber: '',
-      swiftBic: '',
-      branchName: '',
-      instructions: '',
-      requireReference: true,
-    }
-  };
-
-  // 1. Strictly target id = 1 in admin_settings to prevent stale multi-row merges
+export async function GET(req: NextRequest) {
   try {
-    const sRes = await query(`SELECT payment_settings, currency, value FROM admin_settings WHERE id = 1 LIMIT 1`);
-    const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
-    if (row) {
-      if (row.payment_settings) {
-        const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-        if (ps && typeof ps === 'object') settings = { ...settings, ...ps };
-      } else if (row.value) {
-        const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-        if (val && typeof val === 'object') {
-          if (val.paymentSettings) settings = { ...settings, ...val.paymentSettings };
-          else settings = { ...settings, ...val };
-        }
-      }
-      if (row.currency) settings.currency = row.currency;
-    }
-  } catch (_) {}
+    await initWalletDb();
+    const { searchParams } = new URL(req.url);
+    const email = String(searchParams.get('email') || '').toLowerCase().trim();
+    const userId = String(searchParams.get('userId') || '').trim();
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
+    const offset = (page - 1) * limit;
+    const search = String(searchParams.get('search') || '').toLowerCase().trim();
+    const typeFilter = String(searchParams.get('type') || 'all').toLowerCase().trim();
 
-  // 1.1 Fallback to first available row if id = 1 does not exist
-  if (!settings.stripe?.secretKey && !settings.stripe?.publishableKey) {
-    try {
-      const fbRes = await query(`SELECT payment_settings, currency, value FROM admin_settings ORDER BY id ASC LIMIT 1`);
-      const fbRow = Array.isArray(fbRes) ? fbRes[0] : fbRes?.rows?.[0];
-      if (fbRow) {
-        if (fbRow.payment_settings) {
-          const ps = typeof fbRow.payment_settings === 'string' ? JSON.parse(fbRow.payment_settings) : fbRow.payment_settings;
-          if (ps && typeof ps === 'object') settings = { ...settings, ...ps };
-        }
-        if (fbRow.currency) settings.currency = fbRow.currency;
-      }
-    } catch (_) {}
-  }
-
-  // 2. Local filesystem mirror check
-  try {
-    const candidatePaths = [
-      path.join(process.cwd(), 'data', 'admin_settings.json'),
-      path.join(process.cwd(), '..', 'data', 'admin_settings.json'),
-      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    ];
-    for (const fp of candidatePaths) {
-      if (fs.existsSync(fp)) {
-        const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
-        if (fd.paymentSettings && typeof fd.paymentSettings === 'object') {
-          if (!settings.stripe?.publishableKey && !settings.stripe?.secretKey) {
-            settings = { ...settings, ...fd.paymentSettings };
-          }
-        }
-        if (fd.currency && !settings.currency) settings.currency = fd.currency;
-        break;
-      }
-    }
-  } catch (_) {}
-
-  // 3. Fallback to server environment variables
-  if (!settings.stripe.publishableKey) {
-    settings.stripe.publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
-  }
-  if (!settings.stripe.secretKey) {
-    settings.stripe.secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
-  }
-  if (!settings.stripe.webhookSecret) {
-    settings.stripe.webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
-  }
-  if (!settings.paypal.clientId) {
-    settings.paypal.clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
-  }
-  if (!settings.paypal.clientSecret) {
-    settings.paypal.clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
-  }
-
-  // Determine allowed gateways strictly by their enabled status in /admin/payment-gateway
-  const stripeEnabled = settings.stripe?.enabled !== undefined ? Boolean(settings.stripe.enabled) : true;
-  const paypalEnabled = settings.paypal?.enabled !== undefined ? Boolean(settings.paypal.enabled) : false;
-  const manualEnabled = settings.manualSettlement?.enabled !== undefined 
-    ? Boolean(settings.manualSettlement.enabled) 
-    : (settings.manual?.enabled !== undefined ? Boolean(settings.manual.enabled) : false);
-
-  const allowedGateways: string[] = [];
-  if (stripeEnabled) allowedGateways.push('stripe');
-  if (paypalEnabled) allowedGateways.push('paypal');
-  if (manualEnabled) allowedGateways.push('manual');
-
-  return {
-    rawSettings: settings,
-    allowedGateways,
-    stripeEnabled,
-    paypalEnabled,
-    manualEnabled,
-    currency: settings.currency || 'USD',
-    testMode: Boolean(settings.testMode),
-  };
-}
-
-export async function GET(req: Request) {
-  try {
-    const gwData = await getMasterGatewaySettings();
-    const url = new URL(req.url);
-    const userId = url.searchParams.get('userId') || '';
-    const userEmail = (url.searchParams.get('email') || '').toLowerCase().trim();
-    const page = parseInt(url.searchParams.get('page') || '1', 10);
-    const limit = parseInt(url.searchParams.get('limit') || '10', 10);
-    const search = (url.searchParams.get('search') || '').toLowerCase().trim();
-    const typeFilter = url.searchParams.get('type') || 'all';
-
-    let balance = 0;
-    let transactions: any[] = [];
-    let totalCount = 0;
-    let totalDeposited = 0;
-    let totalSpent = 0;
-
-    if (userId || userEmail) {
-      try {
-        const uRes = await query(
-          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-          [userId, userEmail]
-        );
-        const uRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
-        if (uRow && uRow.wallet_balance !== undefined) {
-          balance = Number(uRow.wallet_balance || 0);
-        }
-
-        let queryParams: any[] = [userId, userEmail];
-        let whereClauses = [`((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`];
-
-        if (typeFilter && typeFilter !== 'all') {
-          queryParams.push(typeFilter);
-          whereClauses.push(`type = $${queryParams.length}`);
-        }
-
-        if (search) {
-          queryParams.push(`%${search}%`);
-          whereClauses.push(`(LOWER(description) LIKE $${queryParams.length} OR LOWER(gateway_tx_id) LIKE $${queryParams.length} OR LOWER(id) LIKE $${queryParams.length})`);
-        }
-
-        const whereSql = whereClauses.join(' AND ');
-        const countRes = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, queryParams);
-        const countRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
-        totalCount = parseInt(countRow?.count || '0', 10);
-
-        const offset = (page - 1) * limit;
-        queryParams.push(limit, offset);
-        const tRes = await query(
-          `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
-          queryParams
-        );
-        transactions = Array.isArray(tRes) ? tRes : (tRes?.rows || []);
-
-        const statsRes = await query(
-          `SELECT 
-            SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as total_dep,
-            SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as total_sp
-           FROM wallet_transactions 
-           WHERE ((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`,
-          [userId, userEmail]
-        );
-        const statsRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
-        totalDeposited = Number(statsRow?.total_dep || 0);
-        totalSpent = Number(statsRow?.total_sp || 0);
-      } catch (dbErr) {
-        console.warn('[Wallet API] Data query notice:', dbErr);
-      }
-    }
-
-    let walletRules: any = {
+    // 1. Fetch Wallet Settings with explicit string comparisons
+    let settings = {
       is_enabled: true,
-      min_topup: 5.00,
-      max_topup: 1000.00,
+      currency: 'USD',
+      min_topup: 5,
+      max_topup: 1000,
       preset_amounts: [10, 25, 50, 100, 250],
-      bonus_rules: [
-        { threshold: 50, bonus_percent: 5 },
-        { threshold: 100, bonus_percent: 10 }
-      ],
+      bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
+      allowed_gateways: ['stripe', 'paypal', 'manual'],
       allow_site_purchases: true
     };
 
     try {
-      const wRes = await query(`SELECT * FROM wallet_settings WHERE id = 'current' OR id = '1' LIMIT 1`);
-      const wRow = Array.isArray(wRes) ? wRes[0] : wRes?.rows?.[0];
-      if (wRow) {
-        walletRules = {
-          ...walletRules,
-          ...wRow,
-          min_topup: parseFloat(wRow.min_topup || 5),
-          max_topup: parseFloat(wRow.max_topup || 1000),
-          preset_amounts: typeof wRow.preset_amounts === 'string' ? JSON.parse(wRow.preset_amounts) : (wRow.preset_amounts || walletRules.preset_amounts),
-          bonus_rules: typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : (wRow.bonus_rules || walletRules.bonus_rules),
+      const sRes: any = await query(`
+        SELECT * FROM wallet_settings 
+        WHERE id::text = 'current' OR id::text = '1'
+        LIMIT 1;
+      `);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        settings = {
+          is_enabled: sRow.is_enabled !== false,
+          currency: sRow.currency || 'USD',
+          min_topup: Number(sRow.min_topup || 5),
+          max_topup: Number(sRow.max_topup || 1000),
+          preset_amounts: Array.isArray(sRow.preset_amounts) ? sRow.preset_amounts : (typeof sRow.preset_amounts === 'string' ? JSON.parse(sRow.preset_amounts) : [10, 25, 50, 100, 250]),
+          bonus_rules: Array.isArray(sRow.bonus_rules) ? sRow.bonus_rules : (typeof sRow.bonus_rules === 'string' ? JSON.parse(sRow.bonus_rules) : []),
+          allowed_gateways: Array.isArray(sRow.allowed_gateways) ? sRow.allowed_gateways : ['stripe', 'paypal', 'manual'],
+          allow_site_purchases: sRow.allow_site_purchases !== false
         };
       }
     } catch (_) {}
 
-    const manualDetails = {
-      enabled: gwData.manualEnabled,
-      bankName: gwData.rawSettings.manualSettlement?.bankName || gwData.rawSettings.manual?.bankName || '',
-      accountHolder: gwData.rawSettings.manualSettlement?.accountHolder || gwData.rawSettings.manual?.accountHolder || '',
-      accountNumber: gwData.rawSettings.manualSettlement?.accountNumber || gwData.rawSettings.manual?.accountNumber || '',
-      routingNumber: gwData.rawSettings.manualSettlement?.routingNumber || gwData.rawSettings.manual?.routingNumber || '',
-      swiftBic: gwData.rawSettings.manualSettlement?.swiftBic || gwData.rawSettings.manual?.swiftBic || '',
-      branchName: gwData.rawSettings.manualSettlement?.branchName || gwData.rawSettings.manual?.branchName || '',
-      instructions: gwData.rawSettings.manualSettlement?.instructions || gwData.rawSettings.manual?.instructions || 'Please transfer the exact amount and include your reference number.',
-      requireReference: gwData.rawSettings.manualSettlement?.requireReference ?? true,
-    };
+    // 2. Fetch User & Wallet Balance (Strict type-cast comparison)
+    let userRow: any = null;
+    let walletBalance = 0.00;
 
-    const structuredSettings = {
-      is_enabled: walletRules.is_enabled !== false,
-      currency: gwData.currency,
-      min_topup: walletRules.min_topup,
-      max_topup: walletRules.max_topup,
-      preset_amounts: walletRules.preset_amounts,
-      bonus_rules: walletRules.bonus_rules,
-      allowed_gateways: gwData.allowedGateways,
-      active_gateway: gwData.allowedGateways[0] || null,
-      allow_site_purchases: walletRules.allow_site_purchases !== false,
-      stripe_configured: Boolean(gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY),
-      paypal_configured: Boolean(gwData.rawSettings.paypal?.clientId || process.env.PAYPAL_CLIENT_ID),
-      test_mode: gwData.testMode,
-      manual_details: manualDetails,
-    };
+    if (userId || email) {
+      try {
+        const uRes: any = await query(`
+          SELECT id, email, name, wallet_balance, token_balance, role 
+          FROM users 
+          WHERE (id::text = $1::text AND $1::text != '') 
+             OR (email IS NOT NULL AND LOWER(email) = LOWER($2::text) AND $2::text != '')
+          LIMIT 1;
+        `, [userId, email]);
+        userRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
+        if (userRow) {
+          walletBalance = parseFloat(userRow.wallet_balance || 0);
+        }
+      } catch (_) {}
+    }
+
+    // 3. Query User Transaction Ledger with Type-Safe Conditionals
+    const conditions: string[] = [];
+    const values: any[] = [];
+
+    const identityClauses: string[] = [];
+    if (email) {
+      values.push(email);
+      identityClauses.push(`LOWER(TRIM(user_email)) = LOWER(TRIM($${values.length}::text))`);
+    }
+    if (userId) {
+      values.push(userId);
+      identityClauses.push(`user_id::text = $${values.length}::text`);
+    }
+    if (userRow?.id && userRow.id !== userId) {
+      values.push(String(userRow.id));
+      identityClauses.push(`user_id::text = $${values.length}::text`);
+    }
+
+    if (identityClauses.length > 0) {
+      conditions.push(`(${identityClauses.join(' OR ')})`);
+    } else {
+      conditions.push(`(user_id::text = 'usr_admin_1' OR user_id IS NULL)`);
+    }
+
+    if (typeFilter && typeFilter !== 'all') {
+      values.push(typeFilter);
+      conditions.push(`type = $${values.length}::text`);
+    }
+
+    if (search) {
+      values.push(`%${search}%`);
+      const sIdx = values.length;
+      conditions.push(`(
+        LOWER(COALESCE(description, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(id, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(gateway_tx_id, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(gateway, '')) LIKE $${sIdx}::text
+      )`);
+    }
+
+    const whereSql = conditions.join(' AND ');
+
+    let totalCount = 0;
+    try {
+      const countRes: any = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, values);
+      const cRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
+      totalCount = parseInt(cRow?.count || '0', 10);
+    } catch (_) {}
+
+    const pageValues = [...values, limit, offset];
+    let transactions: any[] = [];
+    try {
+      const rowsRes: any = await query(`
+        SELECT * FROM wallet_transactions 
+        WHERE ${whereSql} 
+        ORDER BY created_at DESC 
+        LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}
+      `, pageValues);
+      transactions = Array.isArray(rowsRes) ? rowsRes : (rowsRes?.rows || []);
+    } catch (_) {}
+
+    let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
+    try {
+      const statsRes: any = await query(`
+        SELECT 
+          COALESCE(SUM(CASE WHEN amount > 0 AND status IN ('succeeded', 'successful', 'completed', 'paid') THEN amount ELSE 0 END), 0) as total_deposited,
+          COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
+          COUNT(*) as total_events
+        FROM wallet_transactions 
+        WHERE ${whereSql} AND status IN ('succeeded', 'successful', 'completed', 'paid')
+      `, values);
+      const stRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+      if (stRow) {
+        stats = {
+          totalDeposited: parseFloat(stRow.total_deposited || 0),
+          totalSpent: parseFloat(stRow.total_spent || 0),
+          totalEvents: parseInt(stRow.total_events || 0, 10)
+        };
+      }
+    } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      balance,
-      wallet_balance: balance,
-      currency: gwData.currency,
-      allowed_gateways: gwData.allowedGateways,
-      allowedGateways: gwData.allowedGateways,
-      active_gateway: gwData.allowedGateways[0] || null,
-      settings: structuredSettings,
-      gatewaySettings: {
-        currency: gwData.currency,
-        testMode: gwData.testMode,
-        stripe: {
-          enabled: gwData.stripeEnabled,
-          publishableKey: gwData.rawSettings.stripe?.publishableKey || ''
-        },
-        paypal: {
-          enabled: gwData.paypalEnabled,
-          clientId: gwData.rawSettings.paypal?.clientId || '',
-          environment: gwData.rawSettings.paypal?.environment || 'sandbox'
-        },
-        manualSettlement: manualDetails,
-      },
+      balance: walletBalance,
+      wallet_balance: walletBalance,
+      walletBalance: walletBalance,
+      user: userRow ? {
+        id: userRow.id,
+        email: userRow.email,
+        name: userRow.name || 'Chef',
+        wallet_balance: walletBalance
+      } : null,
+      settings,
       transactions,
       totalCount,
       totalPages: Math.max(1, Math.ceil(totalCount / limit)),
       page,
-      stats: {
-        totalDeposited,
-        totalSpent,
-        totalEvents: totalCount
-      }
-    });
+      limit,
+      stats
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message, balance: 0, wallet_balance: 0 }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    await ensureWalletSchema();
-    const gwData = await getMasterGatewaySettings();
+    await initWalletDb();
     const body = await req.json();
-    const action = body.action || 'topup';
-    const gateway = (body.gateway || '').toLowerCase();
-    const userId = String(body.userId || '');
-    const userEmail = (body.email || body.userEmail || '').toLowerCase().trim();
-    const depositAmt = parseFloat(String(body.amount || 0));
-    const bonusAmt = parseFloat(String(body.bonus || 0));
-    const totalAddition = depositAmt + (bonusAmt > 0 ? bonusAmt : 0);
+    const { action, amount, bonus, gateway, email, userId, gatewayTxId } = body;
 
-    // 1. RECONCILE WALLET
-    if (action === 'reconcile_wallet') {
-      const uRes = await query(
-        `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-        [userId, userEmail]
-      );
-      const balance = Number(Array.isArray(uRes) ? uRes[0]?.wallet_balance : uRes?.rows?.[0]?.wallet_balance || 0);
+    const depositAmount = parseFloat(amount || 0);
+    const bonusAmount = parseFloat(bonus || 0);
+    const totalToAdd = depositAmount + bonusAmount;
 
-      const txRes = await query(
-        `SELECT * FROM wallet_transactions WHERE (user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != '') ORDER BY created_at DESC LIMIT 20`,
-        [userId, userEmail]
-      );
-      const txs = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
-
-      return NextResponse.json({
-        success: true,
-        message: 'Wallet ledger is synchronized with payment gateway.',
-        wallet_balance: balance,
-        transactions: txs
-      });
+    if (isNaN(depositAmount) || depositAmount <= 0) {
+      return NextResponse.json({ success: false, error: 'Invalid deposit amount' }, { status: 400 });
     }
 
-    // 2. VERIFY STRIPE SESSION
-    if (action === 'verify_stripe_session') {
-      const sessionId = body.sessionId;
-      if (!sessionId) {
-        return NextResponse.json({ success: false, error: 'Session ID is required.' }, { status: 400 });
-      }
+    const targetEmail = String(email || 'admin@zecratary.com').toLowerCase().trim();
+    const targetUserId = String(userId || 'usr_admin_1').trim();
 
-      const existTx = await query(
-        `SELECT id, balance_after FROM wallet_transactions WHERE gateway_tx_id = $1 LIMIT 1`,
-        [sessionId]
-      );
-      const existRow = Array.isArray(existTx) ? existTx[0] : existTx?.rows?.[0];
-      if (existRow) {
-        const uRes = await query(
-          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-          [userId, userEmail]
-        );
-        const curBal = Number(Array.isArray(uRes) ? uRes[0]?.wallet_balance : uRes?.rows?.[0]?.wallet_balance || 0);
-        return NextResponse.json({
-          success: true,
-          message: 'Payment verified! Your wallet has been credited.',
-          wallet_balance: curBal
-        });
-      }
+    // 1. Update user balance atomically
+    const updateRes: any = await query(`
+      UPDATE users 
+      SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+      WHERE (id::text = $2::text AND $2::text != '') 
+         OR (email IS NOT NULL AND LOWER(email) = LOWER($3::text))
+      RETURNING id, email, wallet_balance;
+    `, [totalToAdd, targetUserId, targetEmail]);
 
-      let verifiedAmount = 50.00;
-      const secretKey = gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
+    const userRow = Array.isArray(updateRes) ? updateRes[0] : updateRes?.rows?.[0];
+    const newBalance = userRow ? parseFloat(userRow.wallet_balance) : totalToAdd;
 
-      if (secretKey && !sessionId.startsWith('cs_test_mock_')) {
-        try {
-          const sRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${sessionId}`, {
-            headers: { Authorization: `Bearer ${secretKey}` }
-          });
-          const sessionData = await sRes.json();
-          if (sessionData && sessionData.id) {
-            const metaTotal = parseFloat(sessionData.metadata?.totalAddition || '0');
-            if (metaTotal > 0) {
-              verifiedAmount = metaTotal;
-            } else if (sessionData.amount_total) {
-              verifiedAmount = sessionData.amount_total / 100;
-            }
-          }
-        } catch (e: any) {
-          console.warn('[Wallet API] Stripe retrieve notice:', e.message);
-        }
-      }
+    // 2. Record transaction in ledger
+    const txId = 'wtx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+    const desc = bonusAmount > 0 
+      ? `Wallet Deposit ($${depositAmount.toFixed(2)} + $${bonusAmount.toFixed(2)} Bonus)`
+      : `Wallet Deposit ($${depositAmount.toFixed(2)})`;
 
-      await query(
-        `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-         WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
-        [verifiedAmount, userId, userEmail]
-      );
-
-      const balRes = await query(
-        `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-        [userId, userEmail]
-      );
-      const newBal = Number(Array.isArray(balRes) ? balRes[0]?.wallet_balance : balRes?.rows?.[0]?.wallet_balance || 0);
-
-      const txId = 'wtx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      await query(
-        `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, metadata, created_at)
-         VALUES ($1, $2, $3, $4, $5, 'topup', 'stripe', $6, 'succeeded', $7, $8, NOW())`,
-        [
-          txId, userId, userEmail, verifiedAmount, newBal, sessionId,
-          `Deposit Top-Up via Stripe Checkout (${gwData.currency} ${verifiedAmount.toFixed(2)})`,
-          JSON.stringify({ sessionId, verified: true })
-        ]
-      );
-
-      await query(
-        `INSERT INTO payment_transactions (id, customer_name, customer_email, plan_name, plan_slug, amount, currency, gateway, status, created_at, updated_at)
-         VALUES ($1, $2, $3, 'Wallet Top-Up', 'wallet_topup', $4, $5, 'stripe', 'succeeded', NOW(), NOW())
-         ON CONFLICT (id) DO NOTHING`,
-        [sessionId, userEmail || 'Customer', userEmail, verifiedAmount, gwData.currency]
-      ).catch(() => {});
-
-      return NextResponse.json({
-        success: true,
-        message: `Stripe checkout verified! ${gwData.currency} ${verifiedAmount.toFixed(2)} added to your wallet.`,
-        wallet_balance: newBal
-      });
-    }
-
-    // 3. ENFORCE AUTHORITATIVE GATEWAY AVAILABILITY
-    if (gateway === 'stripe' && !gwData.stripeEnabled) {
-      return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
-    }
-    if (gateway === 'paypal' && !gwData.paypalEnabled) {
-      return NextResponse.json({ success: false, error: 'PayPal digital wallet is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
-    }
-    if (gateway === 'manual' && !gwData.manualEnabled) {
-      return NextResponse.json({ success: false, error: 'Manual Settlement is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
-    }
-
-    // 4. STRIPE CHECKOUT INITIATION
-    if (gateway === 'stripe') {
-      const secretKey = gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
-      const origin = body.origin || (typeof process.env.NEXTAUTH_URL === 'string' ? process.env.NEXTAUTH_URL : 'http://localhost:3000');
-
-      if (secretKey && secretKey.startsWith('sk_')) {
-        try {
-          const zeroDecimal = ['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'];
-          const isZeroDecimal = zeroDecimal.includes(gwData.currency.toLowerCase());
-          const unitAmount = isZeroDecimal ? Math.round(depositAmt) : Math.round(depositAmt * 100);
-
-          const params = new URLSearchParams();
-          params.append('payment_method_types[0]', 'card');
-          params.append('mode', 'payment');
-          params.append('success_url', `${origin}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`);
-          params.append('cancel_url', `${origin}/wallet?status=cancelled`);
-          if (userEmail) params.append('customer_email', userEmail);
-          params.append('line_items[0][price_data][currency]', gwData.currency.toLowerCase());
-          params.append('line_items[0][price_data][product_data][name]', `Store Credit Top-Up (${gwData.currency} ${depositAmt.toFixed(2)})`);
-          params.append('line_items[0][price_data][unit_amount]', String(unitAmount));
-          params.append('line_items[0][quantity]', '1');
-          params.append('metadata[userId]', userId);
-          params.append('metadata[email]', userEmail);
-          params.append('metadata[totalAddition]', String(totalAddition));
-          params.append('metadata[type]', 'topup');
-          params.append('metadata[gateway]', 'stripe');
-
-          const sRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${secretKey}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: params.toString()
-          });
-
-          const session = await sRes.json();
-          if (session.url) {
-            return NextResponse.json({ success: true, checkoutUrl: session.url, sessionId: session.id });
-          } else {
-            throw new Error(session.error?.message || 'Failed to create Stripe Checkout session');
-          }
-        } catch (sErr: any) {
-          if (!gwData.testMode) {
-            return NextResponse.json({ success: false, error: sErr.message || 'Stripe error.' }, { status: 400 });
-          }
-        }
-      }
-
-      // Sandbox Mock Fallback
-      if (gwData.testMode) {
-        const mockSessionId = `cs_test_mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        return NextResponse.json({
-          success: true,
-          checkoutUrl: `${origin}/wallet?status=success&session_id=${mockSessionId}`
-        });
-      }
-
-      return NextResponse.json({ success: false, error: 'Stripe keys are not configured in Payment Gateway settings.' }, { status: 400 });
-    }
-
-    // 5. PAYPAL CHECKOUT INITIATION
-    if (gateway === 'paypal') {
-      const origin = body.origin || (typeof process.env.NEXTAUTH_URL === 'string' ? process.env.NEXTAUTH_URL : 'http://localhost:3000');
-      if (gwData.testMode) {
-        const mockSessionId = `cs_test_mock_pp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        return NextResponse.json({
-          success: true,
-          checkoutUrl: `${origin}/wallet?status=success&session_id=${mockSessionId}&gateway=paypal`
-        });
-      }
-      return NextResponse.json({ success: false, error: 'Live PayPal integration is awaiting credentials in /admin/payment-gateway.' }, { status: 400 });
-    }
-
-    // 6. MANUAL SETTLEMENT / BANK WIRE
-    const ref = body.transferReference || body.transfer_reference || body.gatewayTxId || `manual_${Date.now()}`;
-    await query(
-      `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-       WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
-      [totalAddition, userId, userEmail]
-    );
-
-    const balRes = await query(
-      `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-      [userId, userEmail]
-    );
-    const newBal = Number(Array.isArray(balRes) ? balRes[0]?.wallet_balance : balRes?.rows?.[0]?.wallet_balance || 0);
-
-    const txId = 'wtx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-    await query(
-      `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at)
-       VALUES ($1, $2, $3, $4, $5, 'topup', 'manual', $6, 'succeeded', $7, NOW())`,
-      [txId, userId, userEmail, totalAddition, newBal, ref, `Manual Deposit Top-Up: ${gwData.currency} ${depositAmt.toFixed(2)}${bonusAmt > 0 ? ` (+${gwData.currency} ${bonusAmt.toFixed(2)} bonus)` : ''}`]
-    );
-
-    await query(
-      `INSERT INTO payment_transactions (id, customer_name, customer_email, plan_name, plan_slug, amount, currency, gateway, status, transfer_reference, created_at, updated_at)
-       VALUES ($1, $2, $3, 'Wallet Top-Up', 'wallet_topup', $4, $5, 'manual_settlement', 'succeeded', $6, NOW(), NOW())
-       ON CONFLICT (id) DO NOTHING`,
-      [txId, userEmail || 'Customer', userEmail, depositAmt, gwData.currency, ref]
-    ).catch(() => {});
+    await query(`
+      INSERT INTO wallet_transactions (
+        id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, created_at
+      ) VALUES ($1::text, $2::text, $3::text, 'topup', $4, $5, $6::text, $7::text, 'succeeded', $8::text, NOW());
+    `, [txId, targetUserId, targetEmail, totalToAdd, newBalance, gateway || 'manual', gatewayTxId || txId, desc]);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully deposited ${gwData.currency} ${depositAmt.toFixed(2)} into your wallet!`,
-      wallet_balance: newBal
+      wallet_balance: newBalance,
+      balance: newBalance,
+      message: `Successfully deposited $${depositAmount.toFixed(2)} into your wallet!`
     });
+
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

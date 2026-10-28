@@ -1,115 +1,120 @@
-// Generated & Maintained by AI Collaborator - Production Build Compliant
-// @ts-nocheck
 import { NextResponse } from 'next/server';
-import { query, parseDbRows } from '@/lib/db';
+import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-interface LanguageItem {
-  id?: string;
-  code: string;
-  name: string;
-  native?: string;
-  flag?: string;
-  direction?: 'ltr' | 'rtl';
-  status: 'active' | 'inactive';
-  is_default: boolean;
-}
-
-const DEFAULT_SUPPORTED_LANGUAGES: LanguageItem[] = [
-  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true },
-  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false }
+const DEFAULT_SUPPORTED_LANGUAGES = [
+  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', status: 'active', is_default: false },
+  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', status: 'active', is_default: false },
+  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', status: 'active', is_default: false },
+  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', status: 'active', is_default: false },
+  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', status: 'active', is_default: false },
+  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', status: 'active', is_default: false },
+  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', status: 'active', is_default: false },
+  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', status: 'active', is_default: false },
+  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', status: 'active', is_default: false },
+  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false }
 ];
 
-function getJsonStorePath(): string {
-  const possiblePaths = [
-    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
-  ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return p;
+let isLanguagesDbInitialized = false;
+
+async function ensureLanguagesSchema() {
+  if (isLanguagesDbInitialized) return;
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY,
+        key VARCHAR(64),
+        settings JSONB DEFAULT '{}'::jsonb,
+        supported_languages JSONB DEFAULT '[]'::jsonb,
+        translations JSONB DEFAULT '{}'::jsonb,
+        default_language VARCHAR(32) DEFAULT 'en',
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
+    const alters = [
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id VARCHAR(64);",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(64);",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '[]'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(32) DEFAULT 'en';",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();",
+      "CREATE TABLE IF NOT EXISTS app_translations (lang_code VARCHAR(32) PRIMARY KEY, lang_name VARCHAR(64), dictionary JSONB DEFAULT '{}'::jsonb, updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());"
+    ];
+
+    for (const sql of alters) {
+      await query(sql).catch(() => {});
+    }
+
+    isLanguagesDbInitialized = true;
+  } catch (_) {
+    // Non-blocking schema guard
   }
-  return possiblePaths[0];
 }
 
 function readLocalSettingsFallback(): any {
-  try {
-    const p = getJsonStorePath();
-    if (fs.existsSync(p)) {
-      const raw = fs.readFileSync(p, 'utf-8');
-      return JSON.parse(raw);
+  const possiblePaths = [
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
+  ];
+
+  for (const fp of possiblePaths) {
+    if (fs.existsSync(fp)) {
+      try {
+        const raw = fs.readFileSync(fp, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed) return parsed;
+      } catch (_) {}
     }
-  } catch (_) {}
+  }
   return null;
 }
 
-function normalizeLanguageList(rawList: any[]): LanguageItem[] {
-  if (!Array.isArray(rawList) || rawList.length === 0) {
-    return DEFAULT_SUPPORTED_LANGUAGES;
-  }
-  return rawList.map((item: any, idx: number) => {
-    if (!item) return DEFAULT_SUPPORTED_LANGUAGES[0];
-    const code = (item.code || item.locale || item.lang || `lang_${idx}`).toLowerCase().trim();
-    const name = item.name || code.toUpperCase();
-    const native = item.native || item.nativeName || item.native_name || name;
-    const flag = item.flag || '🌐';
-    const direction = item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr');
-    let status: 'active' | 'inactive' = 'active';
-    if (item.status === 'inactive' || item.status === 'disabled' || item.is_active === false || item.isActive === false) {
-      status = 'inactive';
-    }
-    const is_default = Boolean(item.is_default || item.isDefault || code === 'en');
-    return {
-      id: item.id || `lang_${code}`,
-      code,
-      name,
-      native,
-      flag,
-      direction,
-      status,
-      is_default
-    };
-  });
-}
+export async function GET(request: Request) {
+  await ensureLanguagesSchema();
 
-export async function GET() {
-  let supportedLanguages: LanguageItem[] = DEFAULT_SUPPORTED_LANGUAGES;
+  const { searchParams } = new URL(request.url);
+  const requestedCode = searchParams.get('code');
+
+  let supportedLanguages = DEFAULT_SUPPORTED_LANGUAGES;
   let translations: Record<string, Record<string, string>> = {};
   let defaultLanguage = 'en';
   let dbLoaded = false;
 
-  // 1. Authoritative query from PostgreSQL / MySQL using centralized adaptive query()
+  // Query admin_settings defensively using SELECT * to avoid catalog aborts on missing column names
   try {
-    const adminRes = await query(`
-      SELECT supported_languages, translations, default_language, settings 
-      FROM admin_settings 
-      WHERE id = 'primary_settings' OR id = '1' OR key = 'current' OR key = 'default' 
-      ORDER BY updated_at DESC LIMIT 1;
-    `);
+    const adminRes = await query(
+      `SELECT * FROM admin_settings WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1' ORDER BY updated_at DESC LIMIT 1`
+    ).catch(() => null);
 
-    const rows = parseDbRows(adminRes);
+    const rows = Array.isArray(adminRes) ? adminRes : (adminRes?.rows || []);
     if (rows && rows.length > 0) {
       const row = rows[0];
       const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
 
       if (row.supported_languages) {
-        const parsed = typeof row.supported_languages === 'string' ? JSON.parse(row.supported_languages) : row.supported_languages;
-        supportedLanguages = normalizeLanguageList(parsed);
+        supportedLanguages = typeof row.supported_languages === 'string'
+          ? JSON.parse(row.supported_languages)
+          : row.supported_languages;
         dbLoaded = true;
-      } else if (settings?.supportedLanguages || settings?.languages) {
-        supportedLanguages = normalizeLanguageList(settings.supportedLanguages || settings.languages);
+      } else if (settings?.supportedLanguages && Array.isArray(settings.supportedLanguages)) {
+        supportedLanguages = settings.supportedLanguages;
         dbLoaded = true;
       }
 
       if (row.translations) {
-        translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
+        translations = typeof row.translations === 'string'
+          ? JSON.parse(row.translations)
+          : row.translations;
         dbLoaded = true;
-      } else if (settings?.translations) {
+      } else if (settings?.translations && typeof settings.translations === 'object') {
         translations = settings.translations;
         dbLoaded = true;
       }
@@ -122,10 +127,10 @@ export async function GET() {
     }
   } catch (_) {}
 
-  // 2. Query dedicated app_translations table if available
+  // Query dedicated app_translations table
   try {
-    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations;`);
-    const transRows = parseDbRows(transRes);
+    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations`).catch(() => null);
+    const transRows = Array.isArray(transRes) ? transRes : (transRes?.rows || []);
     if (transRows && transRows.length > 0) {
       transRows.forEach((r: any) => {
         if (r.lang_code && r.dictionary) {
@@ -136,14 +141,13 @@ export async function GET() {
     }
   } catch (_) {}
 
-  // 3. Fallback to local admin_settings.json if database was cold or uninitialized
+  // Local admin_settings.json fallback
   if (!dbLoaded || Object.keys(translations).length === 0) {
     const fileData = readLocalSettingsFallback();
     if (fileData) {
       const langConfig = fileData.languages || fileData;
-      const fileLangs = langConfig.supportedLanguages || langConfig.languages || fileData.supported_languages;
-      if (Array.isArray(fileLangs) && fileLangs.length > 0) {
-        supportedLanguages = normalizeLanguageList(fileLangs);
+      if (langConfig.supportedLanguages && Array.isArray(langConfig.supportedLanguages)) {
+        supportedLanguages = langConfig.supportedLanguages;
       }
       if (langConfig.translations && typeof langConfig.translations === 'object') {
         translations = { ...langConfig.translations, ...translations };
@@ -154,145 +158,93 @@ export async function GET() {
     }
   }
 
+  // Handle single code lookup
+  if (requestedCode) {
+    const code = requestedCode.toLowerCase().trim();
+    const dictionary = translations[code] || {};
+    return NextResponse.json({
+      success: true,
+      code,
+      dictionary,
+      defaultLanguage
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  }
+
   return NextResponse.json({
     success: true,
-    supportedLanguages,
     languages: supportedLanguages,
+    supportedLanguages,
     translations,
     defaultLanguage
   }, {
-    headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate',
-      'Pragma': 'no-cache'
-    }
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
   });
 }
 
 export async function POST(req: Request) {
+  await ensureLanguagesSchema();
+
   try {
     const body = await req.json();
-    const rawLanguages = body.supportedLanguages || body.languages || body.supported_languages || [];
-    const supportedLanguages = normalizeLanguageList(rawLanguages);
-    const translations = body.translations || {};
-    const defaultLanguage = body.defaultLanguage || body.default_language || 'en';
+    const { supportedLanguages: rawLangs, languages, translations, defaultLanguage = 'en' } = body;
+    const finalLangs = rawLangs || languages || [];
 
-    // 1. Ensure table structure exists in PostgreSQL / MySQL
+    // Upsert into admin_settings with explicit string identifiers
     try {
-      await query(`
-        CREATE TABLE IF NOT EXISTS admin_settings (
-          id VARCHAR(255) PRIMARY KEY,
-          site_name VARCHAR(255) DEFAULT 'Zecratary',
-          tagline TEXT DEFAULT 'Autonomous Culinary Intelligence & Precision Meal Planning',
-          titlebar_emoji VARCHAR(50) DEFAULT '👨‍🍳',
-          titlebar_image TEXT DEFAULT '',
-          favicon_emoji VARCHAR(50) DEFAULT '👨‍🍳',
-          favicon_image TEXT DEFAULT '',
-          font_family VARCHAR(100) DEFAULT 'Inter, sans-serif',
-          theme_colors JSONB DEFAULT '{}'::jsonb,
-          supported_languages JSONB DEFAULT '[]'::jsonb,
-          translations JSONB DEFAULT '{}'::jsonb,
-          default_language VARCHAR(32) DEFAULT 'en',
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-      `);
-
-      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '[]'::jsonb;`);
-      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;`);
-      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(32) DEFAULT 'en';`);
-
-      await query(`
-        CREATE TABLE IF NOT EXISTS app_translations (
-          lang_code VARCHAR(32) PRIMARY KEY,
-          dictionary JSONB DEFAULT '{}'::jsonb,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-      `);
-    } catch (_) {}
-
-    // 2. Upsert into admin_settings
-    try {
-      await query(`
-        INSERT INTO admin_settings (id, supported_languages, translations, default_language, updated_at)
-        VALUES ('primary_settings', $1::jsonb, $2::jsonb, $3, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          supported_languages = EXCLUDED.supported_languages,
-          translations = EXCLUDED.translations,
-          default_language = EXCLUDED.default_language,
-          updated_at = NOW();
-      `, [
-        JSON.stringify(supportedLanguages),
-        JSON.stringify(translations),
-        String(defaultLanguage)
-      ]);
-    } catch (err: any) {
-      try {
-        await query(`
-          INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
-          VALUES ('current', $1::jsonb, $2::jsonb, $3, NOW())
-          ON CONFLICT (key) DO UPDATE SET
-            supported_languages = EXCLUDED.supported_languages,
-            translations = EXCLUDED.translations,
-            default_language = EXCLUDED.default_language,
-            updated_at = NOW();
-        `, [
-          JSON.stringify(supportedLanguages),
-          JSON.stringify(translations),
-          String(defaultLanguage)
-        ]);
-      } catch (_) {}
+      await query(
+        `INSERT INTO admin_settings (id, key, supported_languages, translations, default_language, updated_at)
+         VALUES ('primary_settings', 'current', $1, $2, $3, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           supported_languages = EXCLUDED.supported_languages,
+           translations = EXCLUDED.translations,
+           default_language = EXCLUDED.default_language,
+           updated_at = NOW()`,
+        [
+          JSON.stringify(finalLangs),
+          JSON.stringify(translations || {}),
+          String(defaultLanguage || 'en')
+        ]
+      );
+    } catch (_) {
+      await query(
+        `INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
+         VALUES ('current', $1, $2, $3, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           supported_languages = EXCLUDED.supported_languages,
+           translations = EXCLUDED.translations,
+           default_language = EXCLUDED.default_language,
+           updated_at = NOW()`,
+        [
+          JSON.stringify(finalLangs),
+          JSON.stringify(translations || {}),
+          String(defaultLanguage || 'en')
+        ]
+      ).catch(() => {});
     }
 
-    // 3. Upsert individual dictionaries into app_translations
+    // Upsert individual dictionaries into app_translations
     if (translations && typeof translations === 'object') {
       for (const [code, dict] of Object.entries(translations)) {
         try {
-          await query(`
-            INSERT INTO app_translations (lang_code, dictionary, updated_at)
-            VALUES ($1, $2::jsonb, NOW())
-            ON CONFLICT (lang_code) DO UPDATE SET
-              dictionary = EXCLUDED.dictionary,
-              updated_at = NOW();
-          `, [code.toLowerCase(), JSON.stringify(dict)]);
+          await query(
+            `INSERT INTO app_translations (lang_code, dictionary, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (lang_code) DO UPDATE SET
+               dictionary = EXCLUDED.dictionary,
+               updated_at = NOW()`,
+            [code, JSON.stringify(dict)]
+          );
         } catch (_) {}
       }
     }
 
-    // 4. Mirror to filesystem data/admin_settings.json
-    try {
-      const p = getJsonStorePath();
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      let currentData: any = {};
-      if (fs.existsSync(p)) {
-        try {
-          currentData = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        } catch (_) {}
-      }
-      currentData.supported_languages = supportedLanguages;
-      currentData.supportedLanguages = supportedLanguages;
-      currentData.languages = {
-        ...(currentData.languages || {}),
-        supportedLanguages,
-        languages: supportedLanguages,
-        translations,
-        defaultLanguage
-      };
-      currentData.translations = { ...(currentData.translations || {}), ...translations };
-      currentData.defaultLanguage = defaultLanguage;
-      currentData.updated_at = new Date().toISOString();
-      fs.writeFileSync(p, JSON.stringify(currentData, null, 2), 'utf-8');
-
-      const altP = p.includes('apps/web') ? p.replace('apps/web/', '') : path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json');
-      if (altP !== p && fs.existsSync(path.dirname(altP))) {
-        fs.writeFileSync(altP, JSON.stringify(currentData, null, 2), 'utf-8');
-      }
-    } catch (_) {}
-
     return NextResponse.json({
       success: true,
-      message: 'Language settings synchronized with PostgreSQL, MySQL, and server store.',
-      supportedLanguages,
-      languages: supportedLanguages,
-      translations,
+      message: 'Language configuration saved successfully.',
+      supportedLanguages: finalLangs,
+      languages: finalLangs,
       defaultLanguage
     });
   } catch (error: any) {
