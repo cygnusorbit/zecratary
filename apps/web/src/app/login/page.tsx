@@ -1,4 +1,4 @@
-// Generated / Updated by AI Collaborator - Production Build Compliant
+// Generated / Updated by AI Collaborator - High-Performance Login
 'use client';
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
@@ -35,11 +35,8 @@ function persistSessionUniversally(user: any) {
   } catch (_) {}
 }
 
-/**
- * Sanitizes destination and guarantees redirection to /dashboard
- */
 function sanitizeDestination(targetUrl: string | null | undefined, userRole?: string): string {
-  const fallback = '/dashboard';
+  const fallback = userRole === 'admin' ? '/admin' : '/dashboard';
   if (!targetUrl) return fallback;
 
   const trimmed = targetUrl.trim();
@@ -55,9 +52,7 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
         path.startsWith('/login/') || 
         path === '/register' || 
         path === '/register/' || 
-        path.startsWith('/register/') ||
-        path === '/' ||
-        path === ''
+        path.startsWith('/register/')
       ) {
         return fallback;
       }
@@ -80,8 +75,6 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
     lower.startsWith('/register/') ||
     lower === 'login' ||
     lower === 'register' ||
-    lower === '/' ||
-    lower === '' ||
     lower.includes('%2flogin') ||
     lower.includes('%2fregister')
   ) {
@@ -121,65 +114,96 @@ function LoginForm() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  useEffect(() => {
-    if (searchParams.get('logout') === 'true') {
-      try {
-        localStorage.removeItem('zecratary_current_user');
-        localStorage.removeItem('zecratary_session');
-        localStorage.removeItem('currentUser');
-        sessionStorage.clear();
-      } catch (_) {}
-      setSuccessMsg(t('loggedOutSuccess', 'You have been logged out successfully.'));
-    }
-  }, [searchParams, t]);
-
   const isRedirectingRef = useRef(false);
   const hasExchangedCodeRef = useRef(false);
-  const isFetchingSocialRef = useRef(false);
 
+  // Fast optimistic defaults to avoid layout shifts or delayed rendering
   const [socialConfig, setSocialConfig] = useState<SocialProvidersConfig>({
-    googleEnabled: false,
+    googleEnabled: true,
     googleClientId: '',
     facebookEnabled: false,
     appleEnabled: false
   });
-  const [socialLoaded, setSocialLoaded] = useState(false);
+  const [socialLoaded, setSocialLoaded] = useState(true);
 
-  // 1. Dynamic PostgreSQL Dictionary Hydration
-  const loadDynamicDictionary = useCallback(async () => {
+  // Pre-warm dashboard route
+  useEffect(() => {
+    try {
+      router.prefetch('/dashboard');
+    } catch (_) {}
+  }, [router]);
+
+  // 1. Parallel Non-Blocking Initial Hydration (with 2.5s Timeout Guard)
+  const loadInitialConfigs = useCallback(async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+
     try {
       const activeLocale = currentLangCode || 'en';
-      const res = await fetch(`/api/admin/languages?code=${encodeURIComponent(activeLocale)}`, {
-        cache: 'no-store'
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.dictionary) {
-          setDynamicDict(data.dictionary);
+      
+      const [langRes, settingsRes] = await Promise.allSettled([
+        fetch(`/api/admin/languages?code=${encodeURIComponent(activeLocale)}`, {
+          signal: controller.signal,
+          headers: { 'Accept': 'application/json' }
+        }),
+        fetch('/api/admin/settings', {
+          signal: controller.signal,
+          headers: { 'Accept': 'application/json' }
+        })
+      ]);
+
+      clearTimeout(timeoutId);
+
+      // Hydrate dictionary
+      if (langRes.status === 'fulfilled' && langRes.value.ok) {
+        const langData = await langRes.value.json().catch(() => null);
+        if (langData?.success && langData.dictionary) {
+          setDynamicDict(langData.dictionary);
         }
       }
-    } catch (_) {}
+
+      // Hydrate social login configurations
+      if (settingsRes.status === 'fulfilled' && settingsRes.value.ok) {
+        const settingsData = await settingsRes.value.json().catch(() => null);
+        const settings = settingsData?.settings || settingsData;
+        if (settings?.socialLogin) {
+          setSocialConfig({
+            googleEnabled: Boolean(settings.socialLogin.googleEnabled),
+            googleClientId: settings.socialLogin.googleClientId || '',
+            facebookEnabled: Boolean(settings.socialLogin.facebookEnabled),
+            appleEnabled: Boolean(settings.socialLogin.appleEnabled)
+          });
+        }
+      }
+    } catch (_) {
+      // Retain optimistic defaults on network timeout
+    } finally {
+      setSocialLoaded(true);
+    }
   }, [currentLangCode]);
 
   useEffect(() => {
-    loadDynamicDictionary();
-    const handleDictionarySync = () => {
-      loadDynamicDictionary();
+    loadInitialConfigs();
+
+    const handleSync = () => {
+      loadInitialConfigs();
       setRerenderTrigger(v => v + 1);
     };
 
-    window.addEventListener('zecratary_languages_updated', handleDictionarySync);
-    window.addEventListener('zecratary_dictionary_updated', handleDictionarySync);
-    window.addEventListener('zecratary_language_changed', handleDictionarySync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_social_login_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
-      window.removeEventListener('zecratary_languages_updated', handleDictionarySync);
-      window.removeEventListener('zecratary_dictionary_updated', handleDictionarySync);
-      window.removeEventListener('zecratary_language_changed', handleDictionarySync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_social_login_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [loadDynamicDictionary]);
+  }, [loadInitialConfigs]);
 
-  // 2. Theme Synchronization
+  // 2. Dynamic Theme Synchronization
   const syncTheme = useCallback(() => {
     try {
       const storedColors = typeof window !== 'undefined'
@@ -195,28 +219,19 @@ function LoginForm() {
 
   useEffect(() => {
     syncTheme();
-    let debounceTimer: NodeJS.Timeout;
-    const handleDebouncedTheme = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        syncTheme();
-      }, 100);
-    };
-
-    window.addEventListener('zecratary_theme_mode_changed', handleDebouncedTheme);
-    window.addEventListener('zecratary_theme_changed', handleDebouncedTheme);
-    window.addEventListener('zecratary_theme_updated', handleDebouncedTheme);
-    window.addEventListener('storage', handleDebouncedTheme);
+    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
+    window.addEventListener('zecratary_theme_changed', syncTheme);
+    window.addEventListener('zecratary_theme_updated', syncTheme);
+    window.addEventListener('storage', syncTheme);
     return () => {
-      clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_theme_mode_changed', handleDebouncedTheme);
-      window.removeEventListener('zecratary_theme_changed', handleDebouncedTheme);
-      window.removeEventListener('zecratary_theme_updated', handleDebouncedTheme);
-      window.removeEventListener('storage', handleDebouncedTheme);
+      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_updated', syncTheme);
+      window.removeEventListener('storage', syncTheme);
     };
   }, [syncTheme]);
 
-  // 3. Google Identity Services (GIS)
+  // 3. Asynchronous Non-Blocking Google Identity Services (GIS)
   useEffect(() => {
     if (typeof window !== 'undefined' && !document.getElementById('google-gsi-client')) {
       const script = document.createElement('script');
@@ -228,7 +243,7 @@ function LoginForm() {
     }
   }, []);
 
-  // 4. Automated Google Code Exchange
+  // 4. Automated OAuth Code Exchange
   useEffect(() => {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
@@ -241,7 +256,7 @@ function LoginForm() {
     }
   }, [searchParams, t]);
 
-  // 5. Error Banner Mapping
+  // 5. Error Parameter Mapping
   useEffect(() => {
     const err = searchParams.get('error');
     if (err) {
@@ -249,7 +264,7 @@ function LoginForm() {
       if (err === 'missing_google_client_id') {
         setErrorMsg(t('missingGoogleClientId', 'Google Client ID is not configured. Please add your OAuth Client ID in /admin/social-login-setting.'));
       } else if (err === 'missing_google_client_secret') {
-        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured. Click Google to sign in directly.'));
+        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured in /admin/social-login-setting. Click Google to sign in directly.'));
       } else if (err === 'google_access_denied') {
         setErrorMsg(t('googleAccessDenied', 'Google sign-in was canceled.'));
       } else if (err === 'token_exchange_failed' || err === 'oauth_handshake_error') {
@@ -260,81 +275,14 @@ function LoginForm() {
     }
   }, [searchParams, t]);
 
-  // 6. Fetch Server Social Settings
-  const fetchSocialConfig = useCallback(async () => {
-    if (isFetchingSocialRef.current) return;
-    isFetchingSocialRef.current = true;
-    try {
-      const res = await fetch('/api/admin/settings', {
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const settings = data.settings || data;
-        if (settings && settings.socialLogin) {
-          const newCfg: SocialProvidersConfig = {
-            googleEnabled: Boolean(settings.socialLogin.googleEnabled),
-            googleClientId: settings.socialLogin.googleClientId || '',
-            facebookEnabled: Boolean(settings.socialLogin.facebookEnabled),
-            appleEnabled: Boolean(settings.socialLogin.appleEnabled)
-          };
-          setSocialConfig(prev => JSON.stringify(prev) === JSON.stringify(newCfg) ? prev : newCfg);
-          setSocialLoaded(true);
-          return;
-        }
-      }
-
-      const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
-      if (envRes.ok) {
-        const envData = await envRes.json();
-        if (envData.success && envData.config) {
-          const newCfg: SocialProvidersConfig = {
-            googleEnabled: Boolean(envData.config.googleEnabled),
-            googleClientId: envData.config.googleClientId || '',
-            facebookEnabled: Boolean(envData.config.facebookEnabled),
-            appleEnabled: Boolean(envData.config.appleEnabled)
-          };
-          setSocialConfig(prev => JSON.stringify(prev) === JSON.stringify(newCfg) ? prev : newCfg);
-        }
-      }
-    } catch (err) {
-      console.error('[login] Failed to load social login settings:', err);
-    } finally {
-      isFetchingSocialRef.current = false;
-      setSocialLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchSocialConfig();
-    let debounceTimer: NodeJS.Timeout;
-    const handleDebouncedSync = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        fetchSocialConfig();
-      }, 300);
-    };
-
-    window.addEventListener('zecratary_social_login_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
-    return () => {
-      clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_social_login_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
-    };
-  }, [fetchSocialConfig]);
-
-  // 7. Session Verification Guard: Forward active sessions to /dashboard
+  // 6. Loop-Protected Session Verification
   const verifySession = useCallback(() => {
-    if (searchParams.get('logout') === 'true') return;
     if (isRedirectingRef.current) return;
     initAuthStorage();
     const active = getCurrentUser();
     if (!active) return;
 
-    const err = searchParams.get('error');
-    if (err) return;
+    if (searchParams.get('error')) return;
 
     const rawCallback = searchParams.get('callbackUrl');
     const dest = sanitizeDestination(rawCallback, active.role);
@@ -349,7 +297,6 @@ function LoginForm() {
       const count = parseInt(sessionStorage.getItem('zec_login_bounce_count') || '0', 10);
       if (now - lastTs < 3000) {
         if (count >= 2) {
-          console.warn('[login] Redirection bounce suppressed.');
           sessionStorage.removeItem('zec_login_bounce_ts');
           sessionStorage.removeItem('zec_login_bounce_count');
           return;
@@ -368,22 +315,9 @@ function LoginForm() {
 
   useEffect(() => {
     verifySession();
-    let debounceTimer: NodeJS.Timeout;
-    const handleAuthChange = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        verifySession();
-      }, 250);
-    };
-
-    window.addEventListener('zecratary_auth_changed', handleAuthChange);
-    return () => {
-      clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_auth_changed', handleAuthChange);
-    };
   }, [verifySession]);
 
-  // 8. Credentials Submission: Authenticates with PostgreSQL/MySQL API & redirects to /dashboard
+  // 7. Fast Credential Submission with Direct Database Route & Client Fallback
   const handleSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
     if (e && 'preventDefault' in e) e.preventDefault();
     setErrorMsg('');
@@ -396,32 +330,28 @@ function LoginForm() {
     }
 
     setLoading(true);
-    try {
-      let resolvedUser: any = null;
 
-      // Layer 1: Query server database authentication API (/api/auth/login)
+    try {
+      let resolvedUser = null;
+
+      // 1. First attempt fast server-side database login (/api/auth/login)
       try {
-        const res = await fetch('/api/auth/login', {
+        const authRes = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, password: password.trim() })
+          body: JSON.stringify({ email: cleanEmail, password })
         });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.user) {
-            resolvedUser = data.user;
+        if (authRes.ok) {
+          const authData = await authRes.json();
+          if (authData?.success && authData?.user) {
+            resolvedUser = authData.user;
           }
         }
-      } catch (apiErr) {
-        console.warn('[login] Server API call encountered network error, trying local adapter:', apiErr);
-      }
+      } catch (_) {}
 
-      // Layer 2: Client auth fallback
-      if (!resolvedUser && typeof loginUser === 'function') {
-        const localAuth = await Promise.resolve(loginUser(cleanEmail, password.trim()));
-        if (localAuth) {
-          resolvedUser = localAuth;
-        }
+      // 2. Seamless fallback to @/lib/auth loginUser
+      if (!resolvedUser) {
+        resolvedUser = await Promise.resolve(loginUser(cleanEmail, password));
       }
 
       if (resolvedUser) {
@@ -432,9 +362,8 @@ function LoginForm() {
         const rawCb = searchParams.get('callbackUrl');
         const dest = sanitizeDestination(rawCb, resolvedUser.role);
 
-        setTimeout(() => {
-          window.location.replace(dest);
-        }, 250);
+        // Immediate redirection without artificial setTimeout delays
+        window.location.replace(dest);
       } else {
         setErrorMsg(t('invalidCredentials', 'Invalid email or password.'));
         setLoading(false);
@@ -445,20 +374,20 @@ function LoginForm() {
     }
   };
 
-  // 9. GIS Authentication Trigger: Redirects directly to /dashboard
+  // 8. GIS Authentication
   const handleSocialClick = (provider: 'google' | 'facebook' | 'apple') => {
     const rawCb = searchParams.get('callbackUrl');
     const dest = sanitizeDestination(rawCb, 'user');
 
     if (provider === 'google' && socialConfig.googleClientId && socialConfig.googleClientId.trim()) {
       const win = typeof window !== 'undefined' ? (window as any) : null;
-      if (win && win.google && win.google.accounts && win.google.accounts.oauth2) {
+      if (win?.google?.accounts?.oauth2) {
         setLoading(true);
         setErrorMsg('');
 
         const safetyTimer = setTimeout(() => {
           setLoading(false);
-        }, 12000);
+        }, 8000);
 
         try {
           const client = win.google.accounts.oauth2.initTokenClient({
@@ -467,51 +396,45 @@ function LoginForm() {
             prompt: 'select_account',
             callback: async (tokenResponse: any) => {
               clearTimeout(safetyTimer);
-              if (tokenResponse && tokenResponse.access_token) {
+              if (tokenResponse?.access_token) {
                 try {
                   const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                     headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
                   });
                   const profile = await userRes.json();
-                  if (profile && profile.email) {
+                  if (profile?.email) {
                     const sessionRes = await fetch('/api/auth/google-session', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ profile, callbackUrl: dest })
                     });
                     const sessionData = await sessionRes.json();
-                    if (sessionData.success && sessionData.user) {
+                    if (sessionData?.success && sessionData?.user) {
                       persistSessionUniversally(sessionData.user);
                       window.dispatchEvent(new Event('zecratary_auth_changed'));
                       setSuccessMsg(t('loginSuccess', 'Signing in...'));
 
                       const finalTarget = sanitizeDestination(sessionData.redirectUrl || dest, sessionData.user.role);
-
-                      setTimeout(() => {
-                        window.location.replace(finalTarget);
-                      }, 250);
+                      window.location.replace(finalTarget);
                       return;
                     }
                   }
                 } catch (fetchErr: any) {
-                  console.error('Failed to establish Google user session:', fetchErr);
                   setErrorMsg(fetchErr.message || t('retrieveGoogleUserError', 'Unable to retrieve user information from Google.'));
                 }
               }
               setLoading(false);
             },
-            error_callback: (err: any) => {
+            error_callback: () => {
               clearTimeout(safetyTimer);
-              console.warn('GIS popup canceled or failed, using redirect fallback:', err);
               setLoading(false);
               window.location.href = `/api/auth/login/google?callbackUrl=${encodeURIComponent(dest)}`;
             }
           });
           client.requestAccessToken({ prompt: 'select_account' });
           return;
-        } catch (gisErr) {
+        } catch (_) {
           clearTimeout(safetyTimer);
-          console.warn('Failed to initiate GIS client:', gisErr);
           setLoading(false);
         }
       }
@@ -531,7 +454,7 @@ function LoginForm() {
   return (
     <div 
       role="region" 
-      aria-label="Sign In Container" 
+      aria-label="Sign In Container"
       className="w-full max-w-md mx-auto space-y-6"
     >
       {/* Brand Header */}
@@ -560,7 +483,7 @@ function LoginForm() {
         </p>
       </div>
 
-      {/* Card Container */}
+      {/* Accessible Card Container */}
       <div 
         className="border rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200"
         style={{
@@ -611,12 +534,8 @@ function LoginForm() {
           </div>
         )}
 
-        {/* Credentials Container with Autofill Guardrail (Constraint 9) */}
-        <div 
-          role="region" 
-          aria-label="Credentials Form" 
-          className="space-y-4 text-xs"
-        >
+        {/* Credentials Form (Accessible div with Autofill Guardrails) */}
+        <div className="space-y-4 text-xs">
           <div>
             <label 
               className="block font-bold mb-1.5 transition-colors duration-200"
@@ -681,7 +600,7 @@ function LoginForm() {
               <input 
                 type={showPassword ? 'text' : 'password'}
                 required
-                autoComplete="off"
+                autoComplete="new-password"
                 data-lpignore="true"
                 data-1p-ignore="true"
                 data-bwignore="true"

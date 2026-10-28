@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.86",
+  "version": "8.1.87",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.86",
+  "version": "8.1.87",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -6471,6 +6471,145 @@ const DEFAULT_SECTIONS = [
   }
 ];
 
+// Helper: Inspect nested object keys case-insensitively for "AI Chef Recipe Generation"
+const getCostFromFeatureObject = (obj: any): number | null => {
+  if (!obj || typeof obj !== 'object') return null;
+
+  // Exact matching keys
+  const targetKeys = [
+    'AI Chef Recipe Generation',
+    'ai chef recipe generation',
+    'ai_chef_recipe_generation',
+    'aiChefRecipeGeneration',
+    'AI Chef Generation',
+    'ai chef generation',
+    'ai_chef_generation',
+    'aiChefGeneration',
+    'chef',
+    'ai_chef',
+    'aiChef',
+    'recipe_generation',
+    'recipeGeneration'
+  ];
+
+  for (const k of targetKeys) {
+    if (typeof obj[k] !== 'undefined') {
+      const num = Number(obj[k]);
+      if (!isNaN(num)) return num;
+    }
+  }
+
+  // Normalized key matching
+  const entries = Object.entries(obj);
+  for (const [key, val] of entries) {
+    const cleanKey = key.toLowerCase().replace(/[-_]/g, ' ').trim();
+    if (
+      cleanKey === 'ai chef recipe generation' ||
+      cleanKey === 'chef recipe generation' ||
+      cleanKey === 'ai chef generation' ||
+      cleanKey === 'chef recipe' ||
+      cleanKey === 'ai chef'
+    ) {
+      const num = Number(val);
+      if (!isNaN(num)) return num;
+    }
+  }
+
+  return null;
+};
+
+// Authoritative Resolver: Dynamically binds to "AI Chef Recipe Generation" in /admin/token-setting
+const resolveChefRecipeCost = (...sources: any[]): number => {
+  for (const raw of sources) {
+    if (!raw) continue;
+    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
+
+    // 1. Feature costs objects
+    const objSources = [s.featureCosts, s.costs, s.feature_costs, s.pricing];
+    for (const obj of objSources) {
+      const matched = getCostFromFeatureObject(obj);
+      if (matched !== null) return matched;
+    }
+
+    // 2. Features / rules list lookup
+    const featuresList = s.features || s.featureList || s.tokenRules || s.rules || s.items;
+    if (Array.isArray(featuresList)) {
+      const item = featuresList.find((f: any) => {
+        const name = String(f?.name || f?.title || f?.label || f?.feature || '').toLowerCase().replace(/[-_]/g, ' ').trim();
+        const id = String(f?.id || f?.key || '').toLowerCase().replace(/[-_]/g, ' ').trim();
+        return (
+          name === 'ai chef recipe generation' ||
+          name === 'chef recipe generation' ||
+          name === 'ai chef generation' ||
+          name === 'ai chef' ||
+          name.includes('chef recipe') ||
+          id === 'ai chef recipe generation' ||
+          id === 'chef recipe generation' ||
+          id === 'ai chef' ||
+          id === 'chef'
+        );
+      });
+      if (item && (item.cost !== undefined || item.tokens !== undefined || item.price !== undefined || item.tokenCost !== undefined)) {
+        const v = Number(item.cost ?? item.tokens ?? item.price ?? item.tokenCost);
+        if (!isNaN(v)) return v;
+      }
+    }
+
+    // 3. Database columns & top-level settings fields
+    if (typeof s.aiChefRecipeGenerationCost !== 'undefined') return Number(s.aiChefRecipeGenerationCost);
+    if (typeof s.ai_chef_recipe_generation_cost !== 'undefined') return Number(s.ai_chef_recipe_generation_cost);
+    if (typeof s.chefCost !== 'undefined') return Number(s.chefCost);
+    if (typeof s.chef_cost !== 'undefined') return Number(s.chef_cost);
+    if (typeof s.aiChefCost !== 'undefined') return Number(s.aiChefCost);
+    if (typeof s.ai_chef_cost !== 'undefined') return Number(s.ai_chef_cost);
+  }
+  return 0; // Return 0 rather than a hardcoded default
+};
+
+const resolveIsTokenEnabled = (...sources: any[]): boolean => {
+  for (const raw of sources) {
+    if (!raw) continue;
+    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
+    if (s.isEnabled !== undefined) return Boolean(s.isEnabled);
+    if (s.isTokenEnabled !== undefined) return Boolean(s.isTokenEnabled);
+    if (s.is_enabled !== undefined) return Boolean(s.is_enabled);
+    if (s.enabled !== undefined) return Boolean(s.enabled);
+    if (s.systemActive !== undefined) return Boolean(s.systemActive);
+  }
+  return true;
+};
+
+const resolveTokenSymbol = (...sources: any[]): string => {
+  for (const raw of sources) {
+    if (!raw) continue;
+    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
+    if (s.tokenSymbol) return String(s.tokenSymbol).trim();
+    if (s.token_symbol) return String(s.token_symbol).trim();
+    if (s.symbol) return String(s.symbol).trim();
+  }
+  return '';
+};
+
+const resolveTokenName = (...sources: any[]): string => {
+  for (const raw of sources) {
+    if (!raw) continue;
+    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
+    if (s.tokenName) return String(s.tokenName).trim();
+    if (s.token_name) return String(s.token_name).trim();
+    if (s.name && typeof s.name === 'string') return String(s.name).trim();
+  }
+  return '';
+};
+
+const resolveTokenPackages = (...sources: any[]): any[] => {
+  for (const raw of sources) {
+    if (!raw) continue;
+    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
+    if (Array.isArray(s.packages) && s.packages.length > 0) return s.packages;
+  }
+  return [];
+};
+
 export default function ChefChatPage() {
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -6508,11 +6647,12 @@ export default function ChefChatPage() {
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Token Telemetry
+  // Dynamic Token Telemetry (Zero hardcoded values)
   const [tokenBalance, setTokenBalance] = useState<number>(0);
-  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
-  const [tokenName, setTokenName] = useState<string>('Foodie Token');
-  const [chefCost, setChefCost] = useState<number>(1);
+  const [tokenSymbol, setTokenSymbol] = useState<string>('');
+  const [tokenName, setTokenName] = useState<string>('');
+  const [chefCost, setChefCost] = useState<number | null>(null);
+  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
@@ -6628,8 +6768,8 @@ export default function ChefChatPage() {
   };
 
   const getUserKey = useCallback((user: User | null) => {
-    if (!user) return 'usr_admin_1';
-    return user.id || (user.email ? user.email.toLowerCase().trim() : 'usr_admin_1');
+    if (!user) return 'guest';
+    return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
   }, []);
 
   const loadPantryItems = useCallback(async (user: User | null) => {
@@ -6777,58 +6917,98 @@ export default function ChefChatPage() {
     showToast(t('prefsClearedToast', 'Preferences cleared!'));
   };
 
-  // Synchronize AI Model, Telemetry, and Dynamic Parameters from /admin/ai-settings
+  // Synchronize Token Telemetry with /admin/token-setting ("AI Chef Recipe Generation")
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const active = currentUserRef.current || getCurrentUser();
-      const queryParam = active?.id ? `?userId=${active.id}` : '?userId=usr_admin_1';
-      
-      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await safeJsonParse(res);
-        if (data && data.success) {
-          setTokenBalance(Number(data.balance ?? 0));
-          setTokenSymbol(data.tokenSymbol || '🪙');
-          setTokenName(data.tokenName || 'Foodie Token');
-          setChefCost(Number(data.costs?.chef ?? 1));
-          if (Array.isArray(data.packages)) setTokenPackages(data.packages);
+      const userKey = getUserKey(active);
+      const queryParam = userKey ? `?userId=${encodeURIComponent(userKey)}` : '';
+
+      // 1. Live token balance from /api/tokens
+      let tokenData: any = null;
+      try {
+        const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          tokenData = await safeJsonParse(res);
+          if (tokenData && tokenData.success) {
+            setTokenBalance(Number(tokenData.balance ?? 0));
+          }
         }
+      } catch (_) {}
+
+      // 2. Authoritative configuration from /admin/token-setting
+      let adminTokenData: any = null;
+      try {
+        let adminTokenRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
+        if (!adminTokenRes.ok) {
+          adminTokenRes = await fetch(`/api/admin/token-settings?t=${Date.now()}`, { cache: 'no-store' });
+        }
+        if (adminTokenRes.ok) {
+          adminTokenData = await safeJsonParse(adminTokenRes);
+        }
+      } catch (_) {}
+
+      // 3. Admin AI settings from /api/admin/settings
+      let adminSettingsData: any = null;
+      try {
+        const sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
+        if (sRes.ok) {
+          adminSettingsData = await safeJsonParse(sRes);
+        }
+      } catch (_) {}
+
+      // Local cache fallback
+      let localTokenSettings: any = null;
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('zecratary_token_settings');
+          if (raw) localTokenSettings = JSON.parse(raw);
+        } catch (_) {}
       }
 
-      // Dynamic AI Settings from PostgreSQL admin_settings
-      const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
-      if (sRes.ok) {
-        const sData = await safeJsonParse(sRes);
-        const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
-        if (chefCfg) {
-          const resolvedModel = chefCfg.model || sData?.aiModel || sData?.settings?.aiModel;
-          const resolvedProvider = chefCfg.provider || sData?.aiProvider || sData?.settings?.aiProvider;
-          if (resolvedModel) setActiveAiModel(resolvedModel);
-          if (resolvedProvider) setActiveAiProvider(resolvedProvider);
+      // Dynamic Resolution: Binds strictly to "AI Chef Recipe Generation"
+      const resolvedCost = resolveChefRecipeCost(adminTokenData, tokenData, adminSettingsData, localTokenSettings);
+      const resolvedEnabled = resolveIsTokenEnabled(adminTokenData, tokenData, localTokenSettings);
+      const resolvedSymbol = resolveTokenSymbol(adminTokenData, tokenData, localTokenSettings);
+      const resolvedName = resolveTokenName(adminTokenData, tokenData, localTokenSettings);
+      const resolvedPackages = resolveTokenPackages(adminTokenData, tokenData, localTokenSettings);
 
-          if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
-          if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
-          if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
-          if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
-          if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
-          if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
-          if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
-          if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
-          if (Array.isArray(chefCfg.recommendedRecipeUrls)) setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+      setChefCost(resolvedCost);
+      setIsTokenEnabled(resolvedEnabled);
+      if (resolvedSymbol) setTokenSymbol(resolvedSymbol);
+      if (resolvedName) setTokenName(resolvedName);
+      if (resolvedPackages.length > 0) setTokenPackages(resolvedPackages);
 
-          if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
-            const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
-            const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
-            setQuestionnaireSections(toUse);
-            const allQs = toUse.flatMap((s: any) => s.questions || []);
-            setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
-          }
+      // Dynamic AI Model settings
+      const chefCfg = adminSettingsData?.chefAiSettings || adminSettingsData?.settings?.chefAiSettings || adminSettingsData;
+      if (chefCfg) {
+        const resolvedModel = chefCfg.model || adminSettingsData?.aiModel || adminSettingsData?.settings?.aiModel;
+        const resolvedProvider = chefCfg.provider || adminSettingsData?.aiProvider || adminSettingsData?.settings?.aiProvider;
+        if (resolvedModel) setActiveAiModel(resolvedModel);
+        if (resolvedProvider) setActiveAiProvider(resolvedProvider);
+
+        if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
+        if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
+        if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+        if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
+        if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
+        if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
+        if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
+        if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
+        if (Array.isArray(chefCfg.recommendedRecipeUrls)) setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+
+        if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
+          const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
+          const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
+          setQuestionnaireSections(toUse);
+          const allQs = toUse.flatMap((s: any) => s.questions || []);
+          setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
         }
       }
     } catch (err) {
       console.warn('Failed to fetch /chef telemetry:', err);
     }
-  }, []);
+  }, [getUserKey]);
 
   useEffect(() => {
     initAuthStorage();
@@ -6864,7 +7044,10 @@ export default function ChefChatPage() {
 
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
     window.addEventListener('zecratary_tokens_updated', handleSync);
+    window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_users_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
     window.addEventListener('zecratary_pantry_updated', handleSync);
     window.addEventListener('zecratary_chef_ai_settings_updated', handleSync);
@@ -6877,7 +7060,10 @@ export default function ChefChatPage() {
       channel?.close();
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
       window.removeEventListener('zecratary_tokens_updated', handleSync);
+      window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_users_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
       window.removeEventListener('zecratary_pantry_updated', handleSync);
       window.removeEventListener('zecratary_chef_ai_settings_updated', handleSync);
@@ -7013,15 +7199,25 @@ export default function ChefChatPage() {
     return ['Yes, strictly apply', 'Standard recommended', 'Prioritize in-stock pantry items'];
   }, [wizardStep, wizardQuestionsList, maxPlanDays, t]);
 
+  // Derived effective cost and dynamic display label without hardcoding
+  const effectiveCost = isTokenEnabled ? (chefCost ?? 0) : 0;
+  const costLabel = useMemo(() => {
+    if (chefCost === null) return '';
+    if (!isTokenEnabled || effectiveCost <= 0) return t('freeBadge', 'Free');
+    return tokenSymbol ? `${effectiveCost} ${tokenSymbol}` : `${effectiveCost}`;
+  }, [chefCost, isTokenEnabled, effectiveCost, tokenSymbol, t]);
+
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
     if (!textToSend || loading) return;
 
-    if (tokenBalance < chefCost) {
+    // Check token balance based on "AI Chef Recipe Generation"
+    const currentCost = isTokenEnabled ? (chefCost ?? 0) : 0;
+    if (isTokenEnabled && currentCost > 0 && tokenBalance < currentCost) {
       showToast((t('insufficientTokens', 'Insufficient {tokenName}. Required: {cost} {symbol}'))
-        .replace('{tokenName}', tokenName)
-        .replace('{cost}', String(chefCost))
-        .replace('{symbol}', tokenSymbol));
+        .replace('{tokenName}', tokenName || t('tokensWord', 'Tokens'))
+        .replace('{cost}', String(currentCost))
+        .replace('{symbol}', tokenSymbol || ''));
       setIsTokenPurchaseOpen(true);
       return;
     }
@@ -7056,6 +7252,7 @@ export default function ChefChatPage() {
         updateWizardStep(null);
         try {
           const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+          const userKey = getUserKey(activeAuth);
           const res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -7064,8 +7261,12 @@ export default function ChefChatPage() {
               isQuestionnaireComplete: true,
               topicTitle: activeTopicTitle,
               questionnaireAnswers: updatedAnswers,
-              userId: activeAuth?.id || 'usr_admin_1',
-              userEmail: activeAuth?.email || 'admin@zecratary.com',
+              userId: activeAuth?.id || userKey,
+              userEmail: activeAuth?.email || undefined,
+              source: 'chef',
+              feature: 'AI Chef Recipe Generation',
+              action: 'ai_chef_recipe_generation',
+              tokenCost: currentCost,
               model: activeAiModel,
               provider: activeAiProvider,
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
@@ -7076,8 +7277,16 @@ export default function ChefChatPage() {
 
           const data = await safeJsonParse(res);
           if (data) {
-            if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
-            else setTokenBalance(prev => Math.max(0, prev - chefCost));
+            if (typeof data.remainingBalance === 'number') {
+              setTokenBalance(data.remainingBalance);
+            } else if (currentCost > 0) {
+              const consumed = data.consumedSystemTokens !== undefined ? Number(data.consumedSystemTokens) : currentCost;
+              setTokenBalance(prev => Math.max(0, prev - consumed));
+            }
+
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('zecratary_tokens_updated'));
+            }
 
             const fallbackReply = (t('wizardCompleteReply', 'I have formulated your meal plan and signature recommended recipe based on your {topic} questionnaire!')).replace('{topic}', activeTopicTitle);
             const planMsg: ChatMessage = {
@@ -7103,14 +7312,18 @@ export default function ChefChatPage() {
 
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const userKey = getUserKey(activeAuth);
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
-          userId: activeAuth?.id || 'usr_admin_1',
-          userEmail: activeAuth?.email || 'admin@zecratary.com',
+          userId: activeAuth?.id || userKey,
+          userEmail: activeAuth?.email || undefined,
           source: 'chef',
+          feature: 'AI Chef Recipe Generation',
+          action: 'ai_chef_recipe_generation',
+          tokenCost: currentCost,
           model: activeAiModel,
           provider: activeAiProvider,
           preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
@@ -7121,8 +7334,16 @@ export default function ChefChatPage() {
 
       const data = await safeJsonParse(res);
       if (data) {
-        if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
-        else setTokenBalance(prev => Math.max(0, prev - chefCost));
+        if (typeof data.remainingBalance === 'number') {
+          setTokenBalance(data.remainingBalance);
+        } else if (currentCost > 0) {
+          const consumed = data.consumedSystemTokens !== undefined ? Number(data.consumedSystemTokens) : currentCost;
+          setTokenBalance(prev => Math.max(0, prev - consumed));
+        }
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_tokens_updated'));
+        }
 
         const astMsg: ChatMessage = {
           id: 'ast_' + Date.now(),
@@ -7146,9 +7367,10 @@ export default function ChefChatPage() {
     try {
       const recId = 'saved_ai_' + Date.now();
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const userKey = getUserKey(activeAuth);
       const newRec = {
         id: recId,
-        userId: activeAuth?.id || 'usr_admin_1',
+        userId: userKey,
         title: recipe.title,
         name: recipe.title,
         description: recipe.description,
@@ -7184,9 +7406,10 @@ export default function ChefChatPage() {
   const handleScheduleMealPlan = async (plan: MealPlanData) => {
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const userKey = getUserKey(activeAuth);
       const mealsToSchedule = (plan.meals || []).map((m, idx) => ({
         id: 'plan_meal_' + Date.now() + '_' + idx,
-        userId: activeAuth?.id || 'usr_admin_1',
+        userId: userKey,
         title: m.title,
         mealType: m.mealType || 'Dinner',
         dayLabel: m.dayLabel || `Day ${idx + 1}`,
@@ -7360,7 +7583,7 @@ export default function ChefChatPage() {
               </div>
             )}
 
-            {/* DYNAMIC AI MODEL BADGE SYNCED WITH /admin/ai-settings */}
+            {/* DYNAMIC AI MODEL BADGE */}
             <div 
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs transition-all duration-200"
               style={{ 
@@ -8063,7 +8286,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR WITH DEFENSIVE AUTOFILL GUARDRAILS */}
+      {/* PROMPT INPUT BAR (ZERO HARDCODED TOKENS & DYNAMIC BADGE) */}
       <div 
         role="region"
         aria-label={t('promptInputAria', 'Culinary Prompt Input Bar')}
@@ -8105,22 +8328,35 @@ export default function ChefChatPage() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={isListening ? t('listeningToVoice', 'Listening to your voice...') : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${chefCost} ${tokenSymbol})`}
+          placeholder={
+            isListening 
+              ? t('listeningToVoice', 'Listening to your voice...') 
+              : costLabel 
+                ? `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${costLabel})`
+                : t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')
+          }
           className="chef-input bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
         
         <div className="flex items-center gap-1.5 pr-1">
-          <span 
-            className="text-[10px] font-mono font-bold px-2 py-1 rounded-lg border hidden sm:inline-block"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)'
-            }}
-          >
-            {chefCost} {tokenSymbol}
-          </span>
+          {costLabel && (
+            <span 
+              className="text-[10px] font-mono font-bold px-2 py-1 rounded-lg border hidden sm:inline-block transition-colors duration-200"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: (!isTokenEnabled || effectiveCost <= 0) ? 'var(--color-emerald)' : 'var(--color-border)',
+                color: (!isTokenEnabled || effectiveCost <= 0) ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+              }}
+              title={
+                !isTokenEnabled || effectiveCost <= 0 
+                  ? t('freeModeTooltip', 'Free Mode (No tokens charged)') 
+                  : `${effectiveCost} ${tokenName || tokenSymbol}`
+              }
+            >
+              {costLabel}
+            </span>
+          )}
 
           <button
             type="button"
@@ -8526,7 +8762,15 @@ export default function ChefChatPage() {
         packages={tokenPackages}
         onPurchased={(newBal) => {
           setTokenBalance(newBal);
-          showToast(`Tokens added! New balance: ${newBal} ${tokenSymbol}`);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('zecratary_tokens_updated'));
+            window.dispatchEvent(new Event('zecratary_users_updated'));
+          }
+          showToast(
+            tokenSymbol
+              ? `${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal} ${tokenSymbol}`
+              : `${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal}`
+          );
         }}
       />
     </div>

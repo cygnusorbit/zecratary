@@ -63,7 +63,7 @@ export async function GET() {
     };
 
     // Strictly target row id = 1 to prevent multi-row merge conflicts
-    const sRes = await query(`SELECT * FROM admin_settings WHERE id = 1 LIMIT 1`);
+    const sRes = await query(`SELECT * FROM admin_settings WHERE id = '1' LIMIT 1`);
     const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
     if (row) {
       if (row.payment_settings) {
@@ -151,7 +151,7 @@ export async function POST(req: Request) {
         `UPDATE admin_settings 
          SET payment_settings = jsonb_set(COALESCE(payment_settings, '{}'::jsonb), '{stripe,testMode}', $1::jsonb),
              updated_at = NOW()
-         WHERE id = 1`,
+         WHERE id = '1'`,
         [JSON.stringify(nextTestMode)]
       );
       return NextResponse.json({ success: true, message: `Stripe test mode updated to ${nextTestMode}` });
@@ -167,7 +167,7 @@ export async function POST(req: Request) {
                '{paypal,environment}', $2::jsonb
              ),
              updated_at = NOW()
-         WHERE id = 1`,
+         WHERE id = '1'`,
         [JSON.stringify(nextTestMode), JSON.stringify(nextEnv)]
       );
       return NextResponse.json({ success: true, message: `PayPal test mode updated to ${nextTestMode}` });
