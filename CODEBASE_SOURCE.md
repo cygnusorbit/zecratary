@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.74",
+  "version": "8.1.77",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.74",
+  "version": "8.1.77",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -11045,8 +11045,8 @@ export default function AdminDatabasePage() {
 
 ## File: `apps/web/src/app/admin/wallet-settings/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
@@ -11054,7 +11054,8 @@ import {
   Wallet, CreditCard, Shield, CheckCircle2, AlertCircle, Save, RefreshCw, 
   Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, 
   Coins, User as UserIcon, Columns3, ArrowUpDown, ArrowUp, ArrowDown, 
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, Sparkles, Gift, ArrowDownLeft, ArrowUpRight
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, Sparkles, Gift, ArrowDownLeft, ArrowUpRight,
+  ExternalLink, ArrowRight
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -11174,6 +11175,7 @@ export default function AdminWalletSettingsPage() {
 
   const isFetchingRef = useRef<boolean>(false);
   const isSavingRef = useRef<boolean>(false);
+  const columnsPopoverRef = useRef<HTMLDivElement>(null);
 
   const showToast = (type: 'success' | 'error', msg: string) => {
     setFeedback({ type, msg });
@@ -11181,7 +11183,7 @@ export default function AdminWalletSettingsPage() {
   };
 
   const activeCurrencySymbol = useMemo(() => {
-    const found = SUPPORTED_CURRENCIES.find(c => c.code.toUpperCase() === settings.currency.toUpperCase());
+    const found = SUPPORTED_CURRENCIES.find(c => c.code.toUpperCase() === (settings.currency || 'USD').toUpperCase());
     return found ? found.symbol : '$';
   }, [settings.currency]);
 
@@ -11201,8 +11203,8 @@ export default function AdminWalletSettingsPage() {
             currency: loaded.currency || 'USD',
             isEnabled: loaded.isEnabled !== undefined ? Boolean(loaded.isEnabled) : true,
             allowPurchases: loaded.allowPurchases !== undefined ? Boolean(loaded.allowPurchases) : true,
-            minTopup: Number(loaded.minTopup || 5),
-            maxTopup: Number(loaded.maxTopup || 1000),
+            minTopup: Number(loaded.minTopup ?? loaded.min_topup ?? 5),
+            maxTopup: Number(loaded.maxTopup ?? loaded.max_topup ?? 1000),
             presetAmounts: Array.isArray(loaded.presetAmounts) ? loaded.presetAmounts : DEFAULT_SETTINGS.presetAmounts,
             bonusRules: Array.isArray(loaded.bonusRules) ? loaded.bonusRules : DEFAULT_SETTINGS.bonusRules,
             ledgerColumns: loaded.ledgerColumns || DEFAULT_SETTINGS.ledgerColumns
@@ -11219,6 +11221,7 @@ export default function AdminWalletSettingsPage() {
     }
   }, []);
 
+  // Theme & Data Synchronization Listeners
   useEffect(() => {
     document.title = `${tr('walletSettingsDocTitle', 'Wallet Settings - Admin Console')}`;
     loadWalletData();
@@ -11229,6 +11232,10 @@ export default function AdminWalletSettingsPage() {
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
+    window.addEventListener('zecratary_theme_changed', handleSync);
+    window.addEventListener('zecratary_theme_updated', handleSync);
+    window.addEventListener('storage', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_wallet_updated', handleSync);
@@ -11236,8 +11243,31 @@ export default function AdminWalletSettingsPage() {
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+      window.removeEventListener('zecratary_theme_changed', handleSync);
+      window.removeEventListener('zecratary_theme_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
   }, [loadWalletData, tr]);
+
+  // Click-Outside & Escape Dismissal for Column Popover
+  useEffect(() => {
+    if (!showColumnsPopover) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (columnsPopoverRef.current && !columnsPopoverRef.current.contains(e.target as Node)) {
+        setShowColumnsPopover(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowColumnsPopover(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showColumnsPopover]);
 
   // Save Settings to Database
   const handleSaveSettings = async () => {
@@ -11276,7 +11306,7 @@ export default function AdminWalletSettingsPage() {
   };
 
   const handleResetDefaults = () => {
-    if (!confirm('Reset wallet settings and bonus rules to default values?')) return;
+    if (!confirm(tr('confirmResetDefaults', 'Reset wallet settings and bonus rules to default values?'))) return;
     setSettings(DEFAULT_SETTINGS);
     showToast('success', tr('toastWalletReset', 'Wallet settings reset to defaults successfully!'));
   };
@@ -11296,7 +11326,7 @@ export default function AdminWalletSettingsPage() {
 
   const handleRemovePreset = (val: number) => {
     if (settings.presetAmounts.length <= 1) {
-      alert('You must retain at least one quick deposit preset.');
+      showToast('error', tr('errMinOnePreset', 'You must retain at least one quick deposit preset.'));
       return;
     }
     setSettings({
@@ -11309,7 +11339,10 @@ export default function AdminWalletSettingsPage() {
   const handleAddBonusRule = () => {
     const thresh = parseFloat(newTierThreshold);
     const pct = parseFloat(newTierBonus);
-    if (isNaN(thresh) || thresh <= 0 || isNaN(pct) || pct <= 0) return;
+    if (isNaN(thresh) || thresh <= 0 || isNaN(pct) || pct <= 0) {
+      showToast('error', tr('errInvalidBonusTier', 'Please enter valid numbers for deposit threshold and bonus percentage.'));
+      return;
+    }
 
     const newRule: BonusRule = { threshold: thresh, bonus_percent: pct };
     const updated = [...settings.bonusRules.filter(r => r.threshold !== thresh), newRule].sort((a, b) => a.threshold - b.threshold);
@@ -11328,16 +11361,16 @@ export default function AdminWalletSettingsPage() {
   // Apply Manual Balance Adjustment
   const handleApplyAdjustment = async () => {
     if (!adjustEmail) {
-      alert(tr('selectCustomerPlaceholder', '-- Choose Customer --'));
+      showToast('error', tr('errSelectCustomer', 'Please choose a customer from the dropdown list.'));
       return;
     }
     const amt = parseFloat(adjustAmount);
     if (isNaN(amt) || amt <= 0) {
-      alert('Please enter a valid positive adjustment amount.');
+      showToast('error', tr('errValidAmount', 'Please enter a valid positive adjustment amount.'));
       return;
     }
     if (!adjustReason.trim()) {
-      alert(tr('adjustmentReasonLabel', 'Administrative Reason / Note *'));
+      showToast('error', tr('errReasonRequired', 'Please enter an administrative reason or note for this adjustment.'));
       return;
     }
 
@@ -11377,8 +11410,8 @@ export default function AdminWalletSettingsPage() {
   const handleDeleteTransactions = async (idsToDelete: string[]) => {
     if (idsToDelete.length === 0) return;
     const promptMsg = idsToDelete.length > 1
-      ? tr('confirmDeleteSelected', 'Are you sure you want to delete {count} selected transaction record(s)?').replace('{count}', String(idsToDelete.length))
-      : tr('confirmDeleteSingle', 'Are you sure you want to delete this transaction record?');
+      ? tr('confirmDeleteSelected', 'Are you sure you want to delete {count} selected transaction record(s)? This cannot be undone.').replace('{count}', String(idsToDelete.length))
+      : tr('confirmDeleteSingle', 'Are you sure you want to delete this transaction record? This cannot be undone.');
 
     if (!confirm(promptMsg)) return;
 
@@ -11405,12 +11438,13 @@ export default function AdminWalletSettingsPage() {
 
   // Column Visibility Handlers
   const toggleColumn = (colKey: string) => {
-    const activeCols = Object.values(settings.ledgerColumns).filter(Boolean).length;
-    if (settings.ledgerColumns[colKey] && activeCols <= 1) return; // Prevent hiding all columns
+    const currentCols = settings.ledgerColumns || DEFAULT_SETTINGS.ledgerColumns;
+    const activeCols = Object.values(currentCols).filter(Boolean).length;
+    if (currentCols[colKey] && activeCols <= 1) return;
 
     const updatedCols = {
-      ...settings.ledgerColumns,
-      [colKey]: !settings.ledgerColumns[colKey]
+      ...currentCols,
+      [colKey]: !currentCols[colKey]
     };
     setSettings({ ...settings, ledgerColumns: updatedCols });
   };
@@ -11452,15 +11486,26 @@ export default function AdminWalletSettingsPage() {
     setSelectedTxIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  // Dynamic ColSpan Calculation for Empty State
-  const activeColumnsCount = 1 + Object.values(settings.ledgerColumns).filter(Boolean).length;
+  const activeColumnsCount = 1 + Object.values(settings.ledgerColumns || DEFAULT_SETTINGS.ledgerColumns).filter(Boolean).length;
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Header & Actions */}
+      {/* Scoped Autofill Guardrail Style */}
+      <style jsx global>{`
+        .wallet-input:-webkit-autofill,
+        .wallet-input:-webkit-autofill:hover,
+        .wallet-input:-webkit-autofill:focus {
+          -webkit-text-fill-color: var(--color-text) !important;
+          -webkit-box-shadow: 0 0 0px 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0px 1000px var(--color-inner-dark) inset !important;
+          transition: background-color 5000s ease-in-out 0s;
+        }
+      `}</style>
+
+      {/* 1. Header & Quick Actions */}
       <div 
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
         style={{ borderColor: 'var(--color-border)' }}
@@ -11548,7 +11593,7 @@ export default function AdminWalletSettingsPage() {
         </div>
       )}
 
-      {/* 2. Wallet Engine Monitor Summary Bar */}
+      {/* 2. Wallet Engine Monitor & Cross-Module Shortcuts */}
       <div 
         className="p-3.5 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
         style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -11570,7 +11615,7 @@ export default function AdminWalletSettingsPage() {
           </span>
         </div>
 
-        <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+        <div className="flex flex-wrap items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
           <div>
             {tr('walletActiveCurrency', 'Store Currency:')}{' '}
             <span className="font-bold" style={{ color: 'var(--color-text)' }}>
@@ -11582,6 +11627,30 @@ export default function AdminWalletSettingsPage() {
             <span className="font-bold font-mono" style={{ color: 'var(--color-primary)' }}>
               {settings.bonusRules.length} Tiers Active
             </span>
+          </div>
+
+          <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
+            <Link
+              href="/admin/payment-gateway"
+              className="flex items-center gap-1 text-[11px] font-bold hover:underline"
+              style={{ color: 'var(--color-primary)' }}
+            >
+              <CreditCard className="h-3 w-3" />
+              <span>{tr('navPaymentGateways', 'Payment Gateways')}</span>
+              <ExternalLink className="h-2.5 w-2.5" />
+            </Link>
+
+            <span className="opacity-40">•</span>
+
+            <Link
+              href="/wallet"
+              className="flex items-center gap-1 text-[11px] font-bold hover:underline"
+              style={{ color: 'var(--color-primary)' }}
+            >
+              <Wallet className="h-3 w-3" />
+              <span>{tr('navViewStoreWallet', 'Store Wallet Portal')}</span>
+              <ExternalLink className="h-2.5 w-2.5" />
+            </Link>
           </div>
         </div>
       </div>
@@ -11628,7 +11697,7 @@ export default function AdminWalletSettingsPage() {
       {activeTab === 'config' && (
         <div 
           role="region"
-          data-lpignore="true"
+          aria-label={tr('walletRegionConfig', 'Wallet Configuration and Rules')}
           className="space-y-6"
         >
           {/* Section 1: General Wallet Controls */}
@@ -11718,7 +11787,7 @@ export default function AdminWalletSettingsPage() {
                 <select
                   value={settings.currency}
                   onChange={(e) => setSettings({ ...settings, currency: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none cursor-pointer"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none cursor-pointer"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
                   {SUPPORTED_CURRENCIES.map(c => (
@@ -11737,9 +11806,12 @@ export default function AdminWalletSettingsPage() {
                   step="0.01"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                   value={settings.minTopup}
                   onChange={(e) => setSettings({ ...settings, minTopup: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -11754,9 +11826,12 @@ export default function AdminWalletSettingsPage() {
                   step="0.01"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                   value={settings.maxTopup}
                   onChange={(e) => setSettings({ ...settings, maxTopup: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -11772,7 +11847,7 @@ export default function AdminWalletSettingsPage() {
               </p>
 
               <div className="flex flex-wrap items-center gap-2 pt-1">
-                {settings.presetAmounts.map((preset) => (
+                {(settings.presetAmounts || []).map((preset) => (
                   <div
                     key={preset}
                     className="px-3 py-1.5 rounded-xl border text-xs font-bold font-mono flex items-center gap-2 shadow-xs"
@@ -11795,11 +11870,14 @@ export default function AdminWalletSettingsPage() {
                     min="1"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     value={newPresetValue}
                     onChange={(e) => setNewPresetValue(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleAddPreset(); }}
                     placeholder={tr('placeholderNewPreset', 'e.g. 75')}
-                    className="w-24 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
+                    className="wallet-input w-24 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                   <button
@@ -11815,7 +11893,7 @@ export default function AdminWalletSettingsPage() {
             </div>
           </div>
 
-          {/* Section 2: Top-Up Bonus Incentives (Tiered Credit Rewards) */}
+          {/* Section 2: Top-Up Bonus Incentives */}
           <div 
             className="p-6 rounded-3xl border shadow-sm space-y-5 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -11832,7 +11910,7 @@ export default function AdminWalletSettingsPage() {
 
             <div className="space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {settings.bonusRules.map((rule) => (
+                {(settings.bonusRules || []).map((rule) => (
                   <div
                     key={rule.threshold}
                     className="p-4 rounded-2xl border flex items-center justify-between shadow-xs transition-colors"
@@ -11871,10 +11949,13 @@ export default function AdminWalletSettingsPage() {
                     min="1"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     value={newTierThreshold}
                     onChange={(e) => setNewTierThreshold(e.target.value)}
                     placeholder="150"
-                    className="w-full px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
+                    className="wallet-input w-full px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -11889,10 +11970,13 @@ export default function AdminWalletSettingsPage() {
                     max="100"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     value={newTierBonus}
                     onChange={(e) => setNewTierBonus(e.target.value)}
                     placeholder="15"
-                    className="w-full px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
+                    className="wallet-input w-full px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -11933,7 +12017,7 @@ export default function AdminWalletSettingsPage() {
                 <select
                   value={adjustEmail}
                   onChange={(e) => setAdjustEmail(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
+                  className="wallet-input w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
                   <option value="">{tr('selectCustomerPlaceholder', '-- Choose Customer --')}</option>
@@ -11977,9 +12061,12 @@ export default function AdminWalletSettingsPage() {
                   step="0.01"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                   value={adjustAmount}
                   onChange={(e) => setAdjustAmount(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                  className="wallet-input w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -11992,10 +12079,13 @@ export default function AdminWalletSettingsPage() {
                   type="text"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                   value={adjustReason}
                   onChange={(e) => setAdjustReason(e.target.value)}
                   placeholder={tr('adjustmentReasonPlaceholder', 'e.g. Customer loyalty gift or refund settlement')}
-                  className="w-full px-3 py-2 rounded-xl border outline-none font-medium"
+                  className="wallet-input w-full px-3 py-2 rounded-xl border outline-none font-medium"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -12021,7 +12111,7 @@ export default function AdminWalletSettingsPage() {
       {activeTab === 'ledger' && (
         <div 
           role="region"
-          data-lpignore="true"
+          aria-label={tr('walletRegionLedger', 'Wallet Transactions Ledger')}
           className="space-y-4"
         >
           {/* Search, Filter & Columns Popover Bar */}
@@ -12034,10 +12124,13 @@ export default function AdminWalletSettingsPage() {
                 type="text"
                 autoComplete="off"
                 data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
                 placeholder={tr('ledgerSearchPlaceholder', 'Search by customer email, name, description, or transaction ID...')}
-                className="w-full px-3.5 py-2 rounded-xl border text-xs outline-none"
+                className="wallet-input w-full px-3.5 py-2 rounded-xl border text-xs outline-none"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
             </div>
@@ -12046,7 +12139,7 @@ export default function AdminWalletSettingsPage() {
               <select
                 value={typeFilter}
                 onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
-                className="px-3 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer"
+                className="wallet-input px-3 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
                 <option value="all">{tr('ledgerFilterAll', 'All Types')}</option>
@@ -12058,7 +12151,7 @@ export default function AdminWalletSettingsPage() {
               </select>
 
               {/* Columns Popover Toggle */}
-              <div className="relative">
+              <div className="relative" ref={columnsPopoverRef}>
                 <button
                   type="button"
                   onClick={() => setShowColumnsPopover(!showColumnsPopover)}
@@ -12100,9 +12193,9 @@ export default function AdminWalletSettingsPage() {
                           <span style={{ color: 'var(--color-text)' }}>{col.label}</span>
                           <input
                             type="checkbox"
-                            checked={settings.ledgerColumns[col.key] ?? true}
+                            checked={settings.ledgerColumns?.[col.key] ?? true}
                             onChange={() => toggleColumn(col.key)}
-                            className="rounded"
+                            className="rounded cursor-pointer"
                           />
                         </label>
                       ))}
@@ -12165,14 +12258,14 @@ export default function AdminWalletSettingsPage() {
                         className="rounded cursor-pointer"
                       />
                     </th>
-                    {settings.ledgerColumns.customer && <th className="px-5 py-4">{tr('colCustomer', 'Customer')}</th>}
-                    {settings.ledgerColumns.type && <th className="px-5 py-4">{tr('colType', 'Type')}</th>}
-                    {settings.ledgerColumns.amount && <th className="px-5 py-4">{tr('colAmount', 'Amount')}</th>}
-                    {settings.ledgerColumns.balanceAfter && <th className="px-5 py-4">{tr('colBalanceAfter', 'Balance After')}</th>}
-                    {settings.ledgerColumns.gateway && <th className="px-5 py-4">{tr('colGateway', 'Gateway / Ref')}</th>}
-                    {settings.ledgerColumns.description && <th className="px-5 py-4">{tr('colDescription', 'Description')}</th>}
-                    {settings.ledgerColumns.date && <th className="px-5 py-4">{tr('colDate', 'Timestamp')}</th>}
-                    {settings.ledgerColumns.actions && <th className="px-5 py-4 text-right">{tr('colActions', 'Actions')}</th>}
+                    {settings.ledgerColumns?.customer && <th className="px-5 py-4">{tr('colCustomer', 'Customer')}</th>}
+                    {settings.ledgerColumns?.type && <th className="px-5 py-4">{tr('colType', 'Type')}</th>}
+                    {settings.ledgerColumns?.amount && <th className="px-5 py-4">{tr('colAmount', 'Amount')}</th>}
+                    {settings.ledgerColumns?.balanceAfter && <th className="px-5 py-4">{tr('colBalanceAfter', 'Balance After')}</th>}
+                    {settings.ledgerColumns?.gateway && <th className="px-5 py-4">{tr('colGateway', 'Gateway / Ref')}</th>}
+                    {settings.ledgerColumns?.description && <th className="px-5 py-4">{tr('colDescription', 'Description')}</th>}
+                    {settings.ledgerColumns?.date && <th className="px-5 py-4">{tr('colDate', 'Timestamp')}</th>}
+                    {settings.ledgerColumns?.actions && <th className="px-5 py-4 text-right">{tr('colActions', 'Actions')}</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
@@ -12185,8 +12278,22 @@ export default function AdminWalletSettingsPage() {
                   ) : (
                     paginatedTxs.map((tx) => {
                       const isSelected = selectedTxIds.includes(tx.id);
-                      const amt = Number(tx.amount || 0);
-                      const isNegative = amt < 0;
+                      const rawAmt = Number(tx.amount || 0);
+                      const isTypeDebit = ['debit', 'purchase', 'withdrawal', 'fee'].includes((tx.type || '').toLowerCase());
+                      const isNegative = rawAmt < 0 || (isTypeDebit && rawAmt > 0);
+                      const displayAmt = Math.abs(rawAmt);
+
+                      let formattedDate = '—';
+                      if (tx.created_at) {
+                        try {
+                          const d = new Date(tx.created_at);
+                          if (!isNaN(d.getTime())) {
+                            formattedDate = d.toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), {
+                              year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                            });
+                          }
+                        } catch (_) {}
+                      }
 
                       return (
                         <tr 
@@ -12206,7 +12313,7 @@ export default function AdminWalletSettingsPage() {
                             />
                           </td>
 
-                          {settings.ledgerColumns.customer && (
+                          {settings.ledgerColumns?.customer && (
                             <td className="px-5 py-4">
                               <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
                                 {tx.customer_name || 'Customer'}
@@ -12217,7 +12324,7 @@ export default function AdminWalletSettingsPage() {
                             </td>
                           )}
 
-                          {settings.ledgerColumns.type && (
+                          {settings.ledgerColumns?.type && (
                             <td className="px-5 py-4">
                               <span 
                                 className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border"
@@ -12232,19 +12339,19 @@ export default function AdminWalletSettingsPage() {
                             </td>
                           )}
 
-                          {settings.ledgerColumns.amount && (
+                          {settings.ledgerColumns?.amount && (
                             <td className="px-5 py-4 font-mono font-black text-sm" style={{ color: isNegative ? '#ef4444' : 'var(--color-emerald, #10b981)' }}>
-                              {isNegative ? `-${activeCurrencySymbol}${Math.abs(amt).toFixed(2)}` : `+${activeCurrencySymbol}${amt.toFixed(2)}`}
+                              {isNegative ? `-${activeCurrencySymbol}${displayAmt.toFixed(2)}` : `+${activeCurrencySymbol}${displayAmt.toFixed(2)}`}
                             </td>
                           )}
 
-                          {settings.ledgerColumns.balanceAfter && (
+                          {settings.ledgerColumns?.balanceAfter && (
                             <td className="px-5 py-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
                               {tx.balance_after !== undefined ? `${activeCurrencySymbol}${Number(tx.balance_after).toFixed(2)}` : '—'}
                             </td>
                           )}
 
-                          {settings.ledgerColumns.gateway && (
+                          {settings.ledgerColumns?.gateway && (
                             <td className="px-5 py-4">
                               <span className="px-2 py-0.5 rounded border text-[10px] font-mono font-bold uppercase" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                                 {tx.gateway || 'System'}
@@ -12252,19 +12359,19 @@ export default function AdminWalletSettingsPage() {
                             </td>
                           )}
 
-                          {settings.ledgerColumns.description && (
+                          {settings.ledgerColumns?.description && (
                             <td className="px-5 py-4 text-xs font-medium max-w-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
                               {tx.description || '—'}
                             </td>
                           )}
 
-                          {settings.ledgerColumns.date && (
+                          {settings.ledgerColumns?.date && (
                             <td className="px-5 py-4 text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                              {new Date(tx.created_at).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              {formattedDate}
                             </td>
                           )}
 
-                          {settings.ledgerColumns.actions && (
+                          {settings.ledgerColumns?.actions && (
                             <td className="px-5 py-4 text-right">
                               <button
                                 type="button"
@@ -12283,7 +12390,7 @@ export default function AdminWalletSettingsPage() {
               </table>
             </div>
 
-            {/* Pagination Bar */}
+            {/* Pagination Controls Bar */}
             <div 
               className="px-5 py-3.5 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
@@ -12301,7 +12408,7 @@ export default function AdminWalletSettingsPage() {
                   <select
                     value={rowsPerPage}
                     onChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setCurrentPage(1); }}
-                    className="px-2 py-1 rounded-lg border text-xs font-bold outline-none cursor-pointer"
+                    className="wallet-input px-2 py-1 rounded-lg border text-xs font-bold outline-none cursor-pointer"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
                     <option value={10}>10</option>
@@ -12390,12 +12497,18 @@ export default function AdminWalletSettingsPage() {
 
 ## File: `apps/web/src/app/admin/notification-settings/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { BellRing, Bell, Send, CheckCircle2, AlertCircle, Save, RefreshCw, Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, Clock, Volume2, ShieldAlert, Sparkles, Filter, Search, X, VolumeX, Mail, Smartphone, ExternalLink, Moon, ArrowRight, UserCheck, Users, Megaphone, Info, Eye } from 'lucide-react';
+import { 
+  BellRing, Bell, Send, CheckCircle2, AlertCircle, Save, RefreshCw, 
+  RotateCcw, Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, 
+  Clock, Volume2, ShieldAlert, Sparkles, Filter, Search, X, 
+  VolumeX, Mail, Smartphone, ExternalLink, Moon, ArrowRight,
+  UserCheck, Users, Megaphone, Info, Eye
+} from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
 export interface NotificationSettingsState {
@@ -12498,6 +12611,7 @@ export default function AdminNotificationSettingsPage() {
   const [broadcastMessage, setBroadcastMessage] = useState<string>('');
   const [broadcastCategory, setBroadcastCategory] = useState<'info' | 'warning' | 'urgent' | 'promo' | 'success'>('info');
   const [broadcastAudience, setBroadcastAudience] = useState<'all' | 'subscribers' | 'free' | 'admins'>('all');
+  const [broadcastChannels, setBroadcastChannels] = useState<string[]>(['in_app']);
   const [broadcastActionLabel, setBroadcastActionLabel] = useState<string>('');
   const [broadcastActionUrl, setBroadcastActionUrl] = useState<string>('');
   const [savingBroadcast, setSavingBroadcast] = useState<boolean>(false);
@@ -12604,7 +12718,6 @@ export default function AdminNotificationSettingsPage() {
       });
 
       if (res.ok) {
-        // Dispatch live event to update topbar bell in real time
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('zecratary_new_notification', {
             detail: {
@@ -12677,6 +12790,7 @@ export default function AdminNotificationSettingsPage() {
       message: broadcastMessage.trim(),
       category: broadcastCategory,
       targetAudience: broadcastAudience,
+      channels: broadcastChannels,
       actionLabel: broadcastActionLabel.trim(),
       actionUrl: broadcastActionUrl.trim()
     };
@@ -12726,11 +12840,12 @@ export default function AdminNotificationSettingsPage() {
 
   const handleOpenCreateModal = () => {
     setEditingBroadcastId(null);
-    setBroadcastTitle('Special Culinary Announcement');
-    setBroadcastMessage('Explore new high-protein recipes curated by our AI Chef formulator!');
+    setBroadcastTitle(tr('notifPreviewDefaultTitle', 'Special Culinary Announcement'));
+    setBroadcastMessage(tr('notifPreviewDefaultMessage', 'Explore new high-protein recipes curated by our AI Chef formulator!'));
     setBroadcastCategory('info');
     setBroadcastAudience('all');
-    setBroadcastActionLabel('Explore Chef');
+    setBroadcastChannels(['in_app']);
+    setBroadcastActionLabel(tr('notifPreviewDefaultAction', 'Explore Chef'));
     setBroadcastActionUrl('/chef');
     setShowModal(true);
   };
@@ -12741,15 +12856,26 @@ export default function AdminNotificationSettingsPage() {
     setBroadcastMessage(b.message);
     setBroadcastCategory(b.category);
     setBroadcastAudience(b.targetAudience);
+    setBroadcastChannels(Array.isArray(b.channels) && b.channels.length > 0 ? b.channels : ['in_app']);
     setBroadcastActionLabel(b.actionLabel || '');
     setBroadcastActionUrl(b.actionUrl || '');
     setShowModal(true);
   };
 
   const handleResetDefaults = () => {
-    if (!confirm('Reset notification rules and thresholds to defaults?')) return;
+    if (!confirm(tr('notifConfirmReset', 'Reset notification rules and thresholds to defaults?'))) return;
     setSettings(DEFAULT_SETTINGS);
-    showToast('success', 'Notification rules reset to initial defaults.');
+    showToast('success', tr('notifResetSuccess', 'Notification rules reset to initial defaults.'));
+  };
+
+  const toggleChannelSelection = (ch: string) => {
+    setBroadcastChannels(prev => {
+      if (prev.includes(ch)) {
+        if (prev.length === 1) return prev; // keep at least 1 channel
+        return prev.filter(c => c !== ch);
+      }
+      return [...prev, ch];
+    });
   };
 
   const filteredBroadcasts = useMemo(() => {
@@ -12768,21 +12894,22 @@ export default function AdminNotificationSettingsPage() {
   const getCategoryBadge = (cat: string) => {
     switch (cat) {
       case 'urgent':
-        return { label: 'URGENT', bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', color: '#ef4444' };
+        return { label: tr('notifFilterUrgent', 'URGENT'), bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', color: '#ef4444' };
       case 'warning':
-        return { label: 'WARNING', bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', color: '#f59e0b' };
+        return { label: tr('notifFilterWarning', 'WARNING'), bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', color: '#f59e0b' };
       case 'promo':
-        return { label: 'PROMO', bg: 'rgba(168, 85, 247, 0.1)', border: '#a855f7', color: '#c084fc' };
+        return { label: tr('notifFilterPromo', 'PROMO'), bg: 'rgba(168, 85, 247, 0.1)', border: '#a855f7', color: '#c084fc' };
       case 'success':
-        return { label: 'SUCCESS', bg: 'rgba(16, 185, 129, 0.1)', border: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' };
+        return { label: tr('notifFilterSuccess', 'SUCCESS'), bg: 'rgba(16, 185, 129, 0.1)', border: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' };
       default:
-        return { label: 'INFO', bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', color: '#60a5fa' };
+        return { label: tr('notifFilterInfo', 'INFO'), bg: 'rgba(59, 130, 246, 0.1)', border: '#3b82f6', color: '#60a5fa' };
     }
   };
 
   return (
+    // TASK 1: Full-Width (100%) Fluid Canvas with Responsive Padding
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="w-full max-w-full space-y-6 pb-24 px-4 sm:px-6 lg:px-8 xl:px-10 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
       {/* 1. Top Header & Action Cluster */}
@@ -12826,6 +12953,20 @@ export default function AdminNotificationSettingsPage() {
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>{tr('notifBtnReload', 'Reload')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetDefaults}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>{tr('notifBtnResetDefaults', 'Reset Defaults')}</span>
           </button>
 
           <button
@@ -12980,17 +13121,19 @@ export default function AdminNotificationSettingsPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
               <div className="p-4 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div>
                   <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifMealDailyReminder', 'Daily Meal Plan Reminder')}</span>
-                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>Trigger daily recipe lineup notice</span>
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifMealDailyDesc', 'Trigger daily recipe lineup notice')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
                     type="time"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-form-type="other"
+                    data-1p-ignore="true"
                     value={settings.plannerMealReminderTime}
                     onChange={(e) => setSettings({ ...settings, plannerMealReminderTime: e.target.value })}
                     className="px-2 py-1 rounded-lg border font-mono font-bold text-xs"
@@ -13000,7 +13143,7 @@ export default function AdminNotificationSettingsPage() {
                     type="checkbox"
                     checked={settings.plannerMealReminder}
                     onChange={(e) => setSettings({ ...settings, plannerMealReminder: e.target.checked })}
-                    className="rounded h-4 w-4"
+                    className="rounded h-4 w-4 cursor-pointer"
                   />
                 </div>
               </div>
@@ -13008,13 +13151,27 @@ export default function AdminNotificationSettingsPage() {
               <div className="p-4 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div>
                   <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifPrepTimeAlert', 'Pre-Prep Cooking Advance Alert')}</span>
-                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>30 minutes prior to scheduled prep slot</span>
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifPrepTimeDesc', '30 minutes prior to scheduled prep slot')}</span>
                 </div>
                 <input
                   type="checkbox"
                   checked={settings.prepTimeAlert}
                   onChange={(e) => setSettings({ ...settings, prepTimeAlert: e.target.checked })}
-                  className="rounded h-4 w-4"
+                  className="rounded h-4 w-4 cursor-pointer"
+                />
+              </div>
+
+              {/* RESTORED CONTROL: Weekly Intake Nudge */}
+              <div className="p-4 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifWeeklyNudge', 'Weekly Meal Plan Intake Wizard Nudge')}</span>
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifWeeklyNudgeDesc', 'Prompt users every Sunday to plan their weekly menu')}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.weeklyIntakeNudge}
+                  onChange={(e) => setSettings({ ...settings, weeklyIntakeNudge: e.target.checked })}
+                  className="rounded h-4 w-4 cursor-pointer"
                 />
               </div>
             </div>
@@ -13039,13 +13196,19 @@ export default function AdminNotificationSettingsPage() {
 
               <div className="space-y-3 text-xs">
                 <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifTokenLowAlert', 'Low Token Balance Warning')}</span>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifTokenLowAlert', 'Low Token Balance Warning')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifTokenLowThreshold', 'Warning Threshold (Remaining Tokens)')}</span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
                       min="1"
                       autoComplete="off"
                       data-lpignore="true"
+                      data-form-type="other"
+                      data-1p-ignore="true"
+                      spellCheck={false}
                       value={settings.tokenLowThreshold}
                       onChange={(e) => setSettings({ ...settings, tokenLowThreshold: parseInt(e.target.value, 10) || 50 })}
                       className="w-16 px-2 py-1 rounded-lg border font-mono font-bold text-center"
@@ -13055,18 +13218,35 @@ export default function AdminNotificationSettingsPage() {
                       type="checkbox"
                       checked={settings.tokenLowAlert}
                       onChange={(e) => setSettings({ ...settings, tokenLowAlert: e.target.checked })}
-                      className="rounded h-4 w-4"
+                      className="rounded h-4 w-4 cursor-pointer"
                     />
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifTokenExhaustion', 'Zero-Token Exhaustion Notice')}</span>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifTokenExhaustion', 'Zero-Token Exhaustion Notice')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifTokenExhaustionDesc', 'Immediate alert when balance hits zero')}</span>
+                  </div>
                   <input
                     type="checkbox"
                     checked={settings.tokenExhaustionAlert}
                     onChange={(e) => setSettings({ ...settings, tokenExhaustionAlert: e.target.checked })}
-                    className="rounded h-4 w-4"
+                    className="rounded h-4 w-4 cursor-pointer"
+                  />
+                </div>
+
+                {/* RESTORED CONTROL: Monthly Allowance Notice */}
+                <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifTokenAllowance', 'Monthly Plan Allowance Credit Confirmation')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifTokenAllowanceDesc', 'Notify when monthly token balance refreshes')}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.monthlyAllowanceNotice}
+                    onChange={(e) => setSettings({ ...settings, monthlyAllowanceNotice: e.target.checked })}
+                    className="rounded h-4 w-4 cursor-pointer"
                   />
                 </div>
               </div>
@@ -13089,7 +13269,10 @@ export default function AdminNotificationSettingsPage() {
 
               <div className="space-y-3 text-xs">
                 <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifWalletLowAlert', 'Low Wallet Balance Warning')}</span>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifWalletLowAlert', 'Low Wallet Balance Warning')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifWalletLowThreshold', 'Warning Threshold ($)')}</span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -13097,6 +13280,9 @@ export default function AdminNotificationSettingsPage() {
                       min="0.5"
                       autoComplete="off"
                       data-lpignore="true"
+                      data-form-type="other"
+                      data-1p-ignore="true"
+                      spellCheck={false}
                       value={settings.walletLowThreshold}
                       onChange={(e) => setSettings({ ...settings, walletLowThreshold: parseFloat(e.target.value) || 5.00 })}
                       className="w-16 px-2 py-1 rounded-lg border font-mono font-bold text-center"
@@ -13106,18 +13292,35 @@ export default function AdminNotificationSettingsPage() {
                       type="checkbox"
                       checked={settings.walletLowAlert}
                       onChange={(e) => setSettings({ ...settings, walletLowAlert: e.target.checked })}
-                      className="rounded h-4 w-4"
+                      className="rounded h-4 w-4 cursor-pointer"
                     />
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifWalletDepositReceipt', 'Top-Up Deposit Settlement Receipt')}</span>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifWalletDepositReceipt', 'Top-Up Deposit Settlement Receipt')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifWalletDepositDesc', 'Instant receipt for wallet additions')}</span>
+                  </div>
                   <input
                     type="checkbox"
                     checked={settings.topupReceiptAlert}
                     onChange={(e) => setSettings({ ...settings, topupReceiptAlert: e.target.checked })}
-                    className="rounded h-4 w-4"
+                    className="rounded h-4 w-4 cursor-pointer"
+                  />
+                </div>
+
+                {/* RESTORED CONTROL: Payment Decline Warning */}
+                <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifWalletPaymentDecline', 'Payment Method Decline & Retry Warning')}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifWalletPaymentDeclineDesc', 'Alert on recurring subscription charge failures')}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.paymentDeclineAlert}
+                    onChange={(e) => setSettings({ ...settings, paymentDeclineAlert: e.target.checked })}
+                    className="rounded h-4 w-4 cursor-pointer"
                   />
                 </div>
               </div>
@@ -13134,13 +13337,16 @@ export default function AdminNotificationSettingsPage() {
                 <Megaphone className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                 {tr('notifSubHeading', 'Subscription & Expiry Lifecycle Notices')}
               </h2>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('notifSubDesc', 'Advance warnings and confirmation notices for billing renewals.')}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
               <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div>
                   <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSubExpiryAlert', 'Upcoming Renewal Notice')}</span>
-                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Advance warning days</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSubExpiryDesc', 'Advance warning days')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -13149,6 +13355,9 @@ export default function AdminNotificationSettingsPage() {
                     max="14"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-form-type="other"
+                    data-1p-ignore="true"
+                    spellCheck={false}
                     value={settings.subscriptionExpiryDays}
                     onChange={(e) => setSettings({ ...settings, subscriptionExpiryDays: parseInt(e.target.value, 10) || 3 })}
                     className="w-12 px-2 py-1 rounded-lg border font-mono font-bold text-center"
@@ -13158,28 +13367,62 @@ export default function AdminNotificationSettingsPage() {
                     type="checkbox"
                     checked={settings.subscriptionExpiryAlert}
                     onChange={(e) => setSettings({ ...settings, subscriptionExpiryAlert: e.target.checked })}
-                    className="rounded h-4 w-4"
+                    className="rounded h-4 w-4 cursor-pointer"
                   />
                 </div>
               </div>
 
+              {/* RESTORED CONTROL: Subscription Cancel Receipt */}
               <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifSystemUpdates', 'Feature Releases & Platform Updates')}</span>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSubCancelReceipt', 'Subscription Cancellation & Grace Period Notice')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSubCancelDesc', 'Confirm cancellation and communicate expiry terms')}</span>
+                </div>
                 <input
                   type="checkbox"
-                  checked={settings.systemUpdatesAlert}
-                  onChange={(e) => setSettings({ ...settings, systemUpdatesAlert: e.target.checked })}
-                  className="rounded h-4 w-4"
+                  checked={settings.subscriptionCancelReceipt}
+                  onChange={(e) => setSettings({ ...settings, subscriptionCancelReceipt: e.target.checked })}
+                  className="rounded h-4 w-4 cursor-pointer"
                 />
               </div>
 
               <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <span className="font-bold" style={{ color: 'var(--color-text)' }}>{tr('notifSystemMaintenance', 'Scheduled Server Maintenance')}</span>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSystemUpdates', 'Feature Releases & Platform Updates')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSystemUpdatesDesc', 'Notify users of new recipes and chef upgrades')}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.systemUpdatesAlert}
+                  onChange={(e) => setSettings({ ...settings, systemUpdatesAlert: e.target.checked })}
+                  className="rounded h-4 w-4 cursor-pointer"
+                />
+              </div>
+
+              <div className="p-3.5 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSystemMaintenance', 'Scheduled Server Maintenance')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSystemMaintenanceDesc', 'Advance warning for system downtime windows')}</span>
+                </div>
                 <input
                   type="checkbox"
                   checked={settings.maintenanceDowntimeAlert}
                   onChange={(e) => setSettings({ ...settings, maintenanceDowntimeAlert: e.target.checked })}
-                  className="rounded h-4 w-4"
+                  className="rounded h-4 w-4 cursor-pointer"
+                />
+              </div>
+
+              {/* RESTORED CONTROL: Unusual Login Alerts */}
+              <div className="p-3.5 rounded-2xl border flex items-center justify-between sm:col-span-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div>
+                  <span className="font-bold block" style={{ color: 'var(--color-text)' }}>{tr('notifSystemSecurity', 'Unusual Account Login & Password Alerts')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('notifSystemSecurityDesc', 'Security notices on new device or location logins')}</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.securityLoginAlert}
+                  onChange={(e) => setSettings({ ...settings, securityLoginAlert: e.target.checked })}
+                  className="rounded h-4 w-4 cursor-pointer"
                 />
               </div>
             </div>
@@ -13236,6 +13479,8 @@ export default function AdminNotificationSettingsPage() {
                   type="time"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
                   value={settings.dndStartTime}
                   onChange={(e) => setSettings({ ...settings, dndStartTime: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border font-bold"
@@ -13251,6 +13496,8 @@ export default function AdminNotificationSettingsPage() {
                   type="time"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
                   value={settings.dndEndTime}
                   onChange={(e) => setSettings({ ...settings, dndEndTime: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border font-bold"
@@ -13280,7 +13527,7 @@ export default function AdminNotificationSettingsPage() {
                 type="checkbox"
                 checked={settings.soundChimesEnabled}
                 onChange={(e) => setSettings({ ...settings, soundChimesEnabled: e.target.checked })}
-                className="rounded h-4 w-4"
+                className="rounded h-4 w-4 cursor-pointer"
               />
             </div>
           </div>
@@ -13291,7 +13538,7 @@ export default function AdminNotificationSettingsPage() {
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
             <div className="border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
                 <Sliders className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                 {tr('notifRetentionHeading', 'Notification Storage & Rate Limiting')}
               </h2>
@@ -13311,6 +13558,9 @@ export default function AdminNotificationSettingsPage() {
                   max="365"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
+                  spellCheck={false}
                   value={settings.retentionDays}
                   onChange={(e) => setSettings({ ...settings, retentionDays: parseInt(e.target.value, 10) || 30 })}
                   className="w-full px-3.5 py-2.5 rounded-xl border font-bold"
@@ -13328,6 +13578,9 @@ export default function AdminNotificationSettingsPage() {
                   max="50"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
+                  spellCheck={false}
                   value={settings.dailyRateLimit}
                   onChange={(e) => setSettings({ ...settings, dailyRateLimit: parseInt(e.target.value, 10) || 10 })}
                   className="w-full px-3.5 py-2.5 rounded-xl border font-bold"
@@ -13378,6 +13631,9 @@ export default function AdminNotificationSettingsPage() {
                 type="text"
                 autoComplete="off"
                 data-lpignore="true"
+                data-form-type="other"
+                data-1p-ignore="true"
+                spellCheck={false}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('notifSearchPlaceholder', 'Search broadcasts by title, message, or category...')}
@@ -13393,11 +13649,11 @@ export default function AdminNotificationSettingsPage() {
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               <option value="all">{tr('notifFilterAll', 'All Categories')}</option>
-              <option value="info">Info</option>
-              <option value="warning">Warning</option>
-              <option value="urgent">Urgent</option>
-              <option value="promo">Promo</option>
-              <option value="success">Success</option>
+              <option value="info">{tr('notifFilterInfo', 'Info')}</option>
+              <option value="warning">{tr('notifFilterWarning', 'Warning')}</option>
+              <option value="urgent">{tr('notifFilterUrgent', 'Urgent')}</option>
+              <option value="promo">{tr('notifFilterPromo', 'Promo')}</option>
+              <option value="success">{tr('notifFilterSuccess', 'Success')}</option>
             </select>
           </div>
 
@@ -13416,6 +13672,7 @@ export default function AdminNotificationSettingsPage() {
                     <th className="px-5 py-4">{tr('notifColTitle', 'Announcement Title & Message')}</th>
                     <th className="px-5 py-4">{tr('notifColCategory', 'Category')}</th>
                     <th className="px-5 py-4">{tr('notifColAudience', 'Target Audience')}</th>
+                    <th className="px-5 py-4">{tr('notifColChannels', 'Channels')}</th>
                     <th className="px-5 py-4 text-center">{tr('notifColSendCount', 'Dispatched')}</th>
                     <th className="px-5 py-4">{tr('notifColSentAt', 'Last Sent')}</th>
                     <th className="px-5 py-4 text-right">{tr('notifColActions', 'Actions')}</th>
@@ -13424,21 +13681,23 @@ export default function AdminNotificationSettingsPage() {
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                   {filteredBroadcasts.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={7} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
                         {tr('notifNoBroadcasts', 'No custom notifications found matching your search.')}
                       </td>
                     </tr>
                   ) : (
                     filteredBroadcasts.map((b) => {
                       const badge = getCategoryBadge(b.category);
+                      const channels = Array.isArray(b.channels) && b.channels.length > 0 ? b.channels : ['in_app'];
+
                       return (
                         <tr key={b.id} className="transition" style={{ borderColor: 'var(--color-border)' }}>
                           <td className="px-5 py-4">
                             <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{b.title}</div>
                             <div className="text-[11px] line-clamp-2 mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{b.message}</div>
                             {b.actionUrl && (
-                              <div className="text-[10px] text-[var(--color-primary)] font-bold mt-1 flex items-center gap-1">
-                                <span>{b.actionLabel || 'Action'}</span>
+                              <div className="text-[10px] font-bold mt-1 flex items-center gap-1" style={{ color: 'var(--color-primary)' }}>
+                                <span>{b.actionLabel || tr('notifPreviewDefaultAction', 'Action')}</span>
                                 <ExternalLink className="h-2.5 w-2.5" />
                               </div>
                             )}
@@ -13454,7 +13713,31 @@ export default function AdminNotificationSettingsPage() {
                           </td>
 
                           <td className="px-5 py-4 font-mono font-bold uppercase text-[10px]" style={{ color: 'var(--color-text)' }}>
-                            {b.targetAudience}
+                            {b.targetAudience === 'all' && tr('notifAudienceAll', 'All Users')}
+                            {b.targetAudience === 'subscribers' && tr('notifAudienceSubscribers', 'Subscribers')}
+                            {b.targetAudience === 'free' && tr('notifAudienceFree', 'Free Tier')}
+                            {b.targetAudience === 'admins' && tr('notifAudienceAdmins', 'Admins')}
+                            {!['all', 'subscribers', 'free', 'admins'].includes(b.targetAudience) && b.targetAudience}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {channels.includes('in_app') && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                                  App
+                                </span>
+                              )}
+                              {channels.includes('email') && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                                  Email
+                                </span>
+                              )}
+                              {channels.includes('push') && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                                  Push
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           <td className="px-5 py-4 text-center font-mono font-bold">
@@ -13476,7 +13759,7 @@ export default function AdminNotificationSettingsPage() {
                                 title="Dispatch this announcement now"
                               >
                                 <Send className="h-3 w-3" />
-                                <span>{sendingBroadcastId === b.id ? 'Sending...' : tr('notifBtnSendNow', 'Send Alert Now')}</span>
+                                <span>{sendingBroadcastId === b.id ? tr('notifBtnSending', 'Sending...') : tr('notifBtnSendNow', 'Send Alert Now')}</span>
                               </button>
 
                               <button
@@ -13552,6 +13835,8 @@ export default function AdminNotificationSettingsPage() {
                     autoComplete="off"
                     data-lpignore="true"
                     data-form-type="other"
+                    data-1p-ignore="true"
+                    spellCheck={false}
                     value={broadcastTitle}
                     onChange={(e) => setBroadcastTitle(e.target.value)}
                     placeholder="e.g. Special Holiday Tasting Blueprint"
@@ -13571,11 +13856,11 @@ export default function AdminNotificationSettingsPage() {
                       className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
                       style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     >
-                      <option value="info">Info</option>
-                      <option value="warning">Warning</option>
-                      <option value="urgent">Urgent</option>
-                      <option value="promo">Promo</option>
-                      <option value="success">Success</option>
+                      <option value="info">{tr('notifFilterInfo', 'Info')}</option>
+                      <option value="warning">{tr('notifFilterWarning', 'Warning')}</option>
+                      <option value="urgent">{tr('notifFilterUrgent', 'Urgent')}</option>
+                      <option value="promo">{tr('notifFilterPromo', 'Promo')}</option>
+                      <option value="success">{tr('notifFilterSuccess', 'Success')}</option>
                     </select>
                   </div>
 
@@ -13589,12 +13874,48 @@ export default function AdminNotificationSettingsPage() {
                       className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
                       style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     >
-                      <option value="all">All Users</option>
-                      <option value="subscribers">Subscribers Only</option>
-                      <option value="free">Free Tier Only</option>
-                      <option value="admins">Admins Only</option>
+                      <option value="all">{tr('notifAudienceAll', 'All Users')}</option>
+                      <option value="subscribers">{tr('notifAudienceSubscribers', 'Subscribers Only')}</option>
+                      <option value="free">{tr('notifAudienceFree', 'Free Tier Only')}</option>
+                      <option value="admins">{tr('notifAudienceAdmins', 'Admins Only')}</option>
                     </select>
                   </div>
+                </div>
+              </div>
+
+              {/* ACTIVE DELIVERY CHANNELS MULTI-SELECT CHIPS */}
+              <div>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
+                  {tr('notifLabelChannels', 'Active Delivery Channels *')}
+                </label>
+                <div className="flex items-center gap-2">
+                  {[
+                    { id: 'in_app', label: tr('notifChannelInApp', 'In-App Bell'), icon: Bell },
+                    { id: 'email', label: tr('notifChannelEmail', 'Transactional Email'), icon: Mail },
+                    { id: 'push', label: tr('notifChannelPush', 'Web Push'), icon: Smartphone }
+                  ].map(ch => {
+                    const active = broadcastChannels.includes(ch.id);
+                    return (
+                      <button
+                        key={ch.id}
+                        type="button"
+                        onClick={() => toggleChannelSelection(ch.id)}
+                        className="px-3 py-1.5 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                        style={active ? {
+                          backgroundColor: 'var(--color-primary)',
+                          borderColor: 'var(--color-primary)',
+                          color: '#ffffff'
+                        } : {
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                      >
+                        <ch.icon className="h-3.5 w-3.5" />
+                        <span>{ch.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -13605,6 +13926,9 @@ export default function AdminNotificationSettingsPage() {
                 <textarea
                   autoComplete="off"
                   data-lpignore="true"
+                  data-form-type="other"
+                  data-1p-ignore="true"
+                  spellCheck={false}
                   rows={3}
                   value={broadcastMessage}
                   onChange={(e) => setBroadcastMessage(e.target.value)}
@@ -13623,6 +13947,9 @@ export default function AdminNotificationSettingsPage() {
                     type="text"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-form-type="other"
+                    data-1p-ignore="true"
+                    spellCheck={false}
                     value={broadcastActionLabel}
                     onChange={(e) => setBroadcastActionLabel(e.target.value)}
                     placeholder="e.g. View Recipe / Open Planner"
@@ -13639,6 +13966,9 @@ export default function AdminNotificationSettingsPage() {
                     type="text"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-form-type="other"
+                    data-1p-ignore="true"
+                    spellCheck={false}
                     value={broadcastActionUrl}
                     onChange={(e) => setBroadcastActionUrl(e.target.value)}
                     placeholder="e.g. /chef or /planner"
@@ -13651,7 +13981,7 @@ export default function AdminNotificationSettingsPage() {
               {/* LIVE USER NOTIFICATION PREVIEW FLYOUT BOX */}
               <div className="space-y-1.5 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <span className="font-bold text-[11px] flex items-center gap-1.5 opacity-80">
-                  <Eye className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                  <Eye className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                   {tr('notifPreviewHeading', 'Live Top-Bar Flyout Preview')}
                 </span>
 
@@ -13664,24 +13994,24 @@ export default function AdminNotificationSettingsPage() {
                       className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border"
                       style={getCategoryBadge(broadcastCategory)}
                     >
-                      {broadcastCategory}
+                      {getCategoryBadge(broadcastCategory).label}
                     </span>
-                    <span className="text-[10px] opacity-60 font-mono">Just now</span>
+                    <span className="text-[10px] opacity-60 font-mono">{tr('notifPreviewJustNow', 'Just now')}</span>
                   </div>
 
                   <div>
                     <h4 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                      {broadcastTitle || 'Notification Headline'}
+                      {broadcastTitle || tr('notifPreviewDefaultTitle', 'Notification Headline')}
                     </h4>
                     <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                      {broadcastMessage || 'Your announcement body copy will render here as users inspect their top navigation bell...'}
+                      {broadcastMessage || tr('notifPreviewDefaultMessage', 'Your announcement body copy will render here as users inspect their top navigation bell...')}
                     </p>
                   </div>
 
                   {broadcastActionUrl && (
                     <div className="pt-1">
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold underline" style={{ color: 'var(--color-primary)' }}>
-                        <span>{broadcastActionLabel || 'View Details'}</span>
+                        <span>{broadcastActionLabel || tr('notifPreviewDefaultAction', 'View Details')}</span>
                         <ExternalLink className="h-2.5 w-2.5" />
                       </span>
                     </div>
@@ -13730,7 +14060,7 @@ import { useState, useEffect, useCallback, KeyboardEvent } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Key, Sliders, Sparkles, Globe, PackageCheck, 
-  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle
+  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, SlidersVertical, Eye, EyeOff, Calendar, Clock, Flame, Users, Copy, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle, ChevronDown
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -13799,6 +14129,7 @@ export default function ChefAISettingsPage() {
   const [autoConnecting, setAutoConnecting] = useState(false);
   const [testingKey, setTestingKey] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   
   // Capabilities
   const [enableWebSearch, setEnableWebSearch] = useState(true);
@@ -13945,7 +14276,9 @@ export default function ChefAISettingsPage() {
 
   // Load Settings Exclusively from Server Storage
   const loadSettingsFromServer = useCallback(async () => {
-    purgeLegacyBrowserAdminStorage();
+    if (typeof purgeLegacyBrowserAdminStorage === 'function') {
+      purgeLegacyBrowserAdminStorage();
+    }
     try {
       const serverData = await fetchServerAdminSettings();
       if (serverData) {
@@ -14030,6 +14363,7 @@ export default function ChefAISettingsPage() {
         body: JSON.stringify({
           provider,
           apiKey: keyToTest,
+          key: keyToTest,
           model
         })
       });
@@ -14041,10 +14375,10 @@ export default function ChefAISettingsPage() {
       } catch (_) {
         data = { success: false, error: `Invalid response from server (${res.status}: ${res.statusText})` };
       }
-      if (data.success) {
+      if (res.ok && data.success) {
         setTestResult({ success: true, message: data.message || `${t('connectedPrefix', 'Connected to')} ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'}!` });
       } else {
-        setTestResult({ success: false, message: data.error || t('connectionFailed', 'Connection failed.') });
+        setTestResult({ success: false, message: data.error || data.message || t('connectionFailed', 'Connection failed.') });
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message || t('verificationEndpointError', 'Could not reach verification endpoint.') });
@@ -14062,15 +14396,24 @@ export default function ChefAISettingsPage() {
       const data = await res.json();
       let resolvedKey = apiKey.trim();
 
-      if (data.success && Array.isArray(data.keys)) {
-        const geminiEntry = data.keys.find((k: any) => 
-          k.envKey === 'GEMINI_API_KEY' || 
-          k.envKey === 'GOOGLE_API_KEY' || 
-          k.provider?.toLowerCase().includes('gemini')
-        );
-        if (geminiEntry && geminiEntry.keyValue && !geminiEntry.keyValue.includes('sample')) {
-          resolvedKey = geminiEntry.keyValue.trim();
-          setApiKey(resolvedKey);
+      if (data.success) {
+        if (Array.isArray(data.keys)) {
+          const geminiEntry = data.keys.find((k: any) => 
+            k.envKey === 'GEMINI_API_KEY' || 
+            k.envKey === 'GOOGLE_API_KEY' || 
+            k.provider?.toLowerCase().includes('gemini')
+          );
+          if (geminiEntry && geminiEntry.keyValue && !geminiEntry.keyValue.includes('sample')) {
+            resolvedKey = geminiEntry.keyValue.trim();
+            setApiKey(resolvedKey);
+          }
+        }
+        if (!resolvedKey && data.envMap) {
+          const fromEnv = data.envMap['GEMINI_API_KEY'] || data.envMap['GOOGLE_API_KEY'] || data.envMap['NEXT_PUBLIC_GEMINI_API_KEY'];
+          if (fromEnv && !fromEnv.includes('sample')) {
+            resolvedKey = fromEnv.trim();
+            setApiKey(resolvedKey);
+          }
         }
       }
 
@@ -14089,6 +14432,7 @@ export default function ChefAISettingsPage() {
         body: JSON.stringify({
           provider: 'gemini',
           apiKey: resolvedKey,
+          key: resolvedKey,
           model: activeModel
         })
       });
@@ -14100,7 +14444,7 @@ export default function ChefAISettingsPage() {
       } catch (_) {
         testData = { success: false, error: `Invalid server response (${testRes.status})` };
       }
-      if (testData.success) {
+      if (testRes.ok && testData.success) {
         setTestResult({ 
           success: true, 
           message: `${t('connectedPrefix', 'Connected to')} Google Gemini (${activeModel}) ${t('keySyncedSuffix', 'and key synced!')}` 
@@ -14121,12 +14465,12 @@ export default function ChefAISettingsPage() {
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
           window.dispatchEvent(new Event('zecratary_settings_updated'));
           window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-      window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
-      try {
-        const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
-        syncCh.postMessage({ model, provider });
-        syncCh.close();
-      } catch (_) {}
+          window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+          try {
+            const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
+            syncCh.postMessage({ model: activeModel, provider: 'gemini' });
+            syncCh.close();
+          } catch (_) {}
         }
       } else if (!silent) {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
@@ -14247,10 +14591,12 @@ export default function ChefAISettingsPage() {
     }));
   };
 
-  const handleSave = async (e?: React.FormEvent) => {
+  const handleSave = async (e?: React.FormEvent | React.MouseEvent) => {
     if (e) e.preventDefault();
-    const cleanApiKey = apiKey.trim();
+    if (isSaving) return;
+    setIsSaving(true);
 
+    const cleanApiKey = apiKey.trim();
     const config = {
       provider,
       apiKey: cleanApiKey,
@@ -14279,70 +14625,74 @@ export default function ChefAISettingsPage() {
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
-    await persistServerAdminSettings({
-      aiProvider: provider,
-      aiModel: model,
-      chefAiSettings: config,
-      chefQuestionnaire: activeFlattenedQuestions
-    });
+    try {
+      await persistServerAdminSettings({
+        aiProvider: provider,
+        aiModel: model,
+        chefAiSettings: config,
+        chefQuestionnaire: activeFlattenedQuestions
+      });
 
-    if (cleanApiKey) {
-      try {
-        const res = await fetch('/api/admin/keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
-            provider,
-            envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
-            keyValue: cleanApiKey,
-            status: 'active'
-          })
-        });
+      if (cleanApiKey) {
+        try {
+          const res = await fetch('/api/admin/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: provider === 'gemini' ? 'Google Gemini Production' : 'OpenAI GPT-4o',
+              provider,
+              envKey: provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
+              keyValue: cleanApiKey,
+              status: 'active'
+            })
+          });
 
-        const data = await res.json();
-        if (res.ok && data.success) {
-          setTestResult({
-            success: true,
-            message: `${t('keySavedToEnv', 'Key saved to local .env and synchronized')} (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
-          });
-        } else {
-          setTestResult({
-            success: false,
-            message: `${t('serverStoredSettings', 'Server stored settings')}: ${data.error || 'Backend rejected key save'}`
-          });
-        }
-      } catch (err: any) {
-        setTestResult({
-          success: false,
-          message: `${t('serverStoredSettings', 'Server stored settings')}: ${err.message || 'Network error'}`
-        });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            setTestResult({
+              success: true,
+              message: `${t('keySavedToEnv', 'Key saved to local .env and synchronized')} (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
+            });
+          }
+        } catch (_) {}
       }
-    }
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-      window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
-      try {
-        const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
-        syncCh.postMessage({ model, provider });
-        syncCh.close();
-      } catch (_) {}
-      window.dispatchEvent(new Event('zecratary_settings_updated'));
-      window.dispatchEvent(new Event('storage'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+        window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+        try {
+          const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
+          syncCh.postMessage({ model, provider });
+          syncCh.close();
+        } catch (_) {}
+        window.dispatchEvent(new Event('zecratary_settings_updated'));
+        window.dispatchEvent(new Event('storage'));
+      }
+      
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3500);
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: `${t('serverStoredSettings', 'Server stored settings')}: ${err?.message || 'Failed to save'}`
+      });
+    } finally {
+      setIsSaving(false);
     }
-    
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3500);
   };
 
   const activeSection = sections.find(s => s.id === activeTopicId) || sections[0];
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 font-sans px-2 sm:px-4 pt-2 transition-colors duration-200"
+      id="zecratary-ai-settings-canvas"
+      role="region"
+      aria-label={t('aiAssistantConfigTitle', 'AI Assistant Configuration')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans pt-2 transition-colors duration-200"
       style={{ 
+        boxSizing: 'border-box',
         color: 'var(--color-text)',
         transition: 'background-color 200ms ease, color 200ms ease, border-color 200ms ease'
       }}
@@ -14389,7 +14739,8 @@ export default function ChefAISettingsPage() {
           <button
             type="button"
             onClick={handleSave}
-            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90"
+            disabled={isSaving}
+            className="text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
             style={{ 
               backgroundColor: 'var(--color-primary)',
               boxShadow: 'var(--color-primary-shadow, 0 8px 20px -4px rgba(224, 86, 56, 0.3))'
@@ -14397,7 +14748,17 @@ export default function ChefAISettingsPage() {
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            <Check className="h-4 w-4" /> {t('saveConfigurationBtn', 'Save Configuration')}
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>{t('saving', 'Saving...')}</span>
+              </>
+            ) : (
+              <>
+                <Check className="h-4 w-4" />
+                <span>{t('saveConfigurationBtn', 'Save Configuration')}</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -14431,7 +14792,13 @@ export default function ChefAISettingsPage() {
         })}
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      {/* Accessible Landmark Container replacing form tag */}
+      <div 
+        role="region"
+        aria-label={t('aiAssistantConfigForm', 'AI Assistant Settings Configuration Form')}
+        data-lpignore="true"
+        className="space-y-6"
+      >
         
         {/* TAB 1: GENERAL & MODEL CONFIG */}
         {activeTab === 'general' && (
@@ -14543,7 +14910,11 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
                       placeholder={provider === 'gemini' ? t('apiKeyPlaceholderGemini', 'AIzaSy...') : t('apiKeyPlaceholderOpenAI', 'sk-...')}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('apiKeyLabel', 'API Key')}
@@ -14612,34 +14983,43 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
+                {/* Harmonized Model Selector with Custom Chevron */}
                 <div>
                   <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('modelVersionIdentifier', 'Model Version Identifier')}
                   </label>
-                  <select
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    aria-label={t('modelVersionIdentifier', 'Model Version Identifier')}
-                    className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition font-medium"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    {provider === 'gemini' ? (
-                      <>
-                        <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption36', 'Gemini 3.6 Flash (Latest Recommended)')}</option>
-                        <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption35', 'Gemini 3.5 Flash Lite (Lightweight & Fast)')}</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4o', 'GPT-4o (Advanced reasoning)')}</option>
-                        <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4Turbo', 'GPT-4 Turbo')}</option>
-                        <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption35Turbo', 'GPT-3.5 Turbo (High speed)')}</option>
-                      </>
-                    )}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      aria-label={t('modelVersionIdentifier', 'Model Version Identifier')}
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-form-type="other"
+                      className="w-full appearance-none border rounded-xl px-4 py-3 pr-10 outline-none cursor-pointer transition font-medium text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                    >
+                      {provider === 'gemini' ? (
+                        <>
+                          <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption36', 'Gemini 3.6 Flash (Latest Recommended)')}</option>
+                          <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption35', 'Gemini 3.5 Flash Lite (Lightweight & Fast)')}</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4o', 'GPT-4o (Advanced reasoning)')}</option>
+                          <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4Turbo', 'GPT-4 Turbo')}</option>
+                          <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption35Turbo', 'GPT-3.5 Turbo (High speed)')}</option>
+                        </>
+                      )}
+                    </select>
+                    <ChevronDown className="h-4 w-4 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors" style={{ color: 'var(--color-text-secondary)' }} />
+                  </div>
                   <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
                   </span>
@@ -14782,7 +15162,11 @@ export default function ChefAISettingsPage() {
                       value={newTopicTitle}
                       onChange={(e) => setNewTopicTitle(e.target.value)}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('topicTitlePlaceholder', 'Topic Title')}
@@ -14801,7 +15185,11 @@ export default function ChefAISettingsPage() {
                       value={newTopicDesc}
                       onChange={(e) => setNewTopicDesc(e.target.value)}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('topicDescPlaceholder', 'Topic Description')}
@@ -14849,7 +15237,12 @@ export default function ChefAISettingsPage() {
                               setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
                             }}
                             autoComplete="off"
+                            autoCorrect="off"
+                            autoCapitalize="off"
                             data-lpignore="true"
+                            data-1p-ignore="true"
+                            data-bwignore="true"
+                            data-form-type="other"
                             spellCheck={false}
                             className="font-bold text-sm bg-transparent border-b border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
                             style={{ color: 'var(--color-text)' }}
@@ -14875,7 +15268,12 @@ export default function ChefAISettingsPage() {
                             setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
                           }}
                           autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="off"
                           data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-bwignore="true"
+                          data-form-type="other"
                           spellCheck={false}
                           className="text-[11px] bg-transparent border-b border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -14928,9 +15326,14 @@ export default function ChefAISettingsPage() {
                                 }));
                               }}
                               autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="off"
                               data-lpignore="true"
+                              data-1p-ignore="true"
+                              data-bwignore="true"
+                              data-form-type="other"
                               spellCheck={false}
-                              aria-label={`Question ${qIdx + 1}`}
+                              aria-label={`${t('questionNumber', 'Question')} ${qIdx + 1}`}
                               className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
                               style={{ color: 'var(--color-text)' }}
                             />
@@ -14958,7 +15361,11 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => setNewQuestionText(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('addQuestionPrefix', 'Add question')}
@@ -15061,7 +15468,7 @@ export default function ChefAISettingsPage() {
                         <span className="font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                           <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('previewPlanTitle', 'High Protein Plan (3 Days)')}
                         </span>
-                        <span style={{ color: 'var(--color-text-secondary)' }}>3/3 Days</span>
+                        <span style={{ color: 'var(--color-text-secondary)' }}>{t('threeOfThreeDays', '3/3 Days')}</span>
                       </div>
                       <div className="space-y-1.5">
                         <div 
@@ -15130,7 +15537,7 @@ export default function ChefAISettingsPage() {
                       >
                         <div className="text-white px-3 py-2 flex items-center justify-between font-bold text-xs" style={{ backgroundColor: 'var(--color-primary)' }}>
                           <span>{t('previewDay1Title', 'Day 1 - Sunday')}</span>
-                          <span className="text-[10px] opacity-90">Sep 6</span>
+                          <span className="text-[10px] opacity-90">{t('previewSampleDate', 'Sep 6')}</span>
                         </div>
                         <div className="p-3 space-y-2">
                           <div className="flex items-start gap-3">
@@ -15241,26 +15648,35 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
+              {/* Harmonized Persona Selector with Custom Chevron */}
               <div className="space-y-2">
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('assistantVoicePersona', 'Assistant Voice Persona')}
                 </label>
-                <select
-                  value={selectedVoiceName}
-                  onChange={(e) => setSelectedVoiceName(e.target.value)}
-                  aria-label={t('assistantVoicePersona', 'Assistant Voice Persona')}
-                  className="w-full border rounded-xl px-4 py-3 outline-none cursor-pointer transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <option value="en-US-Neural2-F" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceAria', 'Chef Aria (US Female - Warm & Professional)')}</option>
-                  <option value="en-US-Neural2-D" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceMarcus', 'Chef Marcus (US Male - Deep & Authoritative)')}</option>
-                  <option value="en-GB-Neural2-A" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceOliver', 'Chef Oliver (UK Male - Refined Accent)')}</option>
-                  <option value="en-AU-Neural2-B" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceMatilda', 'Chef Matilda (Australian - Friendly & Casual)')}</option>
-                </select>
+                <div className="relative">
+                  <select
+                    value={selectedVoiceName}
+                    onChange={(e) => setSelectedVoiceName(e.target.value)}
+                    aria-label={t('assistantVoicePersona', 'Assistant Voice Persona')}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    className="w-full appearance-none border rounded-xl px-4 py-3 pr-10 outline-none cursor-pointer transition text-xs"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  >
+                    <option value="en-US-Neural2-F" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceAria', 'Chef Aria (US Female - Warm & Professional)')}</option>
+                    <option value="en-US-Neural2-D" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceMarcus', 'Chef Marcus (US Male - Deep & Authoritative)')}</option>
+                    <option value="en-GB-Neural2-A" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceOliver', 'Chef Oliver (UK Male - Refined Accent)')}</option>
+                    <option value="en-AU-Neural2-B" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('voiceMatilda', 'Chef Matilda (Australian - Friendly & Casual)')}</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors" style={{ color: 'var(--color-text-secondary)' }} />
+                </div>
               </div>
             </div>
 
@@ -15517,7 +15933,12 @@ export default function ChefAISettingsPage() {
                     value={maxPlanDays}
                     onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
                     aria-label={t('maxPlanDaysCap', 'Max Plan Days')}
                     className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
                     style={{
@@ -15567,7 +15988,11 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('knowledgeBaseHeader', 'Knowledge Base')}
@@ -15587,7 +16012,7 @@ export default function ChefAISettingsPage() {
                         backgroundColor: 'var(--color-card)',
                         color: 'var(--color-text)'
                       }}
-                      aria-label="Add Knowledge Base Item"
+                      aria-label={t('addKnowledgeBaseItem', 'Add Knowledge Base Item')}
                     >
                       +
                     </button>
@@ -15611,7 +16036,7 @@ export default function ChefAISettingsPage() {
                         onClick={() => setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx))}
                         className="transition cursor-pointer hover:opacity-75"
                         style={{ color: 'var(--color-text-secondary)' }}
-                        aria-label={`Remove ${item}`}
+                        aria-label={`${t('removeItem', 'Remove')} ${item}`}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -15623,7 +16048,7 @@ export default function ChefAISettingsPage() {
               {/* CUSTOM VOCABULARY FEATURE */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
                     <BookA className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('customVocabularyHeader', 'Custom Vocabulary')}
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -15653,7 +16078,11 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('customVocabularyHeader', 'Custom Vocabulary')}
@@ -15705,7 +16134,7 @@ export default function ChefAISettingsPage() {
                         onClick={() => setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx))}
                         className="transition cursor-pointer hover:opacity-75"
                         style={{ color: 'var(--color-text-secondary)' }}
-                        aria-label={`Remove ${item}`}
+                        aria-label={`${t('removeItem', 'Remove')} ${item}`}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -15714,10 +16143,10 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* FILTER WORDS FEATURE */}
+              {/* FILTER WORDS FEATURE - PROPERLY BALANCED H3 CONTAINER */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                  <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-danger, #ef4444)' }}>
                     <Ban className="h-4 w-4" style={{ color: 'var(--color-danger, #ef4444)' }} /> {t('filterWordsHeader', 'Filter Words')}
                   </h3>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -15747,7 +16176,11 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-bwignore="true"
                       data-form-type="other"
                       spellCheck={false}
                       aria-label={t('filterWordsHeader', 'Filter Words')}
@@ -15799,7 +16232,7 @@ export default function ChefAISettingsPage() {
                         onClick={() => setFilterWordsList(filterWordsList.filter((_, i) => i !== idx))}
                         className="transition cursor-pointer hover:opacity-75"
                         style={{ color: 'var(--color-text-secondary)' }}
-                        aria-label={`Remove ${item}`}
+                        aria-label={`${t('removeItem', 'Remove')} ${item}`}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -15818,7 +16251,12 @@ export default function ChefAISettingsPage() {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
                   spellCheck={false}
                   aria-label={t('systemPromptHeader', 'System Prompt')}
                   className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
@@ -15838,7 +16276,7 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-      </form>
+      </div>
     </div>
   );
 }
@@ -48878,7 +49316,7 @@ export async function GET() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
-    const sRow = (Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]);
+    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
     if (sRow) {
       settings = {
         currency: sRow.currency || 'USD',
@@ -48899,7 +49337,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (uRes) {
-      users = (Array.isArray(uRes) ? uRes : (((uRes as any)?.rows) || []));
+      users = Array.isArray(uRes) ? uRes : (uRes.rows || []);
     }
 
     // 3. Fetch recent wallet transactions
@@ -48916,7 +49354,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (txRes) {
-      transactions = (Array.isArray(txRes) ? txRes : (((txRes as any)?.rows) || []));
+      transactions = Array.isArray(txRes) ? txRes : (txRes.rows || []);
     }
   } catch (err: any) {
     console.warn('[Wallet Settings API] Fallback to server JSON store:', err?.message || err);
@@ -48985,7 +49423,7 @@ export async function POST(req: Request) {
         [delta, email]
       );
 
-      const userRow = (Array.isArray(userRes) ? userRes[0] : (userRes as any)?.rows?.[0]);
+      const userRow = Array.isArray(userRes) ? userRes[0] : userRes?.rows?.[0];
       const newBalance = userRow ? Number(userRow.wallet_balance) : 0;
       const txId = 'wtx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 
@@ -49013,13 +49451,23 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2. SAVE CONFIGURATIONS
+    // 2. SAVE COLUMN SETTINGS ACTION
+    if (body.action === 'save_column_settings') {
+      const cols = JSON.stringify(body.ledgerColumns || {});
+      await query(
+        `UPDATE wallet_settings SET ledger_columns = $1::jsonb, updated_at = NOW() WHERE id::text = 'primary_settings' OR id::text = '1'`,
+        [cols]
+      ).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Column visibility preferences saved.' });
+    }
+
+    // 3. SAVE CONFIGURATIONS
     const walletSettings = body.walletSettings || body.settings || body;
     const cur = walletSettings.currency || 'USD';
-    const isEn = walletSettings.isEnabled !== undefined ? Boolean(walletSettings.isEnabled) : true;
-    const allowP = walletSettings.allowPurchases !== undefined ? Boolean(walletSettings.allowPurchases) : true;
-    const minTop = Number(walletSettings.minTopup || 5);
-    const maxTop = Number(walletSettings.maxTopup || 1000);
+    const isEn = walletSettings.isEnabled !== undefined ? Boolean(walletSettings.isEnabled) : (walletSettings.is_enabled !== undefined ? Boolean(walletSettings.is_enabled) : true);
+    const allowP = walletSettings.allowPurchases !== undefined ? Boolean(walletSettings.allowPurchases) : (walletSettings.allow_site_purchases !== undefined ? Boolean(walletSettings.allow_site_purchases) : true);
+    const minTop = Number(walletSettings.minTopup ?? walletSettings.min_topup ?? 5);
+    const maxTop = Number(walletSettings.maxTopup ?? walletSettings.max_topup ?? 1000);
     const presets = JSON.stringify(walletSettings.presetAmounts || [10, 25, 50, 100, 250]);
     const bonus = JSON.stringify(walletSettings.bonusRules || []);
     const columns = JSON.stringify(walletSettings.ledgerColumns || {});
@@ -49042,6 +49490,11 @@ export async function POST(req: Request) {
           updated_at = NOW()`,
         [cur, isEn, allowP, minTop, maxTop, presets, bonus, columns]
       );
+
+      await query(
+        `UPDATE admin_settings SET wallet_settings = $1::jsonb, updated_at = NOW() WHERE id::text = 'primary_settings' OR id::text = '1' OR id::text = 'current'`,
+        [JSON.stringify(walletSettings)]
+      ).catch(() => {});
     } catch (_) {}
 
     // Persist to JSON store mirror
@@ -49135,13 +49588,12 @@ export async function GET() {
   let customBroadcasts: any[] = [];
 
   try {
-    // 1. Fetch system settings
     const sRes: any = await Promise.race([
       query(`SELECT * FROM notification_settings WHERE id = 'global' LIMIT 1`),
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
-    const sRow = (Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]);
+    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
     if (sRow) {
       settings = {
         channelInApp: sRow.channel_in_app !== undefined ? Boolean(sRow.channel_in_app) : true,
@@ -49174,14 +49626,13 @@ export async function GET() {
       };
     }
 
-    // 2. Fetch custom broadcasts
     const bRes: any = await Promise.race([
       query(`SELECT * FROM custom_notifications ORDER BY created_at DESC LIMIT 100`),
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
     if (bRes) {
-      customBroadcasts = (Array.isArray(bRes) ? bRes : (((bRes as any)?.rows) || []));
+      customBroadcasts = Array.isArray(bRes) ? bRes : (bRes.rows || []);
       customBroadcasts = customBroadcasts.map((b: any) => ({
         id: b.id,
         title: b.title,
@@ -49197,7 +49648,7 @@ export async function GET() {
       }));
     }
   } catch (err: any) {
-    console.warn('[Notification API] Fallback to server JSON store:', err?.message || err);
+    console.warn('[Notification API] Fallback to JSON store:', err?.message || err);
   }
 
   const defaultSettings = {
@@ -49247,14 +49698,14 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // 1. SEND TEST ALERT (Live Broadcast Trigger)
+    // 1. LIVE TEST BROADCAST
     if (body.action === 'send_test_alert') {
       const testAlert = {
         id: 'notif_test_' + Date.now().toString(36),
         title: 'Test System Alert 🔔',
         message: 'This is a live test alert dispatched from /admin/notification-settings to verify real-time top-bar bell notifications.',
         category: 'info',
-        actionLabel: 'View System Settings',
+        actionLabel: 'View Settings',
         actionUrl: '/admin/notification-settings',
         createdAt: new Date().toISOString()
       };
@@ -49266,17 +49717,26 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2. DISPATCH CUSTOM ANNOUNCEMENT (SEND NOW)
+    // 2. DISPATCH CUSTOM ANNOUNCEMENT
     if (body.action === 'send_custom_alert') {
       const id = body.id;
       if (!id) return NextResponse.json({ success: false, error: 'Broadcast ID required' }, { status: 400 });
 
-      await query(
-        `UPDATE custom_notifications 
-         SET send_count = COALESCE(send_count, 0) + 1, sent_at = NOW(), updated_at = NOW() 
-         WHERE id = $1`,
-        [id]
-      );
+      try {
+        await query(
+          `UPDATE custom_notifications 
+           SET send_count = COALESCE(send_count, 0) + 1, sent_at = NOW(), updated_at = NOW() 
+           WHERE id = $1`,
+          [id]
+        );
+      } catch (_) {
+        await query(
+          `UPDATE custom_notifications 
+           SET send_count = COALESCE(send_count, 0) + 1, sent_at = NOW(), updated_at = NOW() 
+           WHERE id = ?`,
+          [id]
+        );
+      }
 
       return NextResponse.json({
         success: true,
@@ -49284,7 +49744,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. CREATE OR UPDATE CUSTOM NOTIFICATION
+    // 3. CREATE / UPDATE CUSTOM NOTIFICATION
     if (body.action === 'save_custom_notification') {
       const b = body.notification || {};
       const id = b.id || ('cn_' + Date.now().toString(36));
@@ -49300,20 +49760,39 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: 'Title and Message are required.' }, { status: 400 });
       }
 
-      await query(`
-        INSERT INTO custom_notifications (
-          id, title, message, category, target_audience, channels, action_label, action_url, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          message = EXCLUDED.message,
-          category = EXCLUDED.category,
-          target_audience = EXCLUDED.target_audience,
-          channels = EXCLUDED.channels,
-          action_label = EXCLUDED.action_label,
-          action_url = EXCLUDED.action_url,
-          updated_at = NOW();
-      `, [id, title, message, category, targetAudience, channels, actionLabel, actionUrl]);
+      try {
+        // PostgreSQL ON CONFLICT
+        await query(`
+          INSERT INTO custom_notifications (
+            id, title, message, category, target_audience, channels, action_label, action_url, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            title = EXCLUDED.title,
+            message = EXCLUDED.message,
+            category = EXCLUDED.category,
+            target_audience = EXCLUDED.target_audience,
+            channels = EXCLUDED.channels,
+            action_label = EXCLUDED.action_label,
+            action_url = EXCLUDED.action_url,
+            updated_at = NOW();
+        `, [id, title, message, category, targetAudience, channels, actionLabel, actionUrl]);
+      } catch (_) {
+        // MySQL ON DUPLICATE KEY UPDATE
+        await query(`
+          INSERT INTO custom_notifications (
+            id, title, message, category, target_audience, channels, action_label, action_url, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+          ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            message = VALUES(message),
+            category = VALUES(category),
+            target_audience = VALUES(target_audience),
+            channels = VALUES(channels),
+            action_label = VALUES(action_label),
+            action_url = VALUES(action_url),
+            updated_at = NOW();
+        `, [id, title, message, category, targetAudience, channels, actionLabel, actionUrl]);
+      }
 
       return NextResponse.json({
         success: true,
@@ -49322,50 +49801,10 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. SAVE NOTIFICATION SETTINGS (RULES & DELIVERIES)
+    // 4. SAVE NOTIFICATION SETTINGS (RULES & THRESHOLDS)
     const s = body.notificationSettings || body.settings || body;
 
-    await query(`
-      INSERT INTO notification_settings (
-        id, channel_in_app, channel_email, channel_web_push,
-        planner_meal_reminder, planner_meal_reminder_time, prep_time_alert, weekly_intake_nudge,
-        token_low_alert, token_low_threshold, token_exhaustion_alert, monthly_allowance_notice,
-        wallet_low_alert, wallet_low_threshold, topup_receipt_alert, payment_decline_alert,
-        subscription_expiry_alert, subscription_expiry_days, subscription_cancel_receipt,
-        system_updates_alert, maintenance_downtime_alert, security_login_alert,
-        dnd_enabled, dnd_start_time, dnd_end_time, sound_chimes_enabled, retention_days, daily_rate_limit, updated_at
-      ) VALUES (
-        'global', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, NOW()
-      ) ON CONFLICT (id) DO UPDATE SET
-        channel_in_app = EXCLUDED.channel_in_app,
-        channel_email = EXCLUDED.channel_email,
-        channel_web_push = EXCLUDED.channel_web_push,
-        planner_meal_reminder = EXCLUDED.planner_meal_reminder,
-        planner_meal_reminder_time = EXCLUDED.planner_meal_reminder_time,
-        prep_time_alert = EXCLUDED.prep_time_alert,
-        weekly_intake_nudge = EXCLUDED.weekly_intake_nudge,
-        token_low_alert = EXCLUDED.token_low_alert,
-        token_low_threshold = EXCLUDED.token_low_threshold,
-        token_exhaustion_alert = EXCLUDED.token_exhaustion_alert,
-        monthly_allowance_notice = EXCLUDED.monthly_allowance_notice,
-        wallet_low_alert = EXCLUDED.wallet_low_alert,
-        wallet_low_threshold = EXCLUDED.wallet_low_threshold,
-        topup_receipt_alert = EXCLUDED.topup_receipt_alert,
-        payment_decline_alert = EXCLUDED.payment_decline_alert,
-        subscription_expiry_alert = EXCLUDED.subscription_expiry_alert,
-        subscription_expiry_days = EXCLUDED.subscription_expiry_days,
-        subscription_cancel_receipt = EXCLUDED.subscription_cancel_receipt,
-        system_updates_alert = EXCLUDED.system_updates_alert,
-        maintenance_downtime_alert = EXCLUDED.maintenance_downtime_alert,
-        security_login_alert = EXCLUDED.security_login_alert,
-        dnd_enabled = EXCLUDED.dnd_enabled,
-        dnd_start_time = EXCLUDED.dnd_start_time,
-        dnd_end_time = EXCLUDED.dnd_end_time,
-        sound_chimes_enabled = EXCLUDED.sound_chimes_enabled,
-        retention_days = EXCLUDED.retention_days,
-        daily_rate_limit = EXCLUDED.daily_rate_limit,
-        updated_at = NOW();
-    `, [
+    const values = [
       Boolean(s.channelInApp), Boolean(s.channelEmail), Boolean(s.channelWebPush),
       Boolean(s.plannerMealReminder), s.plannerMealReminderTime || '08:30', Boolean(s.prepTimeAlert), Boolean(s.weeklyIntakeNudge),
       Boolean(s.tokenLowAlert), Number(s.tokenLowThreshold || 50), Boolean(s.tokenExhaustionAlert), Boolean(s.monthlyAllowanceNotice),
@@ -49374,9 +49813,97 @@ export async function POST(req: Request) {
       Boolean(s.systemUpdatesAlert), Boolean(s.maintenanceDowntimeAlert), Boolean(s.securityLoginAlert),
       Boolean(s.dndEnabled), s.dndStartTime || '22:00', s.dndEndTime || '07:00',
       Boolean(s.soundChimesEnabled), Number(s.retentionDays || 30), Number(s.dailyRateLimit || 10)
-    ]);
+    ];
 
-    // Mirror to JSON store
+    try {
+      // PostgreSQL
+      await query(`
+        INSERT INTO notification_settings (
+          id, channel_in_app, channel_email, channel_web_push,
+          planner_meal_reminder, planner_meal_reminder_time, prep_time_alert, weekly_intake_nudge,
+          token_low_alert, token_low_threshold, token_exhaustion_alert, monthly_allowance_notice,
+          wallet_low_alert, wallet_low_threshold, topup_receipt_alert, payment_decline_alert,
+          subscription_expiry_alert, subscription_expiry_days, subscription_cancel_receipt,
+          system_updates_alert, maintenance_downtime_alert, security_login_alert,
+          dnd_enabled, dnd_start_time, dnd_end_time, sound_chimes_enabled, retention_days, daily_rate_limit, updated_at
+        ) VALUES (
+          'global', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, NOW()
+        ) ON CONFLICT (id) DO UPDATE SET
+          channel_in_app = EXCLUDED.channel_in_app,
+          channel_email = EXCLUDED.channel_email,
+          channel_web_push = EXCLUDED.channel_web_push,
+          planner_meal_reminder = EXCLUDED.planner_meal_reminder,
+          planner_meal_reminder_time = EXCLUDED.planner_meal_reminder_time,
+          prep_time_alert = EXCLUDED.prep_time_alert,
+          weekly_intake_nudge = EXCLUDED.weekly_intake_nudge,
+          token_low_alert = EXCLUDED.token_low_alert,
+          token_low_threshold = EXCLUDED.token_low_threshold,
+          token_exhaustion_alert = EXCLUDED.token_exhaustion_alert,
+          monthly_allowance_notice = EXCLUDED.monthly_allowance_notice,
+          wallet_low_alert = EXCLUDED.wallet_low_alert,
+          wallet_low_threshold = EXCLUDED.wallet_low_threshold,
+          topup_receipt_alert = EXCLUDED.topup_receipt_alert,
+          payment_decline_alert = EXCLUDED.payment_decline_alert,
+          subscription_expiry_alert = EXCLUDED.subscription_expiry_alert,
+          subscription_expiry_days = EXCLUDED.subscription_expiry_days,
+          subscription_cancel_receipt = EXCLUDED.subscription_cancel_receipt,
+          system_updates_alert = EXCLUDED.system_updates_alert,
+          maintenance_downtime_alert = EXCLUDED.maintenance_downtime_alert,
+          security_login_alert = EXCLUDED.security_login_alert,
+          dnd_enabled = EXCLUDED.dnd_enabled,
+          dnd_start_time = EXCLUDED.dnd_start_time,
+          dnd_end_time = EXCLUDED.dnd_end_time,
+          sound_chimes_enabled = EXCLUDED.sound_chimes_enabled,
+          retention_days = EXCLUDED.retention_days,
+          daily_rate_limit = EXCLUDED.daily_rate_limit,
+          updated_at = NOW();
+      `, values);
+    } catch (_) {
+      // MySQL
+      await query(`
+        INSERT INTO notification_settings (
+          id, channel_in_app, channel_email, channel_web_push,
+          planner_meal_reminder, planner_meal_reminder_time, prep_time_alert, weekly_intake_nudge,
+          token_low_alert, token_low_threshold, token_exhaustion_alert, monthly_allowance_notice,
+          wallet_low_alert, wallet_low_threshold, topup_receipt_alert, payment_decline_alert,
+          subscription_expiry_alert, subscription_expiry_days, subscription_cancel_receipt,
+          system_updates_alert, maintenance_downtime_alert, security_login_alert,
+          dnd_enabled, dnd_start_time, dnd_end_time, sound_chimes_enabled, retention_days, daily_rate_limit, updated_at
+        ) VALUES (
+          'global', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
+        ) ON DUPLICATE KEY UPDATE
+          channel_in_app = VALUES(channel_in_app),
+          channel_email = VALUES(channel_email),
+          channel_web_push = VALUES(channel_web_push),
+          planner_meal_reminder = VALUES(planner_meal_reminder),
+          planner_meal_reminder_time = VALUES(planner_meal_reminder_time),
+          prep_time_alert = VALUES(prep_time_alert),
+          weekly_intake_nudge = VALUES(weekly_intake_nudge),
+          token_low_alert = VALUES(token_low_alert),
+          token_low_threshold = VALUES(token_low_threshold),
+          token_exhaustion_alert = VALUES(token_exhaustion_alert),
+          monthly_allowance_notice = VALUES(monthly_allowance_notice),
+          wallet_low_alert = VALUES(wallet_low_alert),
+          wallet_low_threshold = VALUES(wallet_low_threshold),
+          topup_receipt_alert = VALUES(topup_receipt_alert),
+          payment_decline_alert = VALUES(payment_decline_alert),
+          subscription_expiry_alert = VALUES(subscription_expiry_alert),
+          subscription_expiry_days = VALUES(subscription_expiry_days),
+          subscription_cancel_receipt = VALUES(subscription_cancel_receipt),
+          system_updates_alert = VALUES(system_updates_alert),
+          maintenance_downtime_alert = VALUES(maintenance_downtime_alert),
+          security_login_alert = VALUES(security_login_alert),
+          dnd_enabled = VALUES(dnd_enabled),
+          dnd_start_time = VALUES(dnd_start_time),
+          dnd_end_time = VALUES(dnd_end_time),
+          sound_chimes_enabled = VALUES(sound_chimes_enabled),
+          retention_days = VALUES(retention_days),
+          daily_rate_limit = VALUES(daily_rate_limit),
+          updated_at = NOW();
+      `, values);
+    }
+
+    // Mirror to local JSON store
     try {
       const dataDir = path.join(process.cwd(), 'data');
       const filePath = path.join(dataDir, 'admin_settings.json');
@@ -49406,7 +49933,11 @@ export async function DELETE(req: Request) {
     const id = url.searchParams.get('id');
 
     if (id) {
-      await query(`DELETE FROM custom_notifications WHERE id = $1`, [id]);
+      try {
+        await query(`DELETE FROM custom_notifications WHERE id = $1`, [id]);
+      } catch (_) {
+        await query(`DELETE FROM custom_notifications WHERE id = ?`, [id]);
+      }
       return NextResponse.json({ success: true, message: 'Custom notification deleted' });
     }
 
@@ -66205,6 +66736,44 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "notifMealDailyDesc": "Trigger daily recipe lineup notice",
+    "notifPrepTimeDesc": "30 minutes prior to scheduled prep slot",
+    "notifWeeklyNudgeDesc": "Prompt users every Sunday to plan their weekly menu",
+    "notifTokenExhaustionDesc": "Immediate alert when balance hits zero",
+    "notifTokenAllowanceDesc": "Notify when monthly token balance refreshes",
+    "notifWalletDepositDesc": "Instant receipt for wallet additions",
+    "notifWalletPaymentDeclineDesc": "Alert on recurring subscription charge failures",
+    "notifSubExpiryDesc": "Advance warning days",
+    "notifSubCancelDesc": "Confirm cancellation and communicate expiry terms",
+    "notifSystemUpdatesDesc": "Notify users of new recipes and chef upgrades",
+    "notifSystemMaintenanceDesc": "Advance warning for system downtime windows",
+    "notifSystemSecurityDesc": "Security notices on new device or location logins",
+    "notifFilterInfo": "Info",
+    "notifFilterWarning": "Warning",
+    "notifFilterUrgent": "Urgent",
+    "notifFilterPromo": "Promo",
+    "notifFilterSuccess": "Success",
+    "notifBtnSending": "Sending...",
+    "notifLabelChannels": "Active Delivery Channels *",
+    "notifPreviewDefaultTitle": "Special Culinary Announcement",
+    "notifPreviewDefaultMessage": "Explore new high-protein recipes curated by our AI Chef formulator!",
+    "notifPreviewJustNow": "Just now",
+    "notifPreviewDefaultAction": "Explore Chef",
+    "notifAudienceAll": "All Users",
+    "notifAudienceSubscribers": "Subscribers Only",
+    "notifAudienceFree": "Free Tier Only",
+    "notifAudienceAdmins": "Admins Only",
+    "notifConfirmReset": "Reset notification rules and thresholds to defaults?",
+    "notifResetSuccess": "Notification rules reset to initial defaults.",
+    "navPaymentGateways": "Payment Gateways",
+    "navViewStoreWallet": "Store Wallet Portal",
+    "errReasonRequired": "Please enter an administrative reason or note for this adjustment.",
+    "errSelectCustomer": "Please choose a customer from the dropdown list.",
+    "errValidAmount": "Please enter a valid positive adjustment amount.",
+    "errMinOnePreset": "You must retain at least one quick deposit preset.",
+    "errInvalidBonusTier": "Please enter valid numbers for deposit threshold and bonus percentage.",
+    "walletRegionConfig": "Wallet Configuration and Rules",
+    "walletRegionLedger": "Wallet Transactions Ledger",
     "btnUpdatePackage": "Update Package",
     "btnCancelEdit": "Cancel Edit",
     "planAllocationsHeading": "Subscription Plan Monthly Included Tokens",

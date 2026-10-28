@@ -48,6 +48,10 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "storageProviderSelect": "Select Active Provider",
+    "storageRegionSelect": "Select Cloud Region",
+    "storageCustomRegion": "Custom / Other Region",
+    "storageSettings": "Storage Settings",
     "notifMealDailyDesc": "Trigger daily recipe lineup notice",
     "notifPrepTimeDesc": "30 minutes prior to scheduled prep slot",
     "notifWeeklyNudgeDesc": "Prompt users every Sunday to plan their weekly menu",
