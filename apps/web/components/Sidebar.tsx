@@ -599,6 +599,9 @@ export default function Sidebar() {
     ? t('topbarPlanPro', 'Pro Plan') 
     : t('topbarPlanFree', 'Free Tier');
 
+  // Task 1: Robust fallback resolving to 'Wallet' across all locales
+  const financeWalletLabel = t('navWallet', t('wallet') === 'Wallet Settings' ? 'Wallet' : t('wallet', 'Wallet'));
+
   return (
     <>
       {/* DESKTOP TOP BAR (Fixed Header with Real-Time Telemetry) */}
@@ -1096,7 +1099,7 @@ export default function Sidebar() {
             <Link 
               href="/wallet" 
               className="flex items-center px-1.5 py-0.5 hover:opacity-85 transition"
-              title={t('wallet', 'Wallet')}
+              title={financeWalletLabel}
             >
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
@@ -1289,7 +1292,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY ACCORDION (Finance Hub: Clean 'Wallet' Link) */}
+          {/* 4. FINANCIAL & UTILITY ACCORDION (Task 1: Clean 'Wallet' Link) */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1311,9 +1314,14 @@ export default function Sidebar() {
                   {!isCollapsed && <span>{t('token', 'Token')}</span>}
                 </Link>
                 {/* Finance Hub: Text changed to 'Wallet' */}
-                <Link href="/wallet" className={navClass('/wallet')} style={navStyle('/wallet')} title={t('wallet', 'Wallet')}>
+                <Link 
+                  href="/wallet" 
+                  className={navClass('/wallet')} 
+                  style={navStyle('/wallet')} 
+                  title={financeWalletLabel}
+                >
                   <Wallet className="h-4 w-4 shrink-0" />
-                  {!isCollapsed && <span>{t('wallet', 'Wallet')}</span>}
+                  {!isCollapsed && <span>{financeWalletLabel}</span>}
                 </Link>
                 <Link href="/subscriptions" className={navClass('/subscriptions')} style={navStyle('/subscriptions')} title={t('subscriptions', 'Subscriptions')}>
                   <Layers className="h-4 w-4 shrink-0" />
@@ -1327,7 +1335,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION (Wallet Settings properly namespaced) */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (Task 2: Added /admin/language Menu Link) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -1353,6 +1361,11 @@ export default function Sidebar() {
                     <Globe className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('pageBuilder', 'Page Builder')}</span>}
                   </Link>
+                  {/* Task 2: Language Setting Menu Link */}
+                  <Link href="/admin/language" className={navClass('/admin/language')} style={navStyle('/admin/language')} title={t('languageSetting', 'Language Setting')}>
+                    <Languages className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('languageSetting', 'Language Setting')}</span>}
+                  </Link>
                   <Link href="/admin/users" className={navClass('/admin/users')} style={navStyle('/admin/users')} title={t('users', 'Users')}>
                     <UserPlus className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('users', 'User Accounts')}</span>}
@@ -1369,7 +1382,6 @@ export default function Sidebar() {
                     <Coins className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('tokenSettings', 'Token Settings')}</span>}
                   </Link>
-                  {/* Distinct localization key for admin settings */}
                   <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} style={navStyle('/admin/wallet-settings')} title={t('walletSettings', 'Wallet Settings')}>
                     <Wallet className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('walletSettings', 'Wallet Settings')}</span>}
@@ -1475,7 +1487,7 @@ export default function Sidebar() {
                 <Coins className="h-4 w-4 shrink-0" /> <span>{t('token', 'Token')}</span>
               </Link>
               <Link href="/wallet" onClick={() => setMobileMenuOpen(false)} className={navClass('/wallet')} style={navStyle('/wallet')}>
-                <Wallet className="h-4 w-4 shrink-0" /> <span>{t('wallet', 'Wallet')}</span>
+                <Wallet className="h-4 w-4 shrink-0" /> <span>{financeWalletLabel}</span>
               </Link>
               <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className={navClass('/profile')} style={navStyle('/profile')}>
                 <UserIcon className="h-4 w-4 shrink-0" /> <span>{t('topbarProfile', 'User Profile')}</span>

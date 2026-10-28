@@ -5624,7 +5624,13 @@
       "enabledBadge": "Enabled",
       "disabledBadge": "Disabled",
       "readyStatus": "Ready",
-      "healthyStatus": "Healthy"
+      "healthyStatus": "Healthy",
+      "languageSetting": "Language Setting",
+      "languageSettings": "Language Settings",
+      "navWallet": "Wallet",
+      "wallet": "Wallet",
+      "walletSettings": "Wallet Settings",
+      "walletPortal": "Store Wallet"
     },
     "th": {
       "importPageTitle": "นำเข้าสูตรอาหาร",
@@ -7277,7 +7283,13 @@
       "enabledBadge": "เปิดใช้งาน",
       "disabledBadge": "ปิดใช้งาน",
       "readyStatus": "พร้อมใช้งาน",
-      "healthyStatus": "สมบูรณ์"
+      "healthyStatus": "สมบูรณ์",
+      "languageSetting": "การตั้งค่าภาษา",
+      "languageSettings": "การตั้งค่าภาษา",
+      "navWallet": "กระเป๋าเงิน",
+      "wallet": "กระเป๋าเงิน",
+      "walletSettings": "การตั้งค่ากระเป๋าเงิน",
+      "walletPortal": "กระเป๋าเงินร้านค้า"
     },
     "es": {
       "importPageTitle": "Importar Receta",
@@ -8930,7 +8942,13 @@
       "enabledBadge": "Habilitado",
       "disabledBadge": "Deshabilitado",
       "readyStatus": "Listo",
-      "healthyStatus": "Saludable"
+      "healthyStatus": "Saludable",
+      "languageSetting": "Configuración de Idioma",
+      "languageSettings": "Configuración de Idioma",
+      "navWallet": "Billetera",
+      "wallet": "Billetera",
+      "walletSettings": "Configuración de Billetera",
+      "walletPortal": "Billetera de la Tienda"
     },
     "fr": {
       "importPageTitle": "Importer une recette",
@@ -10519,7 +10537,13 @@
       "enabledBadge": "Activé",
       "disabledBadge": "Désactivé",
       "readyStatus": "Prêt",
-      "healthyStatus": "Sain"
+      "healthyStatus": "Sain",
+      "languageSetting": "Paramètres de Langue",
+      "languageSettings": "Paramètres de Langue",
+      "navWallet": "Portefeuille",
+      "wallet": "Portefeuille",
+      "walletSettings": "Paramètres du Portefeuille",
+      "walletPortal": "Portefeuille de la Boutique"
     },
     "de": {
       "shoppingListTitle": "Interaktive Einkaufsliste",

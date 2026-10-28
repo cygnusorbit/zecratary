@@ -747,7 +747,7 @@
       "payments": "Payment Gateway",
       "storage": "Storage Settings",
       "tokens": "Token Pricing",
-      "wallet": "Wallet Settings",
+      "wallet": "Wallet",
       "notifications": "Notifications",
       "languages": "Languages",
       "languageSettings": "Language Settings",
@@ -2933,7 +2933,10 @@
       "selectEnginePrompt": "Select Database Dialect",
       "showPassword": "Show Password",
       "hidePassword": "Hide Password",
-      "optimizeTablesDesc": "Analyzes planner meals, grocery items, user profiles, and updates query planner selectivity heuristics."
+      "optimizeTablesDesc": "Analyzes planner meals, grocery items, user profiles, and updates query planner selectivity heuristics.",
+      "languageSetting": "Language Setting",
+      "navWallet": "Wallet",
+      "walletSettings": "Wallet Settings"
     },
     "th": {
       "storageTitle": "การกำหนดค่าพื้นที่จัดเก็บสื่อและรูปภาพ",
@@ -3389,7 +3392,7 @@
       "templates": "แบบแปลนมื้ออาหาร",
       "shoppingList": "รายการซื้อของ",
       "tokenPortal": "พอร์ทัลโทเค็น",
-      "walletPortal": "กระเป๋าเงินระบบ",
+      "walletPortal": "กระเป๋าเงินร้านค้า",
       "subscriptions": "การสมัครสมาชิก",
       "billing": "ประวัติการชำระเงิน",
       "adminAccess": "การจัดการระบบ",
@@ -3400,7 +3403,7 @@
       "payments": "ช่องทางชำระเงิน",
       "storage": "การตั้งค่าพื้นที่จัดเก็บ",
       "tokens": "กำหนดราคาโทเค็น",
-      "wallet": "ตั้งค่ากระเป๋าเงิน",
+      "wallet": "กระเป๋าเงิน",
       "notifications": "การแจ้งเตือน",
       "languages": "ภาษา",
       "languageSettings": "การตั้งค่าภาษา",
@@ -5586,7 +5589,10 @@
       "selectEnginePrompt": "เลือกภาษาโครงสร้างฐานข้อมูล",
       "showPassword": "แสดงรหัสผ่าน",
       "hidePassword": "ซ่อนรหัสผ่าน",
-      "optimizeTablesDesc": "วิเคราะห์ข้อมูลมื้ออาหาร รายการสินค้า โปรไฟล์ผู้ใช้ และปรับปรุงการจัดระเบียบสถิติการสืบค้น"
+      "optimizeTablesDesc": "วิเคราะห์ข้อมูลมื้ออาหาร รายการสินค้า โปรไฟล์ผู้ใช้ และปรับปรุงการจัดระเบียบสถิติการสืบค้น",
+      "languageSetting": "การตั้งค่าภาษา",
+      "navWallet": "กระเป๋าเงิน",
+      "walletSettings": "การตั้งค่ากระเป๋าเงิน"
     },
     "es": {
       "storageTitle": "Configuración de Almacenamiento de Medios",
@@ -6042,7 +6048,7 @@
       "templates": "Plantillas de Menú",
       "shoppingList": "Lista de Compras",
       "tokenPortal": "Portal de Tokens",
-      "walletPortal": "Billetera",
+      "walletPortal": "Billetera de la Tienda",
       "subscriptions": "Suscripciones",
       "billing": "Historial de Facturación",
       "adminAccess": "Acceso de Administrador",
@@ -6053,10 +6059,10 @@
       "payments": "Pasarela de Pago",
       "storage": "Configuración de Almacenamiento",
       "tokens": "Precios de Tokens",
-      "wallet": "Ajustes de Billetera",
+      "wallet": "Billetera",
       "notifications": "Notificaciones",
       "languages": "Idiomas",
-      "languageSettings": "Ajustes de Idioma",
+      "languageSettings": "Configuración de Idioma",
       "aiModels": "Motor de IA",
       "recipeTypes": "Tipos de Receta",
       "categories": "Categorías",
@@ -8239,7 +8245,10 @@
       "selectEnginePrompt": "Seleccionar Dialecto de Base de Datos",
       "showPassword": "Mostrar Contraseña",
       "hidePassword": "Ocultar Contraseña",
-      "optimizeTablesDesc": "Analiza las comidas planificadas, los artículos de compras, los perfiles de usuario y actualiza la heurística del planificador de consultas."
+      "optimizeTablesDesc": "Analiza las comidas planificadas, los artículos de compras, los perfiles de usuario y actualiza la heurística del planificador de consultas.",
+      "languageSetting": "Configuración de Idioma",
+      "navWallet": "Billetera",
+      "walletSettings": "Configuración de Billetera"
     },
     "fr": {
       "storageTitle": "Configuration du Stockage des Médias",
@@ -8695,7 +8704,7 @@
       "templates": "Modèles de repas",
       "shoppingList": "Liste de Courses",
       "tokenPortal": "Portail de Jetons",
-      "walletPortal": "Portefeuille",
+      "walletPortal": "Portefeuille de la Boutique",
       "subscriptions": "Abonnements",
       "billing": "Factures et Règlements",
       "adminAccess": "Accès Administrateur",
@@ -8706,10 +8715,10 @@
       "payments": "Passerelle de paiement",
       "storage": "Paramètres de stockage",
       "tokens": "Tarification des jetons",
-      "wallet": "Paramètres du portefeuille",
+      "wallet": "Portefeuille",
       "notifications": "Notifications",
       "languages": "Langues",
-      "languageSettings": "Gestion des langues",
+      "languageSettings": "Paramètres de Langue",
       "aiModels": "Moteur IA",
       "recipeTypes": "Types de recettes",
       "categories": "Catégories",
@@ -10828,7 +10837,10 @@
       "selectEnginePrompt": "Sélectionner le Dialecte de Base de Données",
       "showPassword": "Afficher le Mot de Passe",
       "hidePassword": "Masquer le Mot de Passe",
-      "optimizeTablesDesc": "Analyse les repas planifiés, les courses, les profils d'utilisateurs et met à jour les statistiques de planification des requêtes."
+      "optimizeTablesDesc": "Analyse les repas planifiés, les courses, les profils d'utilisateurs et met à jour les statistiques de planification des requêtes.",
+      "languageSetting": "Paramètres de Langue",
+      "navWallet": "Portefeuille",
+      "walletSettings": "Paramètres du Portefeuille"
     },
     "de": {
       "shoppingListTitle": "Interaktive Einkaufsliste",

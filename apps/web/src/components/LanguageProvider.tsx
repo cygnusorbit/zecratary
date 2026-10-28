@@ -48,6 +48,9 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "languageSetting": "Language Setting",
+    "navWallet": "Wallet",
+    "walletSettings": "Wallet Settings",
     "selectEnginePrompt": "Select Database Dialect",
     "showPassword": "Show Password",
     "hidePassword": "Hide Password",
