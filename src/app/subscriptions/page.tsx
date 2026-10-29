@@ -139,9 +139,10 @@ function cleanSlug(slug?: string): string {
     .toLowerCase()
     .trim()
     .replace(/^(preset_|plan_|group_)/i, '')
-    .replace(/-(monthly|annual|year)$/i, '')
-    .replace(/[_\s-]+/g, '_')
-    .trim();
+    .replace(/-(monthly|annual|year|free)$/i, '')
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .trim() || 'taster';
 }
 
 export default function SubscriptionsPage() {
@@ -593,18 +594,24 @@ export default function SubscriptionsPage() {
 
     const targetUserId = currentUser.id || 'usr_admin_1';
     const isTargetFree = Boolean(plan.is_free || cleanSlug(plan.slug) === 'taster' || amountToPay === 0);
-    const planFullSlug = isTargetFree ? 'taster' : `${cleanSlug(plan.slug)}-${billingInterval}`;
+    const planFullSlug = isTargetFree ? 'taster' : `${cleanSlug(plan.slug)}-${billingInterval === 'annual' ? 'annual' : 'monthly'}`;
     const planDisplayName = isTargetFree 
       ? `${plan.name} (Free)`
       : `${plan.name} (${billingInterval === 'annual' ? (t('annualBilling', 'Annual')) : (t('monthlyBilling', 'Monthly'))})`;
-    const tokensCredited = plan.token_limit ?? (isTargetFree ? 50 : 500);
+    
+    const tokensCredited = billingInterval === 'annual'
+      ? (plan.tokensAnnual || (plan.tokensMonthly ? plan.tokensMonthly * 12 : 3000000))
+      : (plan.tokensMonthly || plan.token_limit || (isTargetFree ? 25000 : 250000));
 
     try {
       const res = await fetch('/api/billing', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
-          action: 'upgrade_plan',
+          action: 'change_plan',
           planName: planDisplayName,
           planSlug: planFullSlug,
           interval: billingInterval === 'annual' ? 'YEAR' : 'MONTH',
@@ -616,13 +623,25 @@ export default function SubscriptionsPage() {
           userEmail: currentUser.email,
           userName: currentUser.name,
           userId: targetUserId,
-          tokenLimit: tokensCredited
+          tokenLimit: tokensCredited,
+          referenceCode: manualRefCode,
+          userTransferRef: userTransferSlip
         })
       });
 
-      const data = await res.json();
+      // Safe Stream Deserialization Guard
+      const responseText = await res.text();
+      let data: any = null;
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch (parseErr) {
+        console.error('Failed to parse billing response as JSON:', responseText);
+        throw new Error(responseText || `Server returned an invalid response (HTTP ${res.status})`);
+      }
+
       if (!res.ok || !data.success) {
-        throw new Error(data.error || t('failedSwitchPlan', 'Failed to switch subscription plan'));
+        const detailMsg = data.error || data.message || (typeof data === 'string' ? data : '') || t('failedSwitchPlan', 'Failed to switch subscription plan');
+        throw new Error(detailMsg);
       }
 
       if (data.checkoutUrl) {
@@ -631,8 +650,15 @@ export default function SubscriptionsPage() {
       }
 
       const newExpiry = isTargetFree ? null : new Date(Date.now() + (billingInterval === 'annual' ? 365 : 30) * 86400000).toISOString();
+      const finalWalletBal = typeof data.wallet_balance === 'number'
+        ? data.wallet_balance
+        : (paymentMethod === 'wallet' ? Math.max(0, walletBalance - amountToPay) : walletBalance);
+      
+      const finalTokenBal = typeof data.token_balance === 'number'
+        ? data.token_balance
+        : ((currentUser.token_balance || 0) + (tokensCredited > 0 && !isTargetFree ? tokensCredited : 0));
 
-      const updatedUser = {
+      const updatedUser: User = {
         ...currentUser,
         subscription_plan: planFullSlug,
         subscriptionPlan: planFullSlug,
@@ -640,26 +666,24 @@ export default function SubscriptionsPage() {
         planInterval: billingInterval === 'annual' ? 'YEAR' : 'MONTH',
         plan_expiry_date: newExpiry,
         planExpiryDate: newExpiry,
-        token_balance: (currentUser.token_balance || 0) + (tokensCredited > 0 && !isTargetFree ? tokensCredited : 0)
+        wallet_balance: finalWalletBal,
+        token_balance: finalTokenBal
       };
 
-      if (paymentMethod === 'wallet' && typeof data.wallet_balance === 'number') {
-        updatedUser.wallet_balance = data.wallet_balance;
-        setWalletBalance(data.wallet_balance);
-      }
-
+      setWalletBalance(finalWalletBal);
+      setTokenBalance(finalTokenBal);
       setCurrentUser(updatedUser);
 
       if (typeof window !== 'undefined') {
         localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
         localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
         window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('zecratary_user_plan_updated'));
         window.dispatchEvent(new Event('zecratary_subscriptions_updated'));
         window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_wallet_updated'));
-        window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('storage'));
       }
 

@@ -8,12 +8,13 @@ import {
   Layers, CheckCircle2, AlertCircle, ShieldCheck, ArrowRight, 
   Coins, Wallet, RefreshCw, Sparkles, Zap, Lock, Calendar, 
   HelpCircle, ChevronDown, Check, X, Search, ChevronLeft, ChevronRight,
-  ExternalLink, CreditCard, Shield, AlertTriangle, Clock, Ban, Landmark
+  ExternalLink, CreditCard, Shield, AlertTriangle, Clock, Ban, Landmark,
+  Copy, Info, ArrowUpRight
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-interface SubscriptionPlan {
+export interface SubscriptionPlan {
   id: string;
   name: string;
   slug: string;
@@ -31,6 +32,10 @@ interface SubscriptionPlan {
   descriptionAnnual?: string;
   token_limit?: number;
   tokenLimit?: number;
+  tokensMonthly?: number;
+  tokensAnnual?: number;
+  tokens_monthly?: number;
+  tokens_annual?: number;
   recipe_library_limit?: number;
   recipeLibraryLimit?: number;
   ai_recipe_limit?: number;
@@ -42,9 +47,16 @@ interface SubscriptionPlan {
   trialBadge?: string;
   monthlyBadge?: string;
   annualBadge?: string;
+  // Dynamic sync with /admin/plans
+  allowWalletPayment?: boolean;
+  allow_wallet_payment?: boolean;
+  allowGatewayPayment?: boolean;
+  allow_gateway_payment?: boolean;
+  allowedGateways?: string[];
+  allowed_gateways?: string[];
 }
 
-interface PaymentTransaction {
+export interface PaymentTransaction {
   id: string;
   customerName?: string;
   customer_name?: string;
@@ -79,40 +91,55 @@ const DEFAULT_PLANS: SubscriptionPlan[] = [
     is_free: true,
     monthly_price_dollars: 0,
     annual_price_dollars: 0,
-    token_limit: 50,
+    tokensMonthly: 25000,
+    tokensAnnual: 25000,
+    token_limit: 25000,
     trialBadge: 'Free Forever',
-    description_monthly: 'Explore foundational culinary features with initial free tokens.',
-    description_annual: 'Explore foundational culinary features with initial free tokens.',
-    features: ['50 Foodie AI Tokens / month', 'Basic Recipe Generator', 'Standard Ingredient Conversion', 'Community Support']
+    description_monthly: 'Essential culinary companion for exploring AI recipes.',
+    description_annual: 'Essential culinary companion for exploring AI recipes.',
+    features: ['25,000 Culinary AI Tokens / month', 'Basic Recipe Generator', 'Standard Ingredient Conversion', 'Community Cookbooks Access'],
+    allowWalletPayment: false,
+    allowGatewayPayment: false,
+    allowedGateways: []
   },
   {
-    id: 'preset_foodie_pro',
-    name: 'Foodie Pro',
-    slug: 'foodie-pro',
+    id: 'preset_nutrition_pro',
+    name: 'Nutrition Pro',
+    slug: 'nutrition-pro',
     is_free: false,
-    monthly_price_dollars: 9.99,
-    annual_price_dollars: 95.88,
-    token_limit: 600,
+    monthly_price_dollars: 8.99,
+    annual_price_dollars: 59.99,
+    tokensMonthly: 250000,
+    tokensAnnual: 3000000,
+    token_limit: 250000,
     popular: true,
     monthlyBadge: 'Popular',
-    annualBadge: 'Save ~20%',
-    description_monthly: 'Advanced AI cooking partner with abundant monthly tokens and smart meal planning.',
-    description_annual: 'Advanced AI cooking partner with abundant monthly tokens and ~20% annual savings.',
-    features: ['600 Foodie AI Tokens / month', 'Unlimited Recipe Storage', 'Advanced Nutritional Macros Tracking', 'Live Culinary Web & Scraping Engine', 'Priority AI Model Access']
+    annualBadge: 'Save ~44%',
+    description_monthly: 'Advanced meal planning with macro telemetry and custom diets.',
+    description_annual: 'Ultimate savings on personalized culinary formulation.',
+    features: ['250,000 Foodie AI Tokens / month', 'Full Macronutrient Tracking (Macros)', 'Automated Aisle Grocery Consolidation', 'AI Smart Sub-Recipe Formulator'],
+    allowWalletPayment: true,
+    allowGatewayPayment: true,
+    allowedGateways: ['stripe', 'paypal', 'manual']
   },
   {
-    id: 'preset_master_chef',
-    name: 'Master Kitchen',
-    slug: 'master-chef',
+    id: 'preset_executive_chef',
+    name: 'Executive Chef',
+    slug: 'executive-chef',
     is_free: false,
-    monthly_price_dollars: 24.99,
-    annual_price_dollars: 239.88,
-    token_limit: 1800,
-    monthlyBadge: 'Pro Chef',
-    annualBadge: 'Best Value',
-    description_monthly: 'The ultimate culinary suite for food enthusiasts, culinary creators, and chefs.',
-    description_annual: 'The ultimate culinary suite for food enthusiasts, culinary creators, and chefs.',
-    features: ['1,800 Foodie AI Tokens / month', 'Unlimited Recipe Storage', 'High-Resolution AI Recipe Visualizer', 'Dedicated Priority Processing', '24/7 Dedicated Support']
+    monthly_price_dollars: 19.99,
+    annual_price_dollars: 149.99,
+    tokensMonthly: 1000000,
+    tokensAnnual: 12000000,
+    token_limit: 1000000,
+    monthlyBadge: 'Best Value',
+    annualBadge: 'VIP Value',
+    description_monthly: 'Unrestricted culinary power for chefs and nutritionists.',
+    description_annual: 'VIP annual pass with maximum token allowances.',
+    features: ['1,000,000 Foodie AI Tokens / month', 'Unlimited Saved Recipes', 'Priority High-Tier Model Access', 'Custom Dietary Export to PDF & CSV'],
+    allowWalletPayment: true,
+    allowGatewayPayment: true,
+    allowedGateways: ['stripe', 'paypal', 'manual']
   }
 ];
 
@@ -139,9 +166,10 @@ function cleanSlug(slug?: string): string {
     .toLowerCase()
     .trim()
     .replace(/^(preset_|plan_|group_)/i, '')
-    .replace(/-(monthly|annual|year)$/i, '')
-    .replace(/[_\s-]+/g, '_')
-    .trim();
+    .replace(/-(monthly|annual|year|free)$/i, '')
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .trim() || 'taster';
 }
 
 export default function SubscriptionsPage() {
@@ -157,18 +185,32 @@ export default function SubscriptionsPage() {
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
 
   // Balances, Currency & Gateway Settings
-  const [tokenBalance, setTokenBalance] = useState<number>(50);
+  const [tokenBalance, setTokenBalance] = useState<number>(25000);
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
   const [currencyCode, setCurrencyCode] = useState<string>('USD');
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
   const [tokenIdentity, setTokenIdentity] = useState<{ tokenName: string; tokenSymbol: string }>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
+
+  // Dynamic Gateway and Wallet Configuration (Synced with /admin/payment-gateway & /admin/wallet-settings)
   const [gatewayConfig, setGatewayConfig] = useState<any>({
     activeGateway: 'both',
     currency: 'USD',
     currencySymbol: '$',
-    stripe: { enabled: true },
-    paypal: { enabled: true },
-    manual: { enabled: true }
+    stripe: { enabled: true, mode: 'test' },
+    paypal: { enabled: true, mode: 'sandbox' },
+    manual: { 
+      enabled: true,
+      bankName: 'Global Commercial Bank',
+      accountNumber: '4820-9182-3819-001',
+      accountHolder: 'Zecratary AI Solutions Inc.',
+      swiftCode: 'GCBNUS33',
+      instructions: 'Please include your Reference Code in the bank wire transfer note for swift verification.'
+    }
+  });
+
+  const [walletConfig, setWalletConfig] = useState<any>({
+    enabled: true,
+    allowSubscriptionPayment: true
   });
 
   // Transaction Ledger Filters & Pagination
@@ -182,8 +224,12 @@ export default function SubscriptionsPage() {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Payment Selection Modal
+  // Payment Selection Modal State
   const [targetModalPlan, setTargetModalPlan] = useState<SubscriptionPlan | null>(null);
+  const [modalPaymentMethod, setModalPaymentMethod] = useState<'wallet' | 'stripe' | 'paypal' | 'manual'>('wallet');
+  const [manualRefCode, setManualRefCode] = useState<string>('');
+  const [userTransferSlip, setUserTransferSlip] = useState<string>('');
+  const [copiedRef, setCopiedRef] = useState<boolean>(false);
 
   // FAQ Accordion
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
@@ -214,7 +260,7 @@ export default function SubscriptionsPage() {
     created_at: tx.created_at || tx.createdAt || new Date().toISOString()
   });
 
-  // Normalization helper for incoming plans
+  // Normalization helper for incoming plans (Fully synchronized with /admin/plans)
   const normalizePlan = (plan: any): SubscriptionPlan => {
     const rawSlug = String(plan.slug || plan.id || 'plan').toLowerCase().trim();
     const baseSlug = cleanSlug(rawSlug);
@@ -250,12 +296,37 @@ export default function SubscriptionsPage() {
       annualPrice = Number((monthlyPrice * 10).toFixed(2));
     }
 
-    const tokenLimit = Number(
+    const tokensMonthly = Number(
+      plan.tokensMonthly ??
+      plan.tokens_monthly ??
       plan.token_limit ??
       plan.tokenLimit ??
       plan.monthly_tokens ??
       plan.tokenQuota ??
-      (isFree ? 50 : 500)
+      (isFree ? 25000 : 250000)
+    );
+
+    const tokensAnnual = Number(
+      plan.tokensAnnual ??
+      plan.tokens_annual ??
+      (tokensMonthly * 12)
+    );
+
+    // Sync Payment Settings from /admin/plans
+    const allowWallet = isFree ? false : (
+      plan.allowWalletPayment !== undefined ? Boolean(plan.allowWalletPayment) :
+      plan.allow_wallet_payment !== undefined ? Boolean(plan.allow_wallet_payment) : true
+    );
+
+    const allowGateway = isFree ? false : (
+      plan.allowGatewayPayment !== undefined ? Boolean(plan.allowGatewayPayment) :
+      plan.allow_gateway_payment !== undefined ? Boolean(plan.allow_gateway_payment) : true
+    );
+
+    const allowedGws = isFree ? [] : (
+      Array.isArray(plan.allowedGateways || plan.allowed_gateways)
+        ? (plan.allowedGateways || plan.allowed_gateways)
+        : ['stripe', 'paypal', 'manual']
     );
 
     return {
@@ -265,14 +336,19 @@ export default function SubscriptionsPage() {
       is_free: isFree,
       monthly_price_dollars: monthlyPrice,
       annual_price_dollars: annualPrice,
-      token_limit: tokenLimit,
+      token_limit: tokensMonthly,
+      tokensMonthly,
+      tokensAnnual,
       trialBadge: plan.trialBadge || plan.trial_badge || (isFree ? 'Free Forever' : undefined),
       monthlyBadge: plan.monthlyBadge || plan.monthly_badge || (plan.popular ? 'Popular' : undefined),
       annualBadge: plan.annualBadge || plan.annual_badge || 'Save ~20%',
       description_monthly: plan.description_monthly || plan.descriptionMonthly || plan.description || '',
       description_annual: plan.description_annual || plan.descriptionAnnual || plan.description || plan.description_monthly || '',
       features: parsePlanFeatures(plan.featuresText || plan.features),
-      popular: Boolean(plan.popular)
+      popular: Boolean(plan.popular),
+      allowWalletPayment: allowWallet,
+      allowGatewayPayment: allowGateway,
+      allowedGateways: allowedGws
     };
   };
 
@@ -286,7 +362,7 @@ export default function SubscriptionsPage() {
     const targetEmail = activeUser?.email || 'admin@zecratary.com';
 
     try {
-      // 1. Ingest Settings & Currency
+      // 1. Ingest Currency & Gateway Settings
       let activeCur = 'USD';
       if (typeof window !== 'undefined') {
         activeCur = localStorage.getItem('zecratary_currency') || 'USD';
@@ -297,7 +373,7 @@ export default function SubscriptionsPage() {
         if (sRes.ok) {
           const sData = await sRes.json();
           if (sData?.settings?.currency) activeCur = sData.settings.currency;
-          if (sData?.settings?.payment_settings) setGatewayConfig(sData.settings.payment_settings);
+          if (sData?.settings?.payment_settings) setGatewayConfig((prev: any) => ({ ...prev, ...sData.settings.payment_settings }));
         }
       } catch (_) {}
 
@@ -305,17 +381,26 @@ export default function SubscriptionsPage() {
         const gwRes = await fetch(`/api/admin/payment-gateway?t=${Date.now()}`, { cache: 'no-store' });
         if (gwRes.ok) {
           const gwData = await gwRes.json();
-          if (gwData?.gatewayConfig) setGatewayConfig(gwData.gatewayConfig);
+          if (gwData?.gatewayConfig) setGatewayConfig((prev: any) => ({ ...prev, ...gwData.gatewayConfig }));
+          else if (gwData?.stripe || gwData?.paypal || gwData?.manual) setGatewayConfig((prev: any) => ({ ...prev, ...gwData }));
           if (gwData?.currency) activeCur = gwData.currency;
+        }
+      } catch (_) {}
+
+      try {
+        const wRes = await fetch(`/api/admin/wallet-settings?t=${Date.now()}`, { cache: 'no-store' });
+        if (wRes.ok) {
+          const wData = await wRes.json();
+          const wCfg = wData.walletSettings || wData.settings || wData;
+          setWalletConfig(wCfg);
         }
       } catch (_) {}
 
       setCurrencyCode(activeCur.toUpperCase());
       setCurrencySymbol(CURRENCY_SYMBOLS[activeCur.toUpperCase()] || '$');
 
-      // 2. Authoritative Subscription Plans Ingestion
+      // 2. Ingest Plans from /api/admin/plans (Authoritative source)
       let fetchedPlansList: any[] = [];
-
       try {
         const pRes = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
         if (pRes.ok) {
@@ -350,7 +435,6 @@ export default function SubscriptionsPage() {
         if (bRes.ok) {
           const bData = await bRes.json();
           if (bData.success) {
-            // Reconcile and synchronize authoritative user state from database
             if (bData.user) {
               const u = bData.user;
               const reconciledUser: User = {
@@ -377,14 +461,6 @@ export default function SubscriptionsPage() {
                 localStorage.setItem('zecratary_user', JSON.stringify(reconciledUser));
                 localStorage.setItem('zecratary_current_user', JSON.stringify(reconciledUser));
               } catch (_) {}
-            }
-
-            if (bData.gatewayConfig) {
-              setGatewayConfig(bData.gatewayConfig);
-              if (bData.gatewayConfig.currency) {
-                setCurrencyCode(bData.gatewayConfig.currency.toUpperCase());
-                setCurrencySymbol(bData.gatewayConfig.currencySymbol || CURRENCY_SYMBOLS[bData.gatewayConfig.currency.toUpperCase()] || '$');
-              }
             }
 
             if (Array.isArray(bData.transactions)) {
@@ -456,7 +532,7 @@ export default function SubscriptionsPage() {
       }
 
     } catch (err) {
-      console.warn('[SubscriptionsPage] Data ingestion warning:', err);
+      console.warn('[SubscriptionsPage] Data ingestion notice:', err);
       setPlans(DEFAULT_PLANS);
     } finally {
       setLoading(false);
@@ -491,11 +567,20 @@ export default function SubscriptionsPage() {
           setCurrentUser(active);
           fetchRef.current(active);
         }
-      }, 250);
+      }, 200);
     };
+
+    // Cross-tab broadcast listener
+    let paymentBc: BroadcastChannel | null = null;
+    try {
+      paymentBc = new BroadcastChannel('zecratary_payment_sync');
+      paymentBc.onmessage = () => handleDebouncedSync();
+    } catch (_) {}
 
     window.addEventListener('storage', handleDebouncedSync);
     window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_payment_gateway_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_wallet_settings_updated', handleDebouncedSync);
     window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
     window.addEventListener('zecratary_wallet_updated', handleDebouncedSync);
     window.addEventListener('zecratary_tokens_updated', handleDebouncedSync);
@@ -509,8 +594,11 @@ export default function SubscriptionsPage() {
 
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      if (paymentBc) paymentBc.close();
       window.removeEventListener('storage', handleDebouncedSync);
       window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_payment_gateway_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_wallet_settings_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_wallet_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_tokens_updated', handleDebouncedSync);
@@ -584,27 +672,54 @@ export default function SubscriptionsPage() {
       return;
     }
 
+    // Generate reference code for audit or manual wire transfer
+    const ref = `SUB-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    setManualRefCode(ref);
+    setUserTransferSlip('');
+    setCopiedRef(false);
+
+    // Pick optimal starting method permitted by the plan
+    const price = billingInterval === 'annual' ? Number(plan.annual_price_dollars || 0) : Number(plan.monthly_price_dollars || 0);
+    const isWalletEligible = plan.allowWalletPayment !== false && walletConfig.enabled !== false && walletConfig.allowSubscriptionPayment !== false;
+    
+    if (isWalletEligible && walletBalance >= price) {
+      setModalPaymentMethod('wallet');
+    } else if (plan.allowGatewayPayment !== false && (plan.allowedGateways || []).includes('stripe') && gatewayConfig?.stripe?.enabled !== false) {
+      setModalPaymentMethod('stripe');
+    } else if (plan.allowGatewayPayment !== false && (plan.allowedGateways || []).includes('paypal') && gatewayConfig?.paypal?.enabled !== false) {
+      setModalPaymentMethod('paypal');
+    } else {
+      setModalPaymentMethod('manual');
+    }
+
     setTargetModalPlan(plan);
   };
 
-  const executePlanSwitch = async (plan: SubscriptionPlan, paymentMethod: string, amountToPay: number) => {
+  // Execute Plan Switch and synchronize in database
+    const executePlanSwitch = async (plan: SubscriptionPlan, paymentMethod: string, amountToPay: number) => {
     if (!currentUser) return;
     setSubmitting(true);
 
     const targetUserId = currentUser.id || 'usr_admin_1';
     const isTargetFree = Boolean(plan.is_free || cleanSlug(plan.slug) === 'taster' || amountToPay === 0);
-    const planFullSlug = isTargetFree ? 'taster' : `${cleanSlug(plan.slug)}-${billingInterval}`;
+    const planFullSlug = isTargetFree ? 'taster' : `${cleanSlug(plan.slug)}-${billingInterval === 'annual' ? 'annual' : 'monthly'}`;
     const planDisplayName = isTargetFree 
       ? `${plan.name} (Free)`
       : `${plan.name} (${billingInterval === 'annual' ? (t('annualBilling', 'Annual')) : (t('monthlyBilling', 'Monthly'))})`;
-    const tokensCredited = plan.token_limit ?? (isTargetFree ? 50 : 500);
+    
+    const tokensCredited = billingInterval === 'annual'
+      ? (plan.tokensAnnual || (plan.tokensMonthly ? plan.tokensMonthly * 12 : 3000000))
+      : (plan.tokensMonthly || plan.token_limit || (isTargetFree ? 25000 : 250000));
 
     try {
       const res = await fetch('/api/billing', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
-          action: 'upgrade_plan',
+          action: 'change_plan',
           planName: planDisplayName,
           planSlug: planFullSlug,
           interval: billingInterval === 'annual' ? 'YEAR' : 'MONTH',
@@ -616,13 +731,25 @@ export default function SubscriptionsPage() {
           userEmail: currentUser.email,
           userName: currentUser.name,
           userId: targetUserId,
-          tokenLimit: tokensCredited
+          tokenLimit: tokensCredited,
+          referenceCode: manualRefCode,
+          userTransferRef: userTransferSlip
         })
       });
 
-      const data = await res.json();
+      // Safe Stream Deserialization Guard
+      const responseText = await res.text();
+      let data: any = null;
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch (parseErr) {
+        console.error('Failed to parse billing response as JSON:', responseText);
+        throw new Error(responseText || `Server returned an invalid response (HTTP ${res.status})`);
+      }
+
       if (!res.ok || !data.success) {
-        throw new Error(data.error || t('failedSwitchPlan', 'Failed to switch subscription plan'));
+        const detailMsg = data.error || data.message || (typeof data === 'string' ? data : '') || t('failedSwitchPlan', 'Failed to switch subscription plan');
+        throw new Error(detailMsg);
       }
 
       if (data.checkoutUrl) {
@@ -631,8 +758,15 @@ export default function SubscriptionsPage() {
       }
 
       const newExpiry = isTargetFree ? null : new Date(Date.now() + (billingInterval === 'annual' ? 365 : 30) * 86400000).toISOString();
+      const finalWalletBal = typeof data.wallet_balance === 'number'
+        ? data.wallet_balance
+        : (paymentMethod === 'wallet' ? Math.max(0, walletBalance - amountToPay) : walletBalance);
+      
+      const finalTokenBal = typeof data.token_balance === 'number'
+        ? data.token_balance
+        : ((currentUser.token_balance || 0) + (tokensCredited > 0 && !isTargetFree ? tokensCredited : 0));
 
-      const updatedUser = {
+      const updatedUser: User = {
         ...currentUser,
         subscription_plan: planFullSlug,
         subscriptionPlan: planFullSlug,
@@ -640,26 +774,24 @@ export default function SubscriptionsPage() {
         planInterval: billingInterval === 'annual' ? 'YEAR' : 'MONTH',
         plan_expiry_date: newExpiry,
         planExpiryDate: newExpiry,
-        token_balance: (currentUser.token_balance || 0) + (tokensCredited > 0 && !isTargetFree ? tokensCredited : 0)
+        wallet_balance: finalWalletBal,
+        token_balance: finalTokenBal
       };
 
-      if (paymentMethod === 'wallet' && typeof data.wallet_balance === 'number') {
-        updatedUser.wallet_balance = data.wallet_balance;
-        setWalletBalance(data.wallet_balance);
-      }
-
+      setWalletBalance(finalWalletBal);
+      setTokenBalance(finalTokenBal);
       setCurrentUser(updatedUser);
 
       if (typeof window !== 'undefined') {
         localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
         localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
         window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('zecratary_user_plan_updated'));
         window.dispatchEvent(new Event('zecratary_subscriptions_updated'));
         window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_wallet_updated'));
-        window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('storage'));
       }
 
@@ -718,6 +850,14 @@ export default function SubscriptionsPage() {
     } catch (_) {}
   };
 
+  const copyRefCode = () => {
+    if (typeof window !== 'undefined' && manualRefCode) {
+      navigator.clipboard.writeText(manualRefCode);
+      setCopiedRef(true);
+      setTimeout(() => setCopiedRef(false), 2500);
+    }
+  };
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter(tx => {
       const st = (tx.status || 'succeeded').toLowerCase();
@@ -741,9 +881,8 @@ export default function SubscriptionsPage() {
 
   return (
     <div 
-      className="min-h-screen w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 transition-colors duration-200"
+      className="min-h-screen w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 font-sans transition-colors duration-200 box-border space-y-8"
       style={{
-        boxSizing: 'border-box',
         backgroundColor: 'var(--color-bg, #070b13)',
         color: 'var(--color-text, #f8fafc)'
       }}
@@ -907,7 +1046,7 @@ export default function SubscriptionsPage() {
                 <span>
                   {expiryInfo.dateStr && !isFreeUser
                     ? `${t('renewalDateLabel', 'Active period ends on')} ${expiryInfo.dateStr}`
-                    : t('freePlanNoExpiry', 'Free Plan — No expiration date')}
+                    : t('freePlanNoExpiry', 'Free Plan — Perpetual Access')}
                 </span>
               </p>
             </div>
@@ -1127,6 +1266,10 @@ export default function SubscriptionsPage() {
                 : (billingInterval === 'annual' ? plan.annualBadge : plan.monthlyBadge);
               const featuresList = parsePlanFeatures(plan.features);
 
+              const tokenQuota = billingInterval === 'annual'
+                ? (plan.tokensAnnual || (plan.tokensMonthly ? plan.tokensMonthly * 12 : 3000000))
+                : (plan.tokensMonthly || plan.token_limit || (isPlanFree ? 25000 : 250000));
+
               return (
                 <div
                   key={plan.id}
@@ -1199,8 +1342,48 @@ export default function SubscriptionsPage() {
                       {/* Token Allowance Tag */}
                       <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
                         <Coins className="w-3.5 h-3.5" />
-                        <span>+{(plan.token_limit ?? (isPlanFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol} / {billingInterval === 'annual' && !isPlanFree ? 'year' : 'month'}</span>
+                        <span>+{tokenQuota.toLocaleString()} {tokenIdentity.tokenSymbol} / {billingInterval === 'annual' && !isPlanFree ? 'year' : 'month'}</span>
                       </div>
+
+                      {/* Dynamic Payment Gateways & Wallet Support Badges (Synced with /admin/plans) */}
+                      {!isPlanFree && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {plan.allowWalletPayment && (
+                            <span 
+                              className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border flex items-center gap-1"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark, #070b13)',
+                                borderColor: 'var(--color-emerald, #10b981)',
+                                color: 'var(--color-emerald, #10b981)'
+                              }}
+                            >
+                              <Wallet className="h-2.5 w-2.5" />
+                              <span>Wallet</span>
+                            </span>
+                          )}
+
+                          {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('stripe') && (
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-blue-500/30 text-blue-400 bg-blue-500/10 flex items-center gap-1">
+                              <CreditCard className="h-2.5 w-2.5" />
+                              <span>Card</span>
+                            </span>
+                          )}
+
+                          {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('paypal') && (
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-sky-500/30 text-sky-400 bg-sky-500/10 flex items-center gap-1">
+                              <Sparkles className="h-2.5 w-2.5" />
+                              <span>PayPal</span>
+                            </span>
+                          )}
+
+                          {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('manual') && (
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-amber-500/30 text-amber-400 bg-amber-500/10 flex items-center gap-1">
+                              <Landmark className="h-2.5 w-2.5" />
+                              <span>Wire</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Features Matrix */}
@@ -1519,24 +1702,24 @@ export default function SubscriptionsPage() {
           </div>
         </div>
 
-        {/* PAYMENT METHOD SELECTION MODAL (Zero-Form Accessible Container) */}
+        {/* PAYMENT METHOD SELECTION MODAL (Synchronized with /admin/plans & /admin/payment-gateway) */}
         {targetModalPlan && (
           <div 
-            onClick={() => setTargetModalPlan(null)}
+            onClick={() => !submitting && setTargetModalPlan(null)}
             className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
           >
             <div 
               onClick={(e) => e.stopPropagation()}
               role="region"
               data-lpignore="true"
-              className="border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
+              className="border rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
               style={{ backgroundColor: 'var(--color-card, #0f172a)', borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-text, #f8fafc)' }}
             >
               <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
                 <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-emerald, #10b981)' }}>
                   {t('walletDeductionModalTitle', 'Confirm Subscription Payment')}
                 </h3>
-                <button type="button" onClick={() => setTargetModalPlan(null)} className="p-1 rounded-lg">
+                <button type="button" onClick={() => setTargetModalPlan(null)} className="p-1 rounded-lg hover:opacity-80">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -1555,13 +1738,18 @@ export default function SubscriptionsPage() {
 
                   const hasWalletFunds = walletBalance >= planPrice;
 
-                  const isStripeAvailable = gatewayConfig?.stripe?.enabled !== false && (
+                  // Plan-specific authorization checked against /admin/plans
+                  const isWalletPlanAllowed = targetModalPlan.allowWalletPayment !== false && walletConfig.enabled !== false && walletConfig.allowSubscriptionPayment !== false;
+                  const isGatewayPlanAllowed = targetModalPlan.allowGatewayPayment !== false;
+                  const allowedGws = targetModalPlan.allowedGateways || ['stripe', 'paypal', 'manual'];
+
+                  const isStripeAvailable = isGatewayPlanAllowed && allowedGws.includes('stripe') && gatewayConfig?.stripe?.enabled !== false && (
                     !gatewayConfig?.activeGateway || gatewayConfig.activeGateway === 'stripe' || gatewayConfig.activeGateway === 'both'
                   );
-                  const isPaypalAvailable = gatewayConfig?.paypal?.enabled && (
+                  const isPaypalAvailable = isGatewayPlanAllowed && allowedGws.includes('paypal') && gatewayConfig?.paypal?.enabled !== false && (
                     gatewayConfig.activeGateway === 'paypal' || gatewayConfig.activeGateway === 'both'
                   );
-                  const isManualAvailable = Boolean(gatewayConfig?.manual?.enabled);
+                  const isManualAvailable = isGatewayPlanAllowed && allowedGws.includes('manual') && Boolean(gatewayConfig?.manual?.enabled !== false);
 
                   return (
                     <div className="space-y-3">
@@ -1572,35 +1760,41 @@ export default function SubscriptionsPage() {
                             {currencySymbol}{planPrice.toFixed(2)} {currencyCode}
                           </span>
                         </div>
-                        <div className="flex justify-between items-center text-[11px] opacity-75">
-                          <span>{t('storeWalletBalance', 'Your Store Wallet Balance')}:</span>
-                          <span className="font-mono font-bold">{currencySymbol}{walletBalance.toFixed(2)}</span>
-                        </div>
+                        {isWalletPlanAllowed && (
+                          <div className="flex justify-between items-center text-[11px] opacity-75">
+                            <span>{t('storeWalletBalance', 'Your Store Wallet Balance')}:</span>
+                            <span className="font-mono font-bold">{currencySymbol}{walletBalance.toFixed(2)}</span>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Store Wallet Payment */}
-                      <button
-                        type="button"
-                        disabled={!hasWalletFunds || submitting}
-                        onClick={() => executePlanSwitch(targetModalPlan, 'wallet', planPrice)}
-                        className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition cursor-pointer border shadow-sm ${
-                          hasWalletFunds ? 'hover:border-emerald-500' : 'opacity-40 cursor-not-allowed'
-                        }`}
-                        style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
-                      >
-                        <span className="flex items-center gap-2">
-                          <Wallet className="h-4 w-4 text-emerald-400" />
-                          <span>{t('payWithWalletBtn', 'Pay with Store Wallet')}</span>
-                        </span>
-                        <span className="font-mono font-bold text-emerald-400">{currencySymbol}{planPrice.toFixed(2)}</span>
-                      </button>
+                      {/* Store Wallet Payment (Controlled by /admin/plans) */}
+                      {isWalletPlanAllowed && (
+                        <div className="space-y-1.5">
+                          <button
+                            type="button"
+                            disabled={!hasWalletFunds || submitting}
+                            onClick={() => setModalPaymentMethod('wallet')}
+                            className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition cursor-pointer border shadow-sm ${
+                              modalPaymentMethod === 'wallet' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-emerald-500/10' : ''
+                            } ${hasWalletFunds ? 'hover:border-emerald-500' : 'opacity-40 cursor-not-allowed'}`}
+                            style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: modalPaymentMethod === 'wallet' ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #1e293b)' }}
+                          >
+                            <span className="flex items-center gap-2">
+                              <Wallet className="h-4 w-4 text-emerald-400" />
+                              <span>{t('payWithWalletBtn', 'Pay with Store Wallet')}</span>
+                            </span>
+                            <span className="font-mono font-bold text-emerald-400">{currencySymbol}{planPrice.toFixed(2)}</span>
+                          </button>
 
-                      {!hasWalletFunds && (
-                        <div className="p-2.5 rounded-xl border text-[10px] text-amber-500 flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: '#f59e0b' }}>
-                          <span>{t('insufficientWalletBalance', 'Insufficient wallet balance.')}</span>
-                          <Link href={`/wallet?amount=${(planPrice - walletBalance).toFixed(2)}`} className="font-bold underline">
-                            {t('topUpWalletBtn', 'Top Up Wallet')}
-                          </Link>
+                          {!hasWalletFunds && (
+                            <div className="p-2.5 rounded-xl border text-[10px] text-amber-500 flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: '#f59e0b' }}>
+                              <span>{t('insufficientWalletBalance', 'Insufficient wallet balance.')}</span>
+                              <Link href={`/wallet?amount=${(planPrice - walletBalance).toFixed(2)}`} className="font-bold underline">
+                                {t('topUpWalletBtn', 'Top Up Wallet')}
+                              </Link>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1609,12 +1803,19 @@ export default function SubscriptionsPage() {
                         <button
                           type="button"
                           disabled={submitting}
-                          onClick={() => executePlanSwitch(targetModalPlan, 'stripe', planPrice)}
-                          className="w-full py-3 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
-                          style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+                          onClick={() => setModalPaymentMethod('stripe')}
+                          className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition shadow cursor-pointer border ${
+                            modalPaymentMethod === 'stripe' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-blue-500/10' : 'hover:border-blue-400'
+                          }`}
+                          style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
                         >
-                          <CreditCard className="h-4 w-4" />
-                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Credit Card / Stripe')}</span>
+                          <span className="flex items-center gap-2">
+                            <CreditCard className="h-4 w-4 text-blue-400" />
+                            <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Credit Card (Stripe)')}</span>
+                          </span>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            {gatewayConfig?.stripe?.mode === 'live' ? 'Live SSL' : 'Test Sandbox'}
+                          </span>
                         </button>
                       )}
 
@@ -1623,12 +1824,19 @@ export default function SubscriptionsPage() {
                         <button
                           type="button"
                           disabled={submitting}
-                          onClick={() => executePlanSwitch(targetModalPlan, 'paypal', planPrice)}
-                          className="w-full py-3 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
-                          style={{ backgroundColor: '#0284c7' }}
+                          onClick={() => setModalPaymentMethod('paypal')}
+                          className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition shadow cursor-pointer border ${
+                            modalPaymentMethod === 'paypal' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-sky-500/10' : 'hover:border-sky-400'
+                          }`}
+                          style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
                         >
-                          <Zap className="h-4 w-4" />
-                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'PayPal')}</span>
+                          <span className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-sky-400" />
+                            <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'PayPal Express')}</span>
+                          </span>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                            {gatewayConfig?.paypal?.mode === 'live' ? 'Live' : 'Sandbox'}
+                          </span>
                         </button>
                       )}
 
@@ -1637,30 +1845,124 @@ export default function SubscriptionsPage() {
                         <button
                           type="button"
                           disabled={submitting}
-                          onClick={() => executePlanSwitch(targetModalPlan, 'manual', planPrice)}
-                          className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer border hover:opacity-90 disabled:opacity-40"
-                          style={{ 
-                            backgroundColor: 'var(--color-inner-dark, #070b13)', 
-                            borderColor: 'var(--color-border, #1e293b)',
-                            color: 'var(--color-text, #f8fafc)'
-                          }}
+                          onClick={() => setModalPaymentMethod('manual')}
+                          className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition shadow cursor-pointer border ${
+                            modalPaymentMethod === 'manual' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-amber-500/10' : 'hover:border-amber-400'
+                          }`}
+                          style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
                         >
-                          <Landmark className="h-4 w-4 text-emerald-400" />
-                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Bank Transfer / Wire')}</span>
+                          <span className="flex items-center gap-2">
+                            <Landmark className="h-4 w-4 text-amber-400" />
+                            <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Bank Transfer / Wire')}</span>
+                          </span>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            Direct Wire
+                          </span>
                         </button>
+                      )}
+
+                      {/* Detailed Manual Bank Wire Information Box */}
+                      {modalPaymentMethod === 'manual' && isManualAvailable && (
+                        <div 
+                          className="p-4 rounded-2xl border space-y-3 animate-in fade-in transition-all text-xs"
+                          style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                        >
+                          <div className="flex items-center justify-between pb-2 border-b border-white/10 font-bold text-amber-400">
+                            <div className="flex items-center gap-2">
+                              <Building className="w-4 h-4" />
+                              <span>{t('bankDetailsHeading', 'Beneficiary Bank Details')}</span>
+                            </div>
+                            <span className="text-[10px] opacity-75 font-mono">Synced</span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                            <div>
+                              <span className="opacity-60 block text-[9px] uppercase font-bold">{t('bankNameLabel', 'Bank Name')}:</span>
+                              <strong className="text-slate-200">{gatewayConfig?.manual?.bankName || 'Standard Chartered Bank'}</strong>
+                            </div>
+                            <div>
+                              <span className="opacity-60 block text-[9px] uppercase font-bold">{t('accountHolderLabel', 'Beneficiary Name')}:</span>
+                              <strong className="text-slate-200">{gatewayConfig?.manual?.accountHolder || 'Zecratary AI Solutions'}</strong>
+                            </div>
+                            <div>
+                              <span className="opacity-60 block text-[9px] uppercase font-bold">{t('accountNumberLabel', 'Account / IBAN Number')}:</span>
+                              <strong className="font-mono font-bold text-emerald-400 text-xs">{gatewayConfig?.manual?.accountNumber || '8492-4910-4491-002'}</strong>
+                            </div>
+                            <div>
+                              <span className="opacity-60 block text-[9px] uppercase font-bold">{t('swiftCodeLabel', 'SWIFT / Branch Code')}:</span>
+                              <strong className="font-mono text-slate-200">{gatewayConfig?.manual?.swiftCode || 'SCBLUS33'}</strong>
+                            </div>
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-3">
+                            <div>
+                              <span className="text-[9px] uppercase font-bold opacity-60 block">{t('transferRefCodeLabel', 'Payment Reference Note')}:</span>
+                              <span className="font-mono font-black text-amber-400 text-xs tracking-wider">{manualRefCode}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={copyRefCode}
+                              className="px-2.5 py-1.5 rounded-lg border border-white/20 hover:bg-white/10 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                            >
+                              {copiedRef ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              <span>{copiedRef ? t('copiedBtn', 'Copied!') : t('copyCodeBtn', 'Copy Note')}</span>
+                            </button>
+                          </div>
+
+                          <div>
+                            <label className="text-[9px] uppercase font-bold opacity-60 block mb-1">
+                              {t('userTransferRefLabel', 'Your Transfer Slip / Transaction ID (Optional):')}
+                            </label>
+                            <input
+                              type="text"
+                              value={userTransferSlip}
+                              onChange={(e) => setUserTransferSlip(e.target.value)}
+                              placeholder="e.g. TXN-94819204 or Bank receipt code"
+                              className="w-full px-3 py-2 rounded-xl text-xs border bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              style={{ borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-text, #f8fafc)' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* No payment modes allowed guard */}
+                      {!isWalletPlanAllowed && !isStripeAvailable && !isPaypalAvailable && !isManualAvailable && (
+                        <div className="p-4 rounded-2xl border text-center space-y-1 border-red-500/40 bg-red-500/10 text-red-400">
+                          <AlertCircle className="w-5 h-5 mx-auto" />
+                          <p className="font-bold text-xs">{t('noPaymentAllowedAlert', 'No payment purchase methods are currently enabled for this plan tier.')}</p>
+                          <p className="text-[10px] opacity-80">{t('contactAdminToEnable', 'Please contact the system administrator to activate payment options in /admin/plans.')}</p>
+                        </div>
                       )}
                     </div>
                   );
                 })()}
 
-                <div className="flex justify-end pt-2 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
                   <button
                     type="button"
                     onClick={() => setTargetModalPlan(null)}
-                    className="px-4 py-2 border rounded-xl font-bold hover:opacity-80 transition cursor-pointer"
+                    disabled={submitting}
+                    className="px-4 py-2.5 border rounded-xl font-bold hover:opacity-80 transition cursor-pointer"
                     style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
                   >
                     {t('cancelBtn', 'Cancel')}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={
+                      submitting || 
+                      (modalPaymentMethod === 'wallet' && walletBalance < (billingInterval === 'annual' ? targetModalPlan.annual_price_dollars : targetModalPlan.monthly_price_dollars))
+                    }
+                    onClick={() => {
+                      const amount = billingInterval === 'annual' ? Number(targetModalPlan.annual_price_dollars || 0) : Number(targetModalPlan.monthly_price_dollars || 0);
+                      executePlanSwitch(targetModalPlan, modalPaymentMethod, amount);
+                    }}
+                    className="px-5 py-2.5 rounded-xl font-black text-white shadow-lg transition hover:opacity-90 flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                    style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+                  >
+                    {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    <span>{submitting ? t('processingPlanBtn', 'Processing...') : t('confirmAndPayBtn', 'Confirm & Activate Plan')}</span>
                   </button>
                 </div>
               </div>
