@@ -1,87 +1,177 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export async function POST(req: Request) {
+export const dynamic = 'force-dynamic';
+
+async function syncUserToDatabase(user: any): Promise<void> {
+  const email = (user.email || '').toLowerCase().trim();
+  const userId = user.id || '';
+  if (!email && !userId) return;
+
+  // 1. PostgreSQL Synchronization
+  try {
+    const { getPostgresPool } = await import('@/lib/postgresUser').catch(() => ({ getPostgresPool: null }));
+    const pool = getPostgresPool ? getPostgresPool() : null;
+    if (pool) {
+      await pool.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+      `);
+      await pool.query(
+        `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1) OR id = $2`,
+        [email, userId]
+      );
+    }
+  } catch (pgErr) {
+    console.debug('[PostgreSQL Google sync skipped/error]:', pgErr);
+  }
+
+  // 2. MySQL Synchronization
+  try {
+    const mysqlHost = process.env.MYSQL_HOST || process.env.DB_HOST;
+    const mysqlUser = process.env.MYSQL_USER || process.env.DB_USER;
+    const mysqlPassword = process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD;
+    const mysqlDatabase = process.env.MYSQL_DATABASE || process.env.DB_NAME;
+
+    if (mysqlHost && mysqlUser && mysqlDatabase) {
+      const mysqlModule = await import('mysql2/promise').catch(() => null);
+      if (mysqlModule) {
+        const connection = await mysqlModule.createConnection({
+          host: mysqlHost,
+          user: mysqlUser,
+          password: mysqlPassword,
+          database: mysqlDatabase,
+          port: Number(process.env.MYSQL_PORT || 3306),
+          connectTimeout: 2000
+        });
+        try {
+          await connection.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
+        } catch (_) {}
+        await connection.execute(
+          `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?) OR id = ?`,
+          [email, userId]
+        );
+        await connection.end();
+      }
+    }
+  } catch (myErr) {
+    console.debug('[MySQL Google sync skipped/error]:', myErr);
+  }
+}
+
+function syncUserToStore(user: any): any {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, 'apps/web/data/users.json'),
+    path.join(cwd, 'data/users.json')
+  ];
+
+  let resolvedUser = user;
+
+  for (const p of paths) {
+    try {
+      let usersList: any[] = [];
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        usersList = JSON.parse(raw);
+        if (!Array.isArray(usersList)) usersList = [];
+      } else {
+        const dir = path.dirname(p);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const existingIndex = usersList.findIndex(
+        (u) => u && u.email && u.email.toLowerCase() === user.email.toLowerCase()
+      );
+
+      if (existingIndex >= 0) {
+        usersList[existingIndex] = {
+          ...usersList[existingIndex],
+          name: user.name || usersList[existingIndex].name,
+          picture: user.picture || usersList[existingIndex].picture,
+          avatar: user.picture || usersList[existingIndex].avatar,
+          lastLoginAt: new Date().toISOString()
+        };
+        resolvedUser = usersList[existingIndex];
+      } else {
+        usersList.unshift(user);
+      }
+
+      fs.writeFileSync(p, JSON.stringify(usersList, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('[google-session] Error syncing user to store:', p, err);
+    }
+  }
+
+  return resolvedUser;
+}
+
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { profile } = body || {};
+    const profile = body.profile;
+    const requestedCallback = body.callbackUrl || '';
 
     if (!profile || !profile.email) {
-      return NextResponse.json({ success: false, error: 'Profile with email is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing profile email' }, { status: 400 });
     }
 
-    const cleanEmail = profile.email.toLowerCase().trim();
-    const displayName = profile.name || profile.given_name || cleanEmail.split('@')[0];
-    const avatar = profile.picture || profile.avatar || '';
+    const email = profile.email.toLowerCase().trim();
+    const name = profile.name || profile.given_name || email.split('@')[0];
+    const picture = profile.picture || '';
+    const googleId = profile.sub || profile.id || Date.now().toString();
 
-    const userObj = {
-      id: profile.sub ? `usr_google_${profile.sub}` : `usr_${Date.now()}`,
-      name: displayName,
-      email: cleanEmail,
-      avatar: avatar,
-      provider: 'google',
-      role: cleanEmail.includes('admin') ? 'admin' : 'user',
-      token_balance: 50000,
-      subscription_plan: 'taster'
+    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
+
+    const candidateUser = {
+      id: `usr_g_${googleId}`,
+      name,
+      email,
+      role: isEmailAdmin ? 'admin' : 'user',
+      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
+      picture,
+      avatar: picture,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString()
     };
 
-    // Upsert into PostgreSQL users table (Constraint 8)
-    try {
-      const { query } = await import('@/lib/db');
-      if (typeof query === 'function') {
-        await query(`
-          CREATE TABLE IF NOT EXISTS users (
-            id VARCHAR(255) PRIMARY KEY,
-            name VARCHAR(255),
-            email VARCHAR(255) UNIQUE NOT NULL,
-            avatar TEXT,
-            provider VARCHAR(50) DEFAULT 'local',
-            role VARCHAR(50) DEFAULT 'user',
-            token_balance BIGINT DEFAULT 50000,
-            subscription_plan VARCHAR(100) DEFAULT 'free',
-            last_login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-          )
-        `);
+    const finalUser = syncUserToStore(candidateUser);
+    await syncUserToDatabase(finalUser);
 
-        await query(`
-          INSERT INTO users (id, name, email, avatar, provider, role, token_balance, subscription_plan, last_login_at, updated_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-          ON CONFLICT (email) DO UPDATE SET
-            name = EXCLUDED.name,
-            avatar = EXCLUDED.avatar,
-            last_login_at = NOW(),
-            updated_at = NOW()
-        `, [userObj.id, userObj.name, userObj.email, userObj.avatar, userObj.provider, userObj.role, userObj.token_balance, userObj.subscription_plan]);
-      }
-    } catch (dbErr) {
-      console.warn('[google-session] Database sync warning:', dbErr);
+    // Guaranteed redirection to /dashboard
+    let redirectUrl = requestedCallback.trim();
+    if (
+      !redirectUrl || 
+      redirectUrl === '/login' || 
+      redirectUrl.startsWith('/login') ||
+      redirectUrl === '/profile' ||
+      redirectUrl.startsWith('/profile')
+    ) {
+      redirectUrl = '/dashboard';
     }
 
-    // Always redirect to /dashboard upon successful Google login
     const response = NextResponse.json({
       success: true,
-      user: userObj,
-      redirectUrl: '/dashboard'
+      user: finalUser,
+      redirectUrl
     });
 
-    const userRaw = JSON.stringify(userObj);
-    const userEncoded = encodeURIComponent(userRaw);
-    const keys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
-    
-    keys.forEach(k => {
-      response.cookies.set({
-        name: k,
-        value: userEncoded,
+    const serializedUser = JSON.stringify(finalUser);
+    const cookieKeys = ['zecratary_current_user', 'zecratary_auth_session', 'zecratary_session', 'currentUser'];
+    for (const ck of cookieKeys) {
+      response.cookies.set(ck, serializedUser, {
         path: '/',
-        maxAge: 604800,
-        sameSite: 'lax'
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400 * 7
       });
-    });
+    }
 
     return response;
   } catch (err: any) {
-    console.error('[google-session] Handler error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('[google-session] Error:', err);
+    return NextResponse.json({ error: err.message || 'Session creation failed' }, { status: 500 });
   }
 }

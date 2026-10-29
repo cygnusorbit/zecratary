@@ -36,7 +36,7 @@ function persistSessionUniversally(user: any) {
 }
 
 function sanitizeDestination(targetUrl: string | null | undefined, userRole?: string): string {
-  const fallback = userRole === 'admin' ? '/admin' : '/dashboard';
+  const fallback = '/dashboard';
   if (!targetUrl) return fallback;
 
   const trimmed = targetUrl.trim();
@@ -52,7 +52,9 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
         path.startsWith('/login/') || 
         path === '/register' || 
         path === '/register/' || 
-        path.startsWith('/register/')
+        path.startsWith('/register/') ||
+        path === '/profile' ||
+        path === '/profile/'
       ) {
         return fallback;
       }
@@ -73,10 +75,16 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
     lower === '/register/' ||
     lower.startsWith('/register?') ||
     lower.startsWith('/register/') ||
+    lower === '/profile' ||
+    lower === '/profile/' ||
+    lower.startsWith('/profile?') ||
+    lower.startsWith('/profile/') ||
     lower === 'login' ||
     lower === 'register' ||
+    lower === 'profile' ||
     lower.includes('%2flogin') ||
-    lower.includes('%2fregister')
+    lower.includes('%2fregister') ||
+    lower.includes('%2fprofile')
   ) {
     return fallback;
   }
@@ -310,7 +318,7 @@ function LoginForm() {
 
     isRedirectingRef.current = true;
     persistSessionUniversally(active);
-    window.location.replace(dest);
+    window.location.replace(dest || '/dashboard');
   }, [searchParams]);
 
   useEffect(() => {
@@ -362,8 +370,8 @@ function LoginForm() {
         const rawCb = searchParams.get('callbackUrl');
         const dest = sanitizeDestination(rawCb, resolvedUser.role);
 
-        // Immediate redirection without artificial setTimeout delays
-        window.location.replace(dest);
+        // Immediate redirection to /dashboard without artificial delays
+        window.location.replace(dest || '/dashboard');
       } else {
         setErrorMsg(t('invalidCredentials', 'Invalid email or password.'));
         setLoading(false);
@@ -415,7 +423,7 @@ function LoginForm() {
                       setSuccessMsg(t('loginSuccess', 'Signing in...'));
 
                       const finalTarget = sanitizeDestination(sessionData.redirectUrl || dest, sessionData.user.role);
-                      window.location.replace(finalTarget);
+                      window.location.replace(finalTarget || '/dashboard');
                       return;
                     }
                   }
