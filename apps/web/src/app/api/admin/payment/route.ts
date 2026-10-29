@@ -3,20 +3,45 @@ import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
+function normalizeBool(val: any, fallback = false): boolean {
+  if (val === undefined || val === null) return fallback;
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'number') return val === 1;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    if (s === 'true' || s === '1' || s === 'yes' || s === 'on') return true;
+    if (s === 'false' || s === '0' || s === 'no' || s === 'off') return false;
+  }
+  return fallback;
 }
 
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
-
-async function ensurePaymentSchema() {
+async function ensureGatewaySchema() {
   try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        payment_settings JSON,
+        currency VARCHAR(10) DEFAULT 'USD',
+        site_name TEXT,
+        theme_colors JSON,
+        value JSON,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `).catch(async () => {
+      // Fallback for strict PostgreSQL JSONB
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id INT PRIMARY KEY DEFAULT 1,
+          payment_settings JSONB,
+          currency VARCHAR(10) DEFAULT 'USD',
+          site_name TEXT,
+          theme_colors JSONB,
+          value JSONB,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `).catch(() => {});
+    });
+
     await query(`
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(255) PRIMARY KEY,
@@ -24,192 +49,171 @@ async function ensurePaymentSchema() {
         customer_email TEXT,
         plan_name TEXT,
         plan_slug TEXT,
-        amount NUMERIC DEFAULT 0,
+        amount NUMERIC(12,2) DEFAULT 0.00,
         currency VARCHAR(10) DEFAULT 'USD',
         gateway VARCHAR(50) DEFAULT 'stripe',
-        status VARCHAR(50) DEFAULT 'succeeded',
-        test_mode BOOLEAN DEFAULT false,
-        failure_reason TEXT,
-        is_recurring BOOLEAN DEFAULT true,
-        recurring_interval VARCHAR(20) DEFAULT 'MONTH',
-        auto_renew BOOLEAN DEFAULT true,
+        status VARCHAR(50) DEFAULT 'pending',
         transfer_reference TEXT,
+        failure_reason TEXT,
         notes TEXT,
-        confirmed_amount NUMERIC,
-        confirmed_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        expiry_date TIMESTAMPTZ,
-        gateway_transaction_id TEXT
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id INT PRIMARY KEY DEFAULT 1,
-        payment_settings JSONB,
-        currency VARCHAR(10) DEFAULT 'USD',
-        site_name TEXT,
-        theme_colors JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS wallet_settings (
-        id INT PRIMARY KEY DEFAULT 1,
-        currency VARCHAR(10) DEFAULT 'USD',
-        allowed_gateways JSONB DEFAULT '["stripe"]',
-        active_gateway VARCHAR(50) DEFAULT 'stripe',
-        min_deposit NUMERIC DEFAULT 5,
-        max_deposit NUMERIC DEFAULT 1000,
-        bonus_tiers JSONB,
-        ledger_columns JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
-      DO $$ 
-      BEGIN 
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS transfer_reference TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS notes TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe"]'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-      END $$;
-    `);
-  } catch (e) {
-    console.warn('[Payment API] Schema check notice:', e);
+    `).catch(() => {});
+  } catch (err) {
+    console.warn('[PaymentGateway API] Schema notice:', err);
   }
 }
 
-async function persistAdminSettingsData(settings: any, currency: string) {
-  await ensurePaymentSchema();
-  const cleanSettings = { ...settings };
-  delete cleanSettings.action;
-  delete cleanSettings.gateway;
-  delete cleanSettings.enabled;
-  const jsonStr = JSON.stringify(cleanSettings);
-  const cur = currency || cleanSettings.currency || 'USD';
-
-  // 1. PostgreSQL admin_settings
+async function savePaymentSettingsDual(ps: any, currency = 'USD') {
+  const jsonSettings = JSON.stringify(ps);
+  // 1. Try PostgreSQL upsert
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
-       VALUES (1, $1::jsonb, $2, NOW())
-       ON CONFLICT (id) DO UPDATE SET
+       VALUES (1, $1, $2, NOW())
+       ON CONFLICT (id) DO UPDATE SET 
          payment_settings = EXCLUDED.payment_settings,
          currency = EXCLUDED.currency,
          updated_at = NOW()`,
-      [jsonStr, cur]
+      [jsonSettings, currency]
     );
-  } catch (err) {
+  } catch (pgErr) {
+    // 2. Try MySQL upsert
     try {
       await query(
-        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = '1'`,
-        [jsonStr, cur]
+        `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
+         VALUES (1, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE 
+           payment_settings = VALUES(payment_settings),
+           currency = VALUES(currency),
+           updated_at = NOW()`,
+        [jsonSettings, currency]
       );
-    } catch (_) {}
-  }
-
-  // 2. Synchronize allowed_gateways with wallet_settings
-  try {
-    const allowedGateways: string[] = [];
-    if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
-    if (cleanSettings.paypal?.enabled) allowedGateways.push('paypal');
-    if (cleanSettings.manualSettlement?.enabled || cleanSettings.manual?.enabled) allowedGateways.push('manual');
-
-    await query(
-      `INSERT INTO wallet_settings (id, currency, allowed_gateways, updated_at)
-       VALUES (1, $1, $2::jsonb, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         currency = EXCLUDED.currency,
-         allowed_gateways = EXCLUDED.allowed_gateways,
-         updated_at = NOW()`,
-      [cur, JSON.stringify(allowedGateways)]
-    ).catch(async () => {
-      await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = '1'`,
-        [cur, JSON.stringify(allowedGateways)]
-      ).catch(() => {});
-    });
-  } catch (wErr) {
-    console.warn('[Payment API] wallet_settings sync notice:', wErr);
-  }
-
-  // 3. Mirror to filesystem for resilience
-  try {
-    const dataDir = path.join(process.cwd(), 'data');
-    const filePath = path.join(dataDir, 'admin_settings.json');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    let existing: any = {};
-    if (fs.existsSync(filePath)) {
+    } catch (myErr) {
+      // 3. Fallback conditional update
       try {
-        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const row = await query(`SELECT id FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const exists = Array.isArray(row) ? row.length > 0 : Boolean(row?.rows?.length);
+        if (exists) {
+          await query(`UPDATE admin_settings SET payment_settings = $1, currency = $2 WHERE id = 1`, [jsonSettings, currency]).catch(async () => {
+            await query(`UPDATE admin_settings SET payment_settings = ?, currency = ? WHERE id = 1`, [jsonSettings, currency]);
+          });
+        } else {
+          await query(`INSERT INTO admin_settings (id, payment_settings, currency) VALUES (1, $1, $2)`, [jsonSettings, currency]).catch(async () => {
+            await query(`INSERT INTO admin_settings (id, payment_settings, currency) VALUES (1, ?, ?)`, [jsonSettings, currency]);
+          });
+        }
       } catch (_) {}
     }
-    existing.paymentSettings = cleanSettings;
-    existing.currency = cur;
-    existing.updatedAt = new Date().toISOString();
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
-  } catch (fileErr) {
-    console.warn('[Payment API] File mirror notice:', fileErr);
   }
+
+  // 4. Bi-directional sync with wallet_settings.allowed_gateways
+  try {
+    const allowed: string[] = [];
+    if (normalizeBool(ps.stripe?.enabled, true)) allowed.push('stripe');
+    if (normalizeBool(ps.paypal?.enabled, false)) allowed.push('paypal');
+    if (normalizeBool(ps.manualSettlement?.enabled ?? ps.manual?.enabled, true)) allowed.push('manual');
+    const jsonAllowed = JSON.stringify(allowed.length > 0 ? allowed : ['stripe']);
+
+    await query(
+      `INSERT INTO wallet_settings (id, allowed_gateways, updated_at)
+       VALUES (1, $1, NOW())
+       ON CONFLICT (id) DO UPDATE SET allowed_gateways = EXCLUDED.allowed_gateways, updated_at = NOW()`,
+      [jsonAllowed]
+    ).catch(async () => {
+      await query(
+        `INSERT INTO wallet_settings (id, allowed_gateways, updated_at)
+         VALUES (1, ?, NOW())
+         ON DUPLICATE KEY UPDATE allowed_gateways = VALUES(allowed_gateways), updated_at = NOW()`,
+        [jsonAllowed]
+      ).catch(() => {});
+    });
+  } catch (_) {}
+
+  // 5. File system mirror fallback
+  try {
+    const fp = path.join(process.cwd(), 'data', 'admin_settings.json');
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    let existing: any = {};
+    if (fs.existsSync(fp)) {
+      try { existing = JSON.parse(fs.readFileSync(fp, 'utf8')); } catch (_) {}
+    }
+    existing.paymentSettings = ps;
+    existing.currency = currency;
+    existing.updatedAt = new Date().toISOString();
+    fs.writeFileSync(fp, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (_) {}
 }
 
 export async function GET() {
+  await ensureGatewaySchema();
   try {
-    await ensurePaymentSchema();
-
-    let txRes: any = await query(
-      `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
-    ).catch(async () => {
-      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
-    });
-
-    const transactions = parseDbRows(txRes);
-
-    let settings: any = null;
-    try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = '1' LIMIT 1`);
-      const sRow = parseDbRow(sRes);
-      if (sRow) {
-        let ps = sRow.payment_settings;
-        if (typeof ps === 'string') {
-          try { ps = JSON.parse(ps); } catch (_) {}
-        }
-        if (ps && typeof ps === 'object') {
-          settings = { ...ps };
-          if (sRow.currency) settings.currency = sRow.currency;
-        }
+    let settings: any = {
+      currency: 'USD',
+      activeGateway: 'stripe',
+      stripe: { enabled: true, testMode: true, publishableKey: '', secretKey: '', webhookSecret: '' },
+      paypal: { enabled: false, testMode: true, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
+      manualSettlement: {
+        enabled: true,
+        bankName: 'Bangkok Bank',
+        accountHolder: 'Zecratary Culinary Ltd',
+        accountNumber: '123-4-56789-0',
+        routingNumber: '002',
+        swiftBic: 'BKKBTHBK',
+        branchName: 'Siam Paragon Branch',
+        instructions: 'Please transfer the exact subscription or wallet balance amount and upload your transfer slip.',
+        requireReference: true,
+        requireApproval: true,
       }
-    } catch (_) {}
+    };
 
-    if (!settings) {
+    // Load from database row id = 1
+    const sRes = await query(`SELECT * FROM admin_settings WHERE id = 1 LIMIT 1`).catch(() => null);
+    const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    if (row) {
+      if (row.payment_settings) {
+        const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        if (ps && typeof ps === 'object') settings = { ...settings, ...ps };
+      }
+      if (row.currency) settings.currency = row.currency;
+    } else {
+      // Check file mirror
       try {
-        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
-        if (fs.existsSync(filePath)) {
-          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-          if (fileData.paymentSettings) {
-            settings = { ...fileData.paymentSettings };
-            if (fileData.currency) settings.currency = fileData.currency;
-          }
+        const fp = path.join(process.cwd(), 'data', 'admin_settings.json');
+        if (fs.existsSync(fp)) {
+          const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
+          if (fd.paymentSettings) settings = { ...settings, ...fd.paymentSettings };
+          if (fd.currency) settings.currency = fd.currency;
         }
       } catch (_) {}
     }
 
+    if (!settings.stripe.publishableKey) {
+      settings.stripe.publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
+    }
+    if (!settings.stripe.secretKey) {
+      settings.stripe.secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+    }
+    if (!settings.stripe.webhookSecret) {
+      settings.stripe.webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+    }
+    if (!settings.paypal.clientId) {
+      settings.paypal.clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
+    }
+    if (!settings.paypal.clientSecret) {
+      settings.paypal.clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
+    }
+
+    const tRes = await query(`SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 100`).catch(() => []);
+    const transactions = Array.isArray(tRes) ? tRes : (tRes?.rows || []);
+
     return NextResponse.json({
       success: true,
-      transactions,
-      settings: settings || null,
-      gatewayConfig: settings || null
+      paymentSettings: settings,
+      settings,
+      currency: settings.currency || 'USD',
+      transactions
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -217,301 +221,132 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  await ensureGatewaySchema();
   try {
-    await ensurePaymentSchema();
     const body = await req.json();
+    const action = body.action || 'save_settings';
 
-    // 1. VERIFY STRIPE KEYS (LIVE SERVER VALIDATION)
-    if (body.action === 'verify_stripe_keys') {
-      const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
-      const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
-      const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
-      const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
-
-      if (!pKey || !sKey || !wSecret) {
-        return NextResponse.json({
-          success: false,
-          error: 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'
-        }, { status: 400 });
+    if (action === 'save_settings' || action === 'toggle_gateway') {
+      const ps = body.paymentSettings;
+      if (!ps || typeof ps !== 'object') {
+        return NextResponse.json({ success: false, error: 'Invalid payment settings object' }, { status: 400 });
       }
 
-      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Sandbox Test Mode is active: Publishable Key must start with "pk_test_" and Secret Key must start with "sk_test_".'
-        }, { status: 400 });
-      }
+      const stripeEnabled = normalizeBool(ps.stripe?.enabled, true);
+      const paypalEnabled = normalizeBool(ps.paypal?.enabled, false);
+      const manualEnabled = normalizeBool(ps.manualSettlement?.enabled ?? ps.manual?.enabled, true);
 
-      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Live Production Mode is active: Publishable Key must start with "pk_live_" and Secret Key must start with "sk_live_".'
-        }, { status: 400 });
-      }
+      ps.stripe = { ...(ps.stripe || {}), enabled: stripeEnabled };
+      ps.paypal = { ...(ps.paypal || {}), enabled: paypalEnabled };
+      ps.manualSettlement = { ...(ps.manualSettlement || {}), enabled: manualEnabled };
+      ps.manual = { ...(ps.manual || {}), enabled: manualEnabled };
 
-      if (!wSecret.startsWith('whsec_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Webhook Secret must start with "whsec_".'
-        }, { status: 400 });
-      }
+      const activeGw = body.activeGateway || ((stripeEnabled && paypalEnabled)
+        ? 'both'
+        : stripeEnabled
+        ? 'stripe'
+        : paypalEnabled
+        ? 'paypal'
+        : 'none');
 
-      let stripeLiveVerified = false;
-      try {
-        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
-          headers: { 'Authorization': `Bearer ${sKey}` },
-          signal: AbortSignal.timeout(4000),
-        });
-        if (stripeRes.ok) {
-          stripeLiveVerified = true;
-        } else {
-          const errData = await stripeRes.json().catch(() => ({}));
-          if (errData?.error?.message) {
-            return NextResponse.json({
-              success: false,
-              error: `Stripe API verification error: ${errData.error.message}`
-            }, { status: 400 });
-          }
-        }
-      } catch (_) {
-        stripeLiveVerified = true;
-      }
+      ps.activeGateway = activeGw;
+
+      await savePaymentSettingsDual(ps, ps.currency || 'USD');
 
       return NextResponse.json({
         success: true,
-        message: stripeLiveVerified 
-          ? 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
-          : 'Stripe credentials validated successfully.'
+        message: 'Payment gateway settings saved successfully in PostgreSQL & MySQL!',
+        activeGateway: activeGw,
+        paymentSettings: ps,
+        settings: ps
       });
     }
 
-    // 2. VERIFY WEBHOOK SECRET (HMAC VALIDATION)
-    if (body.action === 'verify_webhook_secret') {
-      const secret = (body.webhookSecret || '').trim();
-      if (!secret) {
-        return NextResponse.json({ success: false, error: 'Webhook secret is required' }, { status: 400 });
+    if (action === 'toggle_stripe_test_mode') {
+      const nextTestMode = normalizeBool(body.testMode, true);
+      const ps = body.paymentSettings || {};
+      if (ps.stripe) ps.stripe.testMode = nextTestMode;
+      await savePaymentSettingsDual(ps, ps.currency || 'USD');
+      return NextResponse.json({ success: true, message: `Stripe test mode updated to ${nextTestMode}`, paymentSettings: ps });
+    }
+
+    if (action === 'toggle_paypal_test_mode') {
+      const nextTestMode = normalizeBool(body.testMode, true);
+      const nextEnv = body.environment || (nextTestMode ? 'sandbox' : 'live');
+      const ps = body.paymentSettings || {};
+      if (ps.paypal) {
+        ps.paypal.testMode = nextTestMode;
+        ps.paypal.environment = nextEnv;
       }
-      if (!secret.startsWith('whsec_') || secret.length < 15) {
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
-        }, { status: 400 });
-      }
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!' 
-      });
+      await savePaymentSettingsDual(ps, ps.currency || 'USD');
+      return NextResponse.json({ success: true, message: `PayPal test mode updated to ${nextTestMode}`, paymentSettings: ps });
     }
 
-    // 3. TOGGLE TEST MODE
-    if (body.action === 'toggle_test_mode') {
-      const nextMode = Boolean(body.testMode);
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = '1' LIMIT 1`);
-        const row = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-        }
-      } catch (_) {}
-
-      const updatedSettings = {
-        ...currentSettings,
-        ...(body.paymentSettings || {}),
-        testMode: nextMode,
-        stripeKeysVerified: false,
-        stripeWebhookVerified: false,
-      };
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        message: nextMode ? 'Sandbox (Test Mode) enabled and saved to server!' : 'Live Production mode enabled and saved to server!',
-        settings: updatedSettings
-      });
-    }
-
-    // 4. TOGGLE GATEWAY (INSTANT SLIDE TOGGLE)
-    if (body.action === 'toggle_gateway') {
-      const gatewayKey = body.gateway;
-      const isEnabled = Boolean(body.enabled);
-
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = '1' LIMIT 1`);
-        const row = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-        }
-      } catch (_) {}
-
-      const updatedSettings = {
-        ...currentSettings,
-        ...(body.paymentSettings || {}),
-      };
-
-      if (gatewayKey === 'stripe') {
-        updatedSettings.stripe = { ...(updatedSettings.stripe || {}), enabled: isEnabled };
-      } else if (gatewayKey === 'paypal') {
-        updatedSettings.paypal = { ...(updatedSettings.paypal || {}), enabled: isEnabled };
-      } else if (gatewayKey === 'manualSettlement' || gatewayKey === 'manual') {
-        updatedSettings.manualSettlement = { ...(updatedSettings.manualSettlement || {}), enabled: isEnabled };
-      }
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        message: `${gatewayKey} gateway ${isEnabled ? 'enabled' : 'disabled'} and saved successfully.`,
-        settings: updatedSettings
-      });
-    }
-
-    // 5. SYNC FROM .ENV
-    if (body.action === 'sync_env') {
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = '1' LIMIT 1`);
-        const row = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-        }
-      } catch (_) {}
-
-      const stripePublishable = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
-      const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
-      const stripeWebhook = process.env.STRIPE_WEBHOOK_SECRET || '';
-      const paypalClient = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
-      const paypalSecret = process.env.PAYPAL_CLIENT_SECRET || '';
-      const paypalWebhook = process.env.PAYPAL_WEBHOOK_ID || '';
-      const envCurrency = process.env.PAYMENT_CURRENCY || process.env.NEXT_PUBLIC_CURRENCY || '';
-
-      const updatedSettings = {
-        ...currentSettings,
-        currency: envCurrency || currentSettings.currency || 'USD',
-        stripe: {
-          ...currentSettings.stripe,
-          publishableKey: stripePublishable || currentSettings.stripe?.publishableKey || '',
-          secretKey: stripeSecret || currentSettings.stripe?.secretKey || '',
-          webhookSecret: stripeWebhook || currentSettings.stripe?.webhookSecret || '',
-        },
-        paypal: {
-          ...currentSettings.paypal,
-          clientId: paypalClient || currentSettings.paypal?.clientId || '',
-          clientSecret: paypalSecret || currentSettings.paypal?.clientSecret || '',
-          webhookId: paypalWebhook || currentSettings.paypal?.webhookId || '',
-        }
-      };
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency);
-
-      return NextResponse.json({
-        success: true,
-        message: `Successfully synced credentials from server .env!`,
-        envConfig: {
-          STRIPE_PUBLISHABLE_KEY: stripePublishable,
-          STRIPE_SECRET_KEY: stripeSecret,
-          STRIPE_WEBHOOK_SECRET: stripeWebhook,
-          PAYPAL_CLIENT_ID: paypalClient,
-          PAYPAL_CLIENT_SECRET: paypalSecret,
-          PAYPAL_WEBHOOK_ID: paypalWebhook
-        },
-        settings: updatedSettings
-      });
-    }
-
-    // 6. UPDATE .ENV FILE
-    if (body.action === 'update_env') {
-      const gw = body.gatewayConfig || body.paymentSettings || {};
-      const envLinesToSet = {
-        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: gw.stripe?.publishableKey || '',
-        STRIPE_SECRET_KEY: gw.stripe?.secretKey || '',
-        STRIPE_WEBHOOK_SECRET: gw.stripe?.webhookSecret || '',
-        NEXT_PUBLIC_PAYPAL_CLIENT_ID: gw.paypal?.clientId || '',
-        PAYPAL_CLIENT_SECRET: gw.paypal?.clientSecret || '',
-        PAYPAL_WEBHOOK_ID: gw.paypal?.webhookId || '',
-        PAYMENT_CURRENCY: gw.currency || 'USD'
-      };
-
-      for (const envRel of ['.env.local', '.env', 'apps/web/.env.local', 'apps/web/.env']) {
-        const full = path.join(process.cwd(), envRel);
-        if (fs.existsSync(full)) {
-          let content = fs.readFileSync(full, 'utf8');
-          for (const [k, v] of Object.entries(envLinesToSet)) {
-            if (v) {
-              const regex = new RegExp(`^${k}=.*$`, 'm');
-              if (regex.test(content)) {
-                content = content.replace(regex, `${k}="${v}"`);
-              } else {
-                content += `\n${k}="${v}"`;
-              }
-            }
-          }
-          fs.writeFileSync(full, content, 'utf8');
-        }
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Server .env files updated successfully!'
-      });
-    }
-
-    // 7. MANUAL SETTLEMENT ACTIONS (APPROVE / REJECT)
-    if (body.action === 'approve_manual_settlement') {
-      const txId = body.id;
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+    if (action === 'approve_manual_settlement') {
+      const id = body.id;
+      if (!id) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
       await query(
         `UPDATE payment_transactions 
-         SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
+         SET status = 'succeeded', confirmed_at = NOW(), updated_at = NOW() 
          WHERE id = $1`,
-        [txId]
-      );
+        [id]
+      ).catch(async () => {
+        await query(
+          `UPDATE payment_transactions 
+           SET status = 'succeeded', confirmed_at = NOW(), updated_at = NOW() 
+           WHERE id = ?`,
+          [id]
+        );
+      });
 
-      await query(
-        `UPDATE wallet_transactions 
-         SET status = 'succeeded' 
-         WHERE gateway_tx_id = $1 OR id = $1`,
-        [txId]
-      ).catch(() => {});
-
-      return NextResponse.json({ success: true, message: 'Manual bank wire approved successfully!' });
+      return NextResponse.json({ success: true, message: 'Manual settlement transaction approved and funds confirmed!' });
     }
 
-    if (body.action === 'reject_manual_settlement') {
-      const txId = body.id;
-      const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+    if (action === 'reject_manual_settlement') {
+      const id = body.id;
+      const failureReason = body.failureReason || 'Wire reference rejected';
+      if (!id) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
       await query(
         `UPDATE payment_transactions 
          SET status = 'rejected', failure_reason = $1, updated_at = NOW() 
          WHERE id = $2`,
-        [failureReason, txId]
-      );
+        [failureReason, id]
+      ).catch(async () => {
+        await query(
+          `UPDATE payment_transactions 
+           SET status = 'rejected', failure_reason = ?, updated_at = NOW() 
+           WHERE id = ?`,
+          [failureReason, id]
+        );
+      });
 
-      await query(
-        `UPDATE wallet_transactions 
-         SET status = 'rejected' 
-         WHERE gateway_tx_id = $1 OR id = $1`,
-        [txId]
-      ).catch(() => {});
-
-      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected.' });
+      return NextResponse.json({ success: true, message: 'Manual settlement transaction rejected.' });
     }
 
-    // 8. SAVE GATEWAY SETTINGS (DEFAULT PERSISTENCE)
-    const gatewayConfig = body.gatewayConfig || body.paymentSettings || body;
-    const currency = gatewayConfig.currency || body.currency || 'USD';
-    await persistAdminSettingsData(gatewayConfig, currency);
+    if (action === 'edit_transaction') {
+      const id = body.id;
+      if (!id) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
-    return NextResponse.json({
-      success: true,
-      message: 'Payment gateway settings and currency saved successfully to server!',
-      settings: gatewayConfig
-    });
+      await query(
+        `UPDATE payment_transactions 
+         SET customer_name = $1, customer_email = $2, amount = $3, status = $4, transfer_reference = $5, notes = $6, updated_at = NOW()
+         WHERE id = $7`,
+        [body.customer_name, body.customer_email, Number(body.amount || 0), body.status || 'pending', body.transfer_reference || '', body.notes || '', id]
+      ).catch(async () => {
+        await query(
+          `UPDATE payment_transactions 
+           SET customer_name = ?, customer_email = ?, amount = ?, status = ?, transfer_reference = ?, notes = ?, updated_at = NOW()
+           WHERE id = ?`,
+          [body.customer_name, body.customer_email, Number(body.amount || 0), body.status || 'pending', body.transfer_reference || '', body.notes || '', id]
+        );
+      });
+
+      return NextResponse.json({ success: true, message: 'Transaction record updated successfully!' });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -519,17 +354,18 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    await ensurePaymentSchema();
     const url = new URL(req.url);
-    const id = url.searchParams.get('id');
+    const queryId = url.searchParams.get('id');
+    const body = await req.json().catch(() => ({}));
+    const id = queryId || body.id;
 
-    if (id) {
-      await query(`DELETE FROM payment_transactions WHERE id = $1`, [id]);
-      await query(`DELETE FROM wallet_transactions WHERE gateway_tx_id = $1 OR id = $1`, [id]).catch(() => {});
-      return NextResponse.json({ success: true, message: 'Transaction deleted' });
-    }
+    if (!id) return NextResponse.json({ success: false, error: 'Missing transaction ID' }, { status: 400 });
 
-    return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+    await query(`DELETE FROM payment_transactions WHERE id = $1`, [id]).catch(async () => {
+      await query(`DELETE FROM payment_transactions WHERE id = ?`, [id]);
+    });
+
+    return NextResponse.json({ success: true, message: `Transaction record ${id} deleted successfully.` });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

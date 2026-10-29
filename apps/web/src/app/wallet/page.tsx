@@ -72,7 +72,7 @@ function WalletContent() {
   const [user, setUser] = useState<User | null>(null);
   const [balance, setBalance] = useState<number>(0);
 
-  // Settings: allowed_gateways starts strictly empty so disabled gateways never render
+  // Settings: allowed_gateways strictly initializes empty so disabled gateways never render prematurely
   const [settings, setSettings] = useState<WalletSettings>({
     is_enabled: true,
     currency: 'USD',
@@ -188,14 +188,42 @@ function WalletContent() {
           
           syncLocalBalanceQuietly(wBal);
 
-          // Authoritative allowed gateways array dynamically resolved from /admin/payment-gateway
-          const loadedAllowed: string[] = Array.isArray(data.settings?.allowed_gateways)
+          // 1. Authoritative allowed gateways array dynamically resolved from /admin/payment-gateway
+          const rawLoaded: any[] = Array.isArray(data.settings?.allowed_gateways)
             ? data.settings.allowed_gateways
             : Array.isArray(data.allowed_gateways)
             ? data.allowed_gateways
             : Array.isArray(data.allowedGateways)
             ? data.allowedGateways
             : [];
+
+          // 2. Comprehensive Identifier Normalization (manualSettlement, manual_settlement, bank_wire -> manual)
+          const loadedAllowed: string[] = [];
+          for (const item of rawLoaded) {
+            const lower = String(item).toLowerCase().trim();
+            if (lower === 'manualsettlement' || lower === 'manual_settlement' || lower === 'bank_wire' || lower === 'wire' || lower === 'manual') {
+              if (!loadedAllowed.includes('manual')) loadedAllowed.push('manual');
+            } else if (lower === 'stripe') {
+              if (!loadedAllowed.includes('stripe')) loadedAllowed.push('stripe');
+            } else if (lower === 'paypal') {
+              if (!loadedAllowed.includes('paypal')) loadedAllowed.push('paypal');
+            }
+          }
+
+          // 3. Reconcile Bank Wire status from explicit manual_details or manualSettlement
+          const isManualActive = Boolean(
+            data.settings?.manual_details?.enabled ?? 
+            data.gatewaySettings?.manualSettlement?.enabled ?? 
+            data.manualEnabled
+          );
+          if (isManualActive && !loadedAllowed.includes('manual')) {
+            loadedAllowed.push('manual');
+          } else if (isManualActive === false && loadedAllowed.includes('manual')) {
+            const idx = loadedAllowed.indexOf('manual');
+            if (idx > -1) loadedAllowed.splice(idx, 1);
+          }
+
+          const resolvedManualDetails = data.settings?.manual_details || data.gatewaySettings?.manualSettlement || {};
 
           if (data.settings) {
             setSettings({
@@ -213,14 +241,14 @@ function WalletContent() {
               active_gateway: data.settings.active_gateway || (loadedAllowed[0] || null),
               stripe_configured: Boolean(data.settings.stripe_configured),
               paypal_configured: Boolean(data.settings.paypal_configured),
-              manual_details: data.settings.manual_details || data.gatewaySettings?.manualSettlement || {}
+              manual_details: resolvedManualDetails
             });
           } else {
             setSettings((prev) => ({
               ...prev,
               currency: data.currency || prev.currency,
               allowed_gateways: loadedAllowed,
-              manual_details: data.gatewaySettings?.manualSettlement || prev.manual_details
+              manual_details: resolvedManualDetails || prev.manual_details
             }));
           }
 
@@ -703,7 +731,7 @@ function WalletContent() {
             </div>
           </div>
 
-          {/* Payment Gateway Options - Dynamically Excludes Any Disabled Gateway */}
+          {/* Payment Gateway Options - Dynamically Excludes Disabled, Displays Active Channels */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold opacity-80">{t('paymentGateway', 'Payment Gateway')}</label>
@@ -715,7 +743,6 @@ function WalletContent() {
             </div>
 
             {!gatewaysLoaded ? (
-              /* Skeleton Loader to prevent disabled gateways from flashing */
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <div className="p-3.5 rounded-xl border animate-pulse opacity-40 h-12" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }} />
                 <div className="p-3.5 rounded-xl border animate-pulse opacity-40 h-12" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }} />
@@ -775,7 +802,7 @@ function WalletContent() {
                   >
                     <span className="flex items-center gap-2">
                       <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                      <span>{t('manualGateway', 'Manual Settlement')}</span>
+                      <span>{t('manualGateway', 'Bank Wire / Manual Settlement')}</span>
                     </span>
                     {selectedGateway === 'manual' && <Check className="h-4 w-4 text-[var(--color-primary)]" />}
                   </button>
@@ -784,7 +811,7 @@ function WalletContent() {
             )}
           </div>
 
-          {/* Bank Wire Details (Only Rendered if Manual Settlement is Enabled & Selected) */}
+          {/* Bank Wire Details (Rendered if Bank Wire / Manual Settlement is Enabled & Selected) */}
           {selectedGateway === 'manual' && settings.allowed_gateways.includes('manual') && (
             <div 
               className="p-3.5 rounded-xl border text-xs space-y-2 transition animate-in fade-in"
