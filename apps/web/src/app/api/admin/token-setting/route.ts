@@ -170,6 +170,8 @@ export async function GET() {
     success: true,
     tokenSettings: finalConfig,
     settings: finalConfig,
+    tokenSymbol: finalConfig.tokenSymbol,
+    tokenName: finalConfig.tokenName,
     currency,
     currencySymbol,
     plans,

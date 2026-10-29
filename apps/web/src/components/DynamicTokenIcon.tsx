@@ -25,7 +25,7 @@ export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: Dy
       if (stored) setActiveSymbol(stored);
 
       const handleSettingsUpdate = (e: any) => {
-        const sym = e?.detail?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
+        const sym = e?.detail?.tokenSymbol || e?.detail?.settings?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
         if (sym) setActiveSymbol(sym);
       };
 
@@ -39,14 +39,18 @@ export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: Dy
     }
   }, [symbol]);
 
-  // If icon is a URL (HTTP, HTTPS, or root path)
-  if (icon && (icon.startsWith('http') || icon.startsWith('/'))) {
+  // If icon or activeSymbol is a remote or local image URL
+  const targetImage = (icon && (icon.startsWith('http') || icon.startsWith('/'))) 
+    ? icon 
+    : (activeSymbol && (activeSymbol.startsWith('http') || activeSymbol.startsWith('/')) ? activeSymbol : null);
+
+  if (targetImage) {
     return (
       <img 
-        src={icon} 
+        src={targetImage} 
         alt="Token" 
         style={{ width: `${size}px`, height: `${size}px` }} 
-        className={`inline-block object-contain ${className}`} 
+        className={`inline-block object-contain shrink-0 ${className}`} 
       />
     );
   }
@@ -56,7 +60,7 @@ export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: Dy
     return (
       <span 
         style={{ fontSize: `${size}px`, lineHeight: 1 }} 
-        className={`inline-flex items-center justify-center select-none ${className}`}
+        className={`inline-flex items-center justify-center select-none shrink-0 ${className}`}
       >
         {activeSymbol}
       </span>
@@ -64,7 +68,7 @@ export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: Dy
   }
 
   // Fallback to themed Coins icon
-  return <Coins style={{ width: `${size}px`, height: `${size}px` }} className={className} />;
+  return <Coins style={{ width: `${size}px`, height: `${size}px` }} className={`shrink-0 ${className}`} />;
 }
 
 export default DynamicTokenIcon;
