@@ -7,7 +7,7 @@ import {
   CreditCard, Sparkles, Plus, Trash2, Edit3, Check, RefreshCw, 
   RotateCcw, CheckCircle2, AlertCircle, Shield, Zap, Flame, 
   Lock, Eye, Cpu, Database, Search, DollarSign,
-  Users, TrendingUp, X, ExternalLink, Layers
+  Users, TrendingUp, X, ExternalLink, Layers, Radio
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { DynamicTokenIcon } from '@/components/DynamicTokenIcon';
@@ -46,13 +46,37 @@ export interface PaymentTransaction {
   createdAt: string;
 }
 
-const AVAILABLE_AI_MODELS = [
+export interface AiModelItem {
+  id: string;
+  name: string;
+  isSystemActive?: boolean;
+}
+
+const DEFAULT_AVAILABLE_AI_MODELS: AiModelItem[] = [
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
   { id: 'gpt-4o', name: 'GPT-4o' },
   { id: 'claude-3-7-sonnet', name: 'Claude 3.7 Sonnet' },
   { id: 'deepseek-r1', name: 'DeepSeek R1' }
 ];
+
+function formatModelDisplayName(modelId: string): string {
+  if (!modelId) return '';
+  if (modelId === 'gemini-2.5-flash') return 'Gemini 2.5 Flash';
+  if (modelId === 'gemini-2.5-pro') return 'Gemini 2.5 Pro';
+  if (modelId === 'gemini-2.0-flash') return 'Gemini 2.0 Flash';
+  if (modelId === 'gemini-1.5-flash') return 'Gemini 1.5 Flash';
+  if (modelId === 'gemini-1.5-pro') return 'Gemini 1.5 Pro';
+  if (modelId === 'gpt-4o') return 'GPT-4o';
+  if (modelId === 'gpt-4o-mini') return 'GPT-4o Mini';
+  if (modelId === 'claude-3-7-sonnet') return 'Claude 3.7 Sonnet';
+  if (modelId === 'deepseek-r1') return 'DeepSeek R1';
+  return modelId
+    .split('-')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
 const DEFAULT_PRESET_TASTER: PlanConfig = {
   id: 'preset_taster',
@@ -156,6 +180,11 @@ export default function AdminPlansPage() {
   const [tokenSymbol, setTokenSymbol] = useState('🪙');
   const [tokenName, setTokenName] = useState('Tokens');
 
+  // Dynamic AI Models (Synced with /admin/ai-settings - Model Version Identifier)
+  const [availableAiModels, setAvailableAiModels] = useState<AiModelItem[]>(DEFAULT_AVAILABLE_AI_MODELS);
+  const [activeModelVersionIdentifier, setActiveModelVersionIdentifier] = useState<string>('gemini-2.5-flash');
+  const [syncingAiModels, setSyncingAiModels] = useState<boolean>(false);
+
   // Plan Form State (for Add or Edit)
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('Culinary Pro');
@@ -240,7 +269,6 @@ export default function AdminPlansPage() {
 
   // Fetch token settings from /api/admin/token-setting with comprehensive payload fallback
   const fetchTokenSetting = useCallback(async () => {
-    // 1. Instant hydration from localStorage to prevent flash
     if (typeof window !== 'undefined') {
       const cachedSym = localStorage.getItem('zecratary_token_symbol');
       const cachedName = localStorage.getItem('zecratary_token_name');
@@ -249,7 +277,6 @@ export default function AdminPlansPage() {
     }
 
     try {
-      // 2. Query /api/admin/token-setting
       const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
@@ -268,7 +295,6 @@ export default function AdminPlansPage() {
         return;
       }
 
-      // 3. Fallback to /api/tokens
       const altRes = await fetch('/api/tokens?t=' + Date.now(), { cache: 'no-store' });
       if (altRes.ok) {
         const altData = await altRes.json();
@@ -279,6 +305,83 @@ export default function AdminPlansPage() {
       }
     } catch (_) {}
   }, []);
+
+  // Fetch AI Settings to dynamically sync Model Version Identifier & Available Models from /admin/ai-settings
+  const fetchAiSettings = useCallback(async () => {
+    setSyncingAiModels(true);
+    if (typeof window !== 'undefined') {
+      const cachedActiveModel = localStorage.getItem('zecratary_active_model') || localStorage.getItem('zecratary_ai_model');
+      if (cachedActiveModel) setActiveModelVersionIdentifier(cachedActiveModel);
+    }
+
+    try {
+      const res = await fetch('/api/admin/settings?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const chefSettings = data.chefAiSettings || data.settings || {};
+        const activeModel = chefSettings.model || data.ai_model || 'gemini-2.5-flash';
+
+        if (activeModel) {
+          setActiveModelVersionIdentifier(activeModel);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_active_model', activeModel);
+            localStorage.setItem('zecratary_ai_model', activeModel);
+          }
+        }
+
+        const geminiModels = Array.isArray(chefSettings.availableGeminiModels) ? chefSettings.availableGeminiModels : [];
+        const openAiModels = Array.isArray(chefSettings.availableOpenAiModels) ? chefSettings.availableOpenAiModels : [];
+        const dynamicList = [...geminiModels, ...openAiModels];
+
+        setAvailableAiModels(prev => {
+          const modelMap = new Map<string, AiModelItem>();
+          DEFAULT_AVAILABLE_AI_MODELS.forEach(m => modelMap.set(m.id, { ...m }));
+
+          dynamicList.forEach((dm: any) => {
+            const id = dm.id || dm.modelId || dm.name;
+            const displayName = dm.displayName || dm.name || formatModelDisplayName(id);
+            if (id) {
+              modelMap.set(id, { id, name: displayName });
+            }
+          });
+
+          if (activeModel && !modelMap.has(activeModel)) {
+            modelMap.set(activeModel, { id: activeModel, name: formatModelDisplayName(activeModel) });
+          }
+
+          return Array.from(modelMap.values()).map(m => ({
+            ...m,
+            isSystemActive: m.id === activeModel
+          }));
+        });
+      }
+    } catch (_) {}
+
+    try {
+      const altRes = await fetch('/api/admin/models?t=' + Date.now(), { cache: 'no-store' });
+      if (altRes.ok) {
+        const altData = await altRes.json();
+        const list = altData.models || altData.availableModels || [];
+        if (Array.isArray(list) && list.length > 0) {
+          setAvailableAiModels(prev => {
+            const map = new Map<string, AiModelItem>();
+            prev.forEach(m => map.set(m.id, m));
+            list.forEach((m: any) => {
+              const id = m.id || m.name;
+              const name = m.displayName || m.name || formatModelDisplayName(id);
+              if (id) map.set(id, { id, name });
+            });
+            return Array.from(map.values()).map(m => ({
+              ...m,
+              isSystemActive: m.id === activeModelVersionIdentifier
+            }));
+          });
+        }
+      }
+    } catch (_) {} finally {
+      setSyncingAiModels(false);
+    }
+  }, [activeModelVersionIdentifier]);
 
   // Fetch system currency from /api/system-settings
   const fetchSystemSettings = useCallback(async () => {
@@ -337,11 +440,13 @@ export default function AdminPlansPage() {
     document.title = tr('adminPlansDocTitle', 'Subscription Plans - Admin Console');
     fetchTokenSetting();
     fetchSystemSettings();
+    fetchAiSettings();
     loadPlans();
 
     const handleSync = () => {
       fetchTokenSetting();
       fetchSystemSettings();
+      fetchAiSettings();
       loadPlans();
     };
 
@@ -354,22 +459,48 @@ export default function AdminPlansPage() {
       fetchTokenSetting();
     };
 
-    // BroadcastChannel for cross-tab instant synchronization
-    let bc: BroadcastChannel | null = null;
+    // Dedicated AI Settings / Model Version Identifier real-time listener
+    const handleAiModelUpdate = (e: any) => {
+      const newModel = e?.detail?.model || e?.detail?.chefAiSettings?.model || localStorage.getItem('zecratary_active_model');
+      if (newModel) {
+        setActiveModelVersionIdentifier(newModel);
+      }
+      fetchAiSettings();
+    };
+
+    // Cross-tab BroadcastChannels
+    let balanceBc: BroadcastChannel | null = null;
+    let aiBc: BroadcastChannel | null = null;
     try {
-      bc = new BroadcastChannel('zecratary_balance_channel');
-      bc.onmessage = (event) => {
+      balanceBc = new BroadcastChannel('zecratary_balance_channel');
+      balanceBc.onmessage = (event) => {
         if (event?.data?.type === 'TOKEN_SETTINGS_UPDATED') {
           if (event.data.tokenSymbol) setTokenSymbol(event.data.tokenSymbol);
           if (event.data.settings?.tokenName) setTokenName(event.data.settings.tokenName);
           fetchTokenSetting();
         }
       };
+
+      aiBc = new BroadcastChannel('zecratary_ai_settings_sync');
+      aiBc.onmessage = (event) => {
+        if (event?.data?.type === 'AI_SETTINGS_UPDATED' || event?.data?.model) {
+          if (event.data.model) setActiveModelVersionIdentifier(event.data.model);
+          fetchAiSettings();
+        }
+      };
     } catch (_) {}
 
     window.addEventListener('zecratary_token_settings_updated', handleTokenUpdate);
     window.addEventListener('zecratary_tokens_updated', handleTokenUpdate);
-    window.addEventListener('zecratary_admin_settings_updated', handleTokenUpdate);
+    window.addEventListener('zecratary_admin_settings_updated', (e) => {
+      handleTokenUpdate(e);
+      handleAiModelUpdate(e);
+    });
+    window.addEventListener('zecratary_chef_ai_settings_updated', handleAiModelUpdate);
+    window.addEventListener('zecratary_ai_settings_updated', handleAiModelUpdate);
+    window.addEventListener('zecratary_engine_config_updated', handleAiModelUpdate);
+    window.addEventListener('zecratary_settings_updated', handleAiModelUpdate);
+
     window.addEventListener('zecratary_plans_updated', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
@@ -377,26 +508,30 @@ export default function AdminPlansPage() {
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_theme_updated', handleSync);
     window.addEventListener('storage', (e) => {
-      if (!e.key || e.key.includes('token') || e.key.includes('plan')) {
+      if (!e.key || e.key.includes('token') || e.key.includes('plan') || e.key.includes('model') || e.key.includes('ai')) {
         handleTokenUpdate(e);
+        handleAiModelUpdate(e);
       }
     });
 
     return () => {
       window.removeEventListener('zecratary_token_settings_updated', handleTokenUpdate);
       window.removeEventListener('zecratary_tokens_updated', handleTokenUpdate);
-      window.removeEventListener('zecratary_admin_settings_updated', handleTokenUpdate);
+      window.removeEventListener('zecratary_admin_settings_updated', handleAiModelUpdate);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', handleAiModelUpdate);
+      window.removeEventListener('zecratary_ai_settings_updated', handleAiModelUpdate);
+      window.removeEventListener('zecratary_engine_config_updated', handleAiModelUpdate);
+      window.removeEventListener('zecratary_settings_updated', handleAiModelUpdate);
       window.removeEventListener('zecratary_plans_updated', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
       window.removeEventListener('zecratary_theme_updated', handleSync);
-      if (bc) {
-        bc.close();
-      }
+      if (balanceBc) balanceBc.close();
+      if (aiBc) aiBc.close();
     };
-  }, [fetchTokenSetting, fetchSystemSettings, loadPlans, tr]);
+  }, [fetchTokenSetting, fetchSystemSettings, fetchAiSettings, loadPlans, tr]);
 
   // Load preset plan directly into editor
   const applyPreset = (preset: PlanConfig) => {
@@ -463,7 +598,7 @@ export default function AdminPlansPage() {
     setIsFree(false);
   };
 
-  // Toggle model selection
+  // Toggle model selection (Ensuring at least 1 model remains selected)
   const handleToggleModel = (modelId: string) => {
     if (allowedModels.includes(modelId)) {
       if (allowedModels.length > 1) {
@@ -536,7 +671,6 @@ export default function AdminPlansPage() {
       setPlans(nextPlans);
       setEditingId(null);
 
-      // Broadcast update across /subscriptions, /profile, /admin/payment
       window.dispatchEvent(new Event('zecratary_plans_updated'));
       localStorage.setItem('zecratary_plans_updated_at', Date.now().toString());
 
@@ -760,7 +894,6 @@ export default function AdminPlansPage() {
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-2 rounded-2xl border shadow-sm transition-colors duration-200"
         style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
       >
-        {/* Navigation Tabs (Subscription Plans vs Plan Transactions Ledger) */}
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -817,7 +950,6 @@ export default function AdminPlansPage() {
           </button>
         </div>
 
-        {/* View-Specific Contextual Action Button */}
         <div className="flex items-center gap-2">
           {activeTab === 'plans' ? (
             <button
@@ -988,30 +1120,53 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              {/* Pricing Controls */}
+              {/* Pricing Controls with Slide-Toggle for Free Tier */}
               <div className="p-4 rounded-2xl border space-y-3" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
                     {tr('adminPlansBillingPricingHeading', 'Billing & Pricing ({currency})').replace('{currency}', currencyCode)}
                   </span>
 
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
-                    <input
-                      type="checkbox"
-                      checked={isFree}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setIsFree(checked);
-                        if (checked) {
+                  {/* Task 1: Slide-Toggle for Free Tier */}
+                  <div
+                    onClick={() => {
+                      const nextVal = !isFree;
+                      setIsFree(nextVal);
+                      if (nextVal) {
+                        setMonthlyPriceDollars(0);
+                        setAnnualPriceDollars(0);
+                        setCanViewMacros(false);
+                      }
+                    }}
+                    role="switch"
+                    aria-checked={isFree}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === ' ' || e.key === 'Enter') {
+                        e.preventDefault();
+                        const nextVal = !isFree;
+                        setIsFree(nextVal);
+                        if (nextVal) {
                           setMonthlyPriceDollars(0);
                           setAnnualPriceDollars(0);
                           setCanViewMacros(false);
                         }
+                      }
+                    }}
+                    className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold"
+                  >
+                    <div 
+                      className="w-10 h-5 rounded-full transition-colors relative"
+                      style={{
+                        backgroundColor: isFree ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
                       }}
-                      className="rounded border"
-                    />
+                    >
+                      <div 
+                        className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${isFree ? 'right-0.5' : 'left-0.5'}`}
+                      />
+                    </div>
                     <span>{tr('adminPlansLabelFreeTier', 'Mark as Free Tier (Taster)')}</span>
-                  </label>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1163,50 +1318,135 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              {/* Model Permissions & Macronutrients Tracking */}
-              <div className="space-y-3 pt-1">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                    {tr('adminPlansLabelAllowedModels', 'Allowed AI Chef Models')}
-                  </label>
+              {/* Task 1 & 2: Dynamic AI Models Sync & Slide-Toggles for Models & Macros */}
+              <div className="space-y-3.5 pt-1">
+                {/* Header row with Model Sync Telemetry & Macro Slide-Toggle */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
+                  <div>
+                    <label className="block text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                      {tr('adminPlansLabelAllowedModels', 'Allowed AI Chef Models')}
+                    </label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border text-[10px] font-mono font-semibold" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <span>{tr('adminPlansAiSyncLabel', 'Synced with /admin/ai-settings')}:</span>
+                        <span className="font-bold text-emerald-400">{activeModelVersionIdentifier}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={fetchAiSettings}
+                        disabled={syncingAiModels}
+                        title="Re-sync Model Version Identifier from /admin/ai-settings"
+                        className="p-1 rounded-lg border text-[10px] hover:opacity-80 transition cursor-pointer"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                      >
+                        <RefreshCw className={`h-3 w-3 ${syncingAiModels ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
 
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
-                    <input
-                      type="checkbox"
-                      checked={canViewMacros}
-                      disabled={isFree}
-                      onChange={(e) => setCanViewMacros(e.target.checked)}
-                      className="rounded border"
-                    />
-                    <span className={isFree ? 'opacity-40' : ''}>
-                      {tr('adminPlansLabelMacros', 'Enable Macronutrient Tracking (can_view_macros)')}
-                    </span>
-                  </label>
+                  {/* Task 1: Slide-Toggle for Macronutrient Tracking */}
+                  <div
+                    onClick={() => {
+                      if (!isFree) setCanViewMacros(!canViewMacros);
+                    }}
+                    role="switch"
+                    aria-checked={canViewMacros && !isFree}
+                    tabIndex={isFree ? -1 : 0}
+                    onKeyDown={(e) => {
+                      if (!isFree && (e.key === ' ' || e.key === 'Enter')) {
+                        e.preventDefault();
+                        setCanViewMacros(!canViewMacros);
+                      }
+                    }}
+                    className={`flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold ${isFree ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  >
+                    <div 
+                      className="w-10 h-5 rounded-full transition-colors relative shrink-0"
+                      style={{
+                        backgroundColor: canViewMacros && !isFree ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
+                      }}
+                    >
+                      <div 
+                        className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${canViewMacros && !isFree ? 'right-0.5' : 'left-0.5'}`} 
+                      />
+                    </div>
+                    <span>{tr('adminPlansLabelMacros', 'Enable Macronutrient Tracking (can_view_macros)')}</span>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {AVAILABLE_AI_MODELS.map(model => {
+                {/* Task 1 & 2: Dynamic Model Grid with Slide-Toggle Switches */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {availableAiModels.map(model => {
                     const isSelected = allowedModels.includes(model.id);
+                    const isSystemActive = model.id === activeModelVersionIdentifier;
+
                     return (
-                      <button
+                      <div
                         key={model.id}
-                        type="button"
                         onClick={() => handleToggleModel(model.id)}
-                        className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                        role="switch"
+                        aria-checked={isSelected}
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            handleToggleModel(model.id);
+                          }
+                        }}
+                        className="px-3.5 py-2.5 rounded-2xl border text-xs font-bold flex items-center justify-between gap-3 transition cursor-pointer select-none shadow-xs hover:opacity-95"
                         style={isSelected ? {
-                          backgroundColor: 'var(--color-primary)',
+                          backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-primary)',
-                          color: '#ffffff'
+                          color: 'var(--color-text)'
                         } : {
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-secondary)'
+                          color: 'var(--color-text-secondary)',
+                          opacity: 0.75
                         }}
                       >
-                        <Cpu className="h-3.5 w-3.5" />
-                        <span>{model.name}</span>
-                        {isSelected && <Check className="h-3.5 w-3.5" />}
-                      </button>
+                        <div className="flex items-center gap-2.5 truncate">
+                          <Cpu 
+                            className="h-4 w-4 shrink-0 transition-colors" 
+                            style={{ color: isSelected ? 'var(--color-primary)' : 'inherit' }} 
+                          />
+                          <div className="text-left truncate">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold truncate">{model.name}</span>
+                              {isSystemActive && (
+                                <span 
+                                  className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wide border shrink-0"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                    borderColor: 'var(--color-emerald, #10b981)',
+                                    color: 'var(--color-emerald, #10b981)'
+                                  }}
+                                  title="Active Model Version Identifier configured in /admin/ai-settings"
+                                >
+                                  {tr('adminPlansActiveModelBadge', 'Active Identifier')}
+                                </span>
+                              )}
+                            </div>
+                            <span className="block text-[10px] font-mono opacity-60 truncate">{model.id}</span>
+                          </div>
+                        </div>
+
+                        {/* Slide-Toggle converting check-mark */}
+                        <div 
+                          className="w-8 h-4 rounded-full transition-colors relative shrink-0"
+                          style={{
+                            backgroundColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
+                          }}
+                        >
+                          <div 
+                            className={`w-3 h-3 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${isSelected ? 'right-0.5' : 'left-0.5'}`}
+                          />
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -1502,7 +1742,7 @@ export default function AdminPlansPage() {
                         className="px-2 py-0.5 rounded-lg border text-[10px] font-bold"
                         style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                       >
-                        {AVAILABLE_AI_MODELS.find(x => x.id === m)?.name || m}
+                        {availableAiModels.find(x => x.id === m)?.name || formatModelDisplayName(m)}
                       </span>
                     ))}
                   </div>
@@ -1826,7 +2066,7 @@ export default function AdminPlansPage() {
             </div>
           </div>
 
-          {/* Transactions Table */}
+          {/* Transactions Table with Auto-Renew Slide-Toggle */}
           <div 
             className="border rounded-3xl overflow-hidden shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -1874,19 +2114,27 @@ export default function AdminPlansPage() {
                       </td>
 
                       <td className="px-5 py-4">
-                        <button
-                          type="button"
+                        <div
                           onClick={() => handleToggleAutoRenew(tx.id)}
+                          role="switch"
+                          aria-checked={tx.autoRenew}
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === ' ' || e.key === 'Enter') {
+                              e.preventDefault();
+                              handleToggleAutoRenew(tx.id);
+                            }
+                          }}
                           aria-label={tr('adminPlansLabelEnableAutoRenew', 'Enable Auto-Renew')}
-                          className="w-10 h-5 rounded-full transition-colors relative cursor-pointer"
+                          className="w-10 h-5 rounded-full transition-colors relative cursor-pointer select-none"
                           style={{
                             backgroundColor: tx.autoRenew ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
                           }}
                         >
                           <div 
-                            className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${tx.autoRenew ? 'right-0.5' : 'left-0.5'}`} 
+                            className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${tx.autoRenew ? 'right-0.5' : 'left-0.5'}`} 
                           />
-                        </button>
+                        </div>
                       </td>
 
                       <td className="px-5 py-4 font-mono text-[11px] opacity-70">
@@ -1934,7 +2182,7 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* 3. TRANSACTION MODAL (Add/Edit) */}
+      {/* 3. TRANSACTION MODAL (Add/Edit with Slide-Toggle) */}
       {isTxModalOpen && (
         <div 
           role="dialog"
@@ -2041,16 +2289,33 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              <div className="pt-1">
-                <label className="flex items-center gap-2 cursor-pointer font-bold">
-                  <input
-                    type="checkbox"
-                    checked={modalAutoRenew}
-                    onChange={(e) => setModalAutoRenew(e.target.checked)}
-                    className="rounded border"
-                  />
+              {/* Task 1: Slide-Toggle for Modal Auto-Renew */}
+              <div className="pt-1.5">
+                <div
+                  onClick={() => setModalAutoRenew(!modalAutoRenew)}
+                  role="switch"
+                  aria-checked={modalAutoRenew}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === ' ' || e.key === 'Enter') {
+                      e.preventDefault();
+                      setModalAutoRenew(!modalAutoRenew);
+                    }
+                  }}
+                  className="flex items-center gap-2.5 cursor-pointer select-none font-bold text-xs"
+                >
+                  <div 
+                    className="w-10 h-5 rounded-full transition-colors relative shrink-0"
+                    style={{
+                      backgroundColor: modalAutoRenew ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
+                    }}
+                  >
+                    <div 
+                      className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${modalAutoRenew ? 'right-0.5' : 'left-0.5'}`} 
+                    />
+                  </div>
                   <span>{tr('adminPlansLabelEnableAutoRenew', 'Enable Auto-Renew')}</span>
-                </label>
+                </div>
               </div>
             </div>
 

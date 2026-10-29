@@ -55,24 +55,30 @@
       ],
       "canViewMacros": false,
       "isFree": true,
-      "isDefault": true
+      "isDefault": true,
+      "allowWalletPayment": false,
+      "allowGatewayPayment": false,
+      "allowedGateways": [
+        "stripe",
+        "paypal",
+        "manual"
+      ]
     },
     {
-      "id": "plan_culinary-pro_mvtnspc3",
+      "id": "plan_culinary-pro_mvtpqx2z",
       "name": "Culinary Pro",
       "slug": "culinary-pro",
       "badge": "Most Popular",
       "monthlyPriceDollars": 9.99,
-      "annualPriceDollars": 79.99,
+      "annualPriceDollars": 39.99,
       "descriptionMonthly": "Ideal for passionate home cooks.",
       "descriptionAnnual": "Maximum savings with yearly billing.",
       "tokensMonthly": 2500,
-      "tokensAnnual": 3000,
+      "tokensAnnual": 5000,
       "tokenLimit": 2500,
       "maxSavedRecipes": 200,
       "allowedModels": [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro"
+        "claude-3-7-sonnet"
       ],
       "features": [
         "Full Macronutrient Tracking (Macros)",
@@ -81,7 +87,14 @@
       ],
       "canViewMacros": true,
       "isFree": false,
-      "isDefault": false
+      "isDefault": false,
+      "allowWalletPayment": true,
+      "allowGatewayPayment": false,
+      "allowedGateways": [
+        "stripe",
+        "paypal",
+        "manual"
+      ]
     }
   ],
   "updatedAt": "2026-10-28T18:32:59.612Z",

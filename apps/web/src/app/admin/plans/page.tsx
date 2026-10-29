@@ -7,7 +7,8 @@ import {
   CreditCard, Sparkles, Plus, Trash2, Edit3, Check, RefreshCw, 
   RotateCcw, CheckCircle2, AlertCircle, Shield, Zap, Flame, 
   Lock, Eye, Cpu, Database, Search, DollarSign,
-  Users, TrendingUp, X, ExternalLink, Layers
+  Users, TrendingUp, X, ExternalLink, Layers, Wallet,
+  Landmark, ArrowRightLeft, Radio, CheckSquare, ShieldCheck
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { DynamicTokenIcon } from '@/components/DynamicTokenIcon';
@@ -30,6 +31,10 @@ export interface PlanConfig {
   canViewMacros: boolean;
   isFree?: boolean;
   isDefault?: boolean;
+  // Dynamic Payment Gateway & Wallet Purchase Configuration
+  allowWalletPayment?: boolean;
+  allowGatewayPayment?: boolean;
+  allowedGateways?: string[]; // 'stripe' | 'paypal' | 'manual'
 }
 
 export interface PaymentTransaction {
@@ -44,15 +49,54 @@ export interface PaymentTransaction {
   status: 'active' | 'completed' | 'cancelled';
   autoRenew: boolean;
   createdAt: string;
+  gateway?: 'stripe' | 'paypal' | 'manual' | 'wallet';
 }
 
-const AVAILABLE_AI_MODELS = [
+export interface AiModelItem {
+  id: string;
+  name: string;
+  isSystemActive?: boolean;
+}
+
+export interface GatewayOption {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  mode?: string;
+}
+
+const DEFAULT_GATEWAYS: GatewayOption[] = [
+  { id: 'stripe', name: 'Stripe', description: 'Credit / Debit Card Processing', enabled: true, mode: 'test' },
+  { id: 'paypal', name: 'PayPal', description: 'PayPal Express & Recurring Checkout', enabled: true, mode: 'sandbox' },
+  { id: 'manual', name: 'Bank Transfer', description: 'Direct Bank Wire / Invoice Settlement', enabled: true }
+];
+
+const DEFAULT_AVAILABLE_AI_MODELS: AiModelItem[] = [
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
   { id: 'gpt-4o', name: 'GPT-4o' },
   { id: 'claude-3-7-sonnet', name: 'Claude 3.7 Sonnet' },
   { id: 'deepseek-r1', name: 'DeepSeek R1' }
 ];
+
+function formatModelDisplayName(modelId: string): string {
+  if (!modelId) return '';
+  if (modelId === 'gemini-2.5-flash') return 'Gemini 2.5 Flash';
+  if (modelId === 'gemini-2.5-pro') return 'Gemini 2.5 Pro';
+  if (modelId === 'gemini-2.0-flash') return 'Gemini 2.0 Flash';
+  if (modelId === 'gemini-1.5-flash') return 'Gemini 1.5 Flash';
+  if (modelId === 'gemini-1.5-pro') return 'Gemini 1.5 Pro';
+  if (modelId === 'gpt-4o') return 'GPT-4o';
+  if (modelId === 'gpt-4o-mini') return 'GPT-4o Mini';
+  if (modelId === 'claude-3-7-sonnet') return 'Claude 3.7 Sonnet';
+  if (modelId === 'deepseek-r1') return 'DeepSeek R1';
+  return modelId
+    .split('-')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
 const DEFAULT_PRESET_TASTER: PlanConfig = {
   id: 'preset_taster',
@@ -75,7 +119,10 @@ const DEFAULT_PRESET_TASTER: PlanConfig = {
   ],
   canViewMacros: false,
   isFree: true,
-  isDefault: true
+  isDefault: true,
+  allowWalletPayment: false,
+  allowGatewayPayment: false,
+  allowedGateways: []
 };
 
 const DEFAULT_PRESET_NUTRITION_PRO: PlanConfig = {
@@ -99,7 +146,10 @@ const DEFAULT_PRESET_NUTRITION_PRO: PlanConfig = {
     'AI Smart Sub-Recipe Formulator'
   ],
   canViewMacros: true,
-  isFree: false
+  isFree: false,
+  allowWalletPayment: true,
+  allowGatewayPayment: true,
+  allowedGateways: ['stripe', 'paypal', 'manual']
 };
 
 const DEFAULT_PLANS: PlanConfig[] = [
@@ -127,12 +177,15 @@ const DEFAULT_PLANS: PlanConfig[] = [
       'Direct Concierge Culinary Advice'
     ],
     canViewMacros: true,
-    isFree: false
+    isFree: false,
+    allowWalletPayment: true,
+    allowGatewayPayment: true,
+    allowedGateways: ['stripe', 'paypal', 'manual']
   }
 ];
 
 export default function AdminPlansPage() {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
 
   const tr = useCallback((key: string, fallback: string): string => {
     if (typeof t === 'function') {
@@ -156,6 +209,16 @@ export default function AdminPlansPage() {
   const [tokenSymbol, setTokenSymbol] = useState('🪙');
   const [tokenName, setTokenName] = useState('Tokens');
 
+  // Dynamic AI Models (Synced with /admin/ai-settings - Model Version Identifier)
+  const [availableAiModels, setAvailableAiModels] = useState<AiModelItem[]>(DEFAULT_AVAILABLE_AI_MODELS);
+  const [activeModelVersionIdentifier, setActiveModelVersionIdentifier] = useState<string>('gemini-2.5-flash');
+  const [syncingAiModels, setSyncingAiModels] = useState<boolean>(false);
+
+  // Dynamic Payment Gateways & Wallet Setting (Synced with /admin/payment-gateway & /admin/wallet-settings)
+  const [availableGateways, setAvailableGateways] = useState<GatewayOption[]>(DEFAULT_GATEWAYS);
+  const [walletGloballyEnabled, setWalletGloballyEnabled] = useState<boolean>(true);
+  const [syncingGateways, setSyncingGateways] = useState<boolean>(false);
+
   // Plan Form State (for Add or Edit)
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('Culinary Pro');
@@ -177,6 +240,11 @@ export default function AdminPlansPage() {
   const [canViewMacros, setCanViewMacros] = useState<boolean>(true);
   const [isFree, setIsFree] = useState<boolean>(false);
 
+  // Payment Mode purchase toggles
+  const [allowWalletPayment, setAllowWalletPayment] = useState<boolean>(true);
+  const [allowGatewayPayment, setAllowGatewayPayment] = useState<boolean>(true);
+  const [allowedGateways, setAllowedGateways] = useState<string[]>(['stripe', 'paypal', 'manual']);
+
   // Live Card Mockup Billing Toggle
   const [mockupBillingInterval, setMockupBillingInterval] = useState<'monthly' | 'annual'>('monthly');
 
@@ -196,7 +264,8 @@ export default function AdminPlansPage() {
       billingInterval: 'monthly',
       status: 'active',
       autoRenew: true,
-      createdAt: '2026-10-24 14:32'
+      createdAt: '2026-10-24 14:32',
+      gateway: 'stripe'
     },
     {
       id: 'tx_ec_1042',
@@ -209,7 +278,8 @@ export default function AdminPlansPage() {
       billingInterval: 'annual',
       status: 'active',
       autoRenew: true,
-      createdAt: '2026-10-21 09:15'
+      createdAt: '2026-10-21 09:15',
+      gateway: 'wallet'
     },
     {
       id: 'tx_ta_5011',
@@ -222,14 +292,16 @@ export default function AdminPlansPage() {
       billingInterval: 'monthly',
       status: 'completed',
       autoRenew: false,
-      createdAt: '2026-10-18 18:40'
+      createdAt: '2026-10-18 18:40',
+      gateway: 'manual'
     }
   ]);
   const [txSearch, setTxSearch] = useState('');
   const [txPlanFilter, setTxPlanFilter] = useState('all');
   const [txStatusFilter, setTxStatusFilter] = useState('all');
+  const [txGatewayFilter, setTxGatewayFilter] = useState('all');
 
-  // Add/Edit Transaction Modal
+  // Add/Edit Transaction Modal State
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [txEditingId, setTxEditingId] = useState<string | null>(null);
   const [modalEmail, setModalEmail] = useState('');
@@ -237,47 +309,126 @@ export default function AdminPlansPage() {
   const [modalAmount, setModalAmount] = useState<number>(8.99);
   const [modalInterval, setModalInterval] = useState<'monthly' | 'annual'>('monthly');
   const [modalAutoRenew, setModalAutoRenew] = useState(true);
+  const [modalPaymentMode, setModalPaymentMode] = useState<'gateway' | 'wallet'>('gateway');
+  const [modalGateway, setModalGateway] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
 
-  // Fetch token settings from /api/admin/token-setting with comprehensive payload fallback
+  // Fetch token settings from /api/admin/token-setting
   const fetchTokenSetting = useCallback(async () => {
-    // 1. Instant hydration from localStorage to prevent flash
-    if (typeof window !== 'undefined') {
-      const cachedSym = localStorage.getItem('zecratary_token_symbol');
-      const cachedName = localStorage.getItem('zecratary_token_name');
-      if (cachedSym) setTokenSymbol(cachedSym);
-      if (cachedName) setTokenName(cachedName);
-    }
-
     try {
-      // 2. Query /api/admin/token-setting
       const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         const cfg = data.tokenSettings || data.settings || data;
         const sym = cfg?.tokenSymbol || data?.tokenSymbol;
         const nameVal = cfg?.tokenName || data?.tokenName;
-
-        if (sym) {
-          setTokenSymbol(sym);
-          if (typeof window !== 'undefined') localStorage.setItem('zecratary_token_symbol', sym);
-        }
-        if (nameVal) {
-          setTokenName(nameVal);
-          if (typeof window !== 'undefined') localStorage.setItem('zecratary_token_name', nameVal);
-        }
-        return;
-      }
-
-      // 3. Fallback to /api/tokens
-      const altRes = await fetch('/api/tokens?t=' + Date.now(), { cache: 'no-store' });
-      if (altRes.ok) {
-        const altData = await altRes.json();
-        const sym = altData.tokenSymbol || altData.symbol;
-        const nameVal = altData.tokenName || altData.name;
         if (sym) setTokenSymbol(sym);
         if (nameVal) setTokenName(nameVal);
       }
     } catch (_) {}
+  }, []);
+
+  // Fetch AI Settings from /api/admin/settings
+  const fetchAiSettings = useCallback(async () => {
+    setSyncingAiModels(true);
+    try {
+      const res = await fetch('/api/admin/settings?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const chefSettings = data.chefAiSettings || data.settings || {};
+        const activeModel = chefSettings.model || data.ai_model || 'gemini-2.5-flash';
+        if (activeModel) setActiveModelVersionIdentifier(activeModel);
+
+        const geminiModels = Array.isArray(chefSettings.availableGeminiModels) ? chefSettings.availableGeminiModels : [];
+        const openAiModels = Array.isArray(chefSettings.availableOpenAiModels) ? chefSettings.availableOpenAiModels : [];
+        const dynamicList = [...geminiModels, ...openAiModels];
+
+        setAvailableAiModels(prev => {
+          const modelMap = new Map<string, AiModelItem>();
+          DEFAULT_AVAILABLE_AI_MODELS.forEach(m => modelMap.set(m.id, { ...m }));
+
+          dynamicList.forEach((dm: any) => {
+            const id = dm.id || dm.modelId || dm.name;
+            const displayName = dm.displayName || dm.name || formatModelDisplayName(id);
+            if (id) modelMap.set(id, { id, name: displayName });
+          });
+
+          if (activeModel && !modelMap.has(activeModel)) {
+            modelMap.set(activeModel, { id: activeModel, name: formatModelDisplayName(activeModel) });
+          }
+
+          return Array.from(modelMap.values()).map(m => ({
+            ...m,
+            isSystemActive: m.id === activeModel
+          }));
+        });
+      }
+    } catch (_) {} finally {
+      setSyncingAiModels(false);
+    }
+  }, []);
+
+  // Dynamically sync with /admin/payment-gateway & /admin/wallet-settings
+  const fetchPaymentGatewaySettings = useCallback(async () => {
+    setSyncingGateways(true);
+    try {
+      let gwConfig: any = null;
+
+      // 1. Try querying /api/admin/payment-gateway
+      const res = await fetch('/api/admin/payment-gateway?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        gwConfig = await res.json();
+      } else {
+        // Fallback to /api/admin/payment
+        const altRes = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
+        if (altRes.ok) {
+          const altData = await altRes.json();
+          gwConfig = altData.settings || altData.paymentSettings || altData;
+        }
+      }
+
+      if (gwConfig) {
+        const stripeCfg = gwConfig.stripe || {};
+        const paypalCfg = gwConfig.paypal || {};
+        const manualCfg = gwConfig.manual || {};
+
+        setAvailableGateways([
+          {
+            id: 'stripe',
+            name: 'Stripe',
+            description: stripeCfg.mode === 'live' ? 'Live Credit / Debit Cards' : 'Test Mode (Credit / Debit Cards)',
+            enabled: Boolean(stripeCfg.enabled ?? true),
+            mode: stripeCfg.mode || 'test'
+          },
+          {
+            id: 'paypal',
+            name: 'PayPal',
+            description: paypalCfg.mode === 'live' ? 'Live PayPal Express' : 'Sandbox PayPal Express',
+            enabled: Boolean(paypalCfg.enabled ?? true),
+            mode: paypalCfg.mode || 'sandbox'
+          },
+          {
+            id: 'manual',
+            name: 'Bank Transfer',
+            description: manualCfg.bankName ? `Manual Wire (${manualCfg.bankName})` : 'Direct Bank Transfer / Wire',
+            enabled: Boolean(manualCfg.enabled ?? true)
+          }
+        ]);
+      }
+    } catch (_) {}
+
+    // 2. Fetch Wallet Status from /api/admin/wallet-settings
+    try {
+      const wRes = await fetch('/api/admin/wallet-settings?t=' + Date.now(), { cache: 'no-store' });
+      if (wRes.ok) {
+        const wData = await wRes.json();
+        const wCfg = wData.walletSettings || wData.settings || wData;
+        if (wCfg.enabled !== undefined) {
+          setWalletGloballyEnabled(Boolean(wCfg.enabled && (wCfg.allowSubscriptionPayment ?? true)));
+        }
+      }
+    } catch (_) {} finally {
+      setSyncingGateways(false);
+    }
   }, []);
 
   // Fetch system currency from /api/system-settings
@@ -292,7 +443,7 @@ export default function AdminPlansPage() {
     } catch (_) {}
   }, []);
 
-  // Fetch plans from /api/admin/plans with universal normalization
+  // Fetch plans from /api/admin/plans
   const loadPlans = useCallback(async () => {
     setLoading(true);
     try {
@@ -301,33 +452,39 @@ export default function AdminPlansPage() {
         const data = await res.json();
         const rawList = Array.isArray(data) ? data : (data.configs || data.plans || data.packages || []);
         if (Array.isArray(rawList) && rawList.length > 0) {
-          const normalized: PlanConfig[] = rawList.map((p: any) => ({
-            id: p.id || ('plan_' + p.slug),
-            name: p.name || 'Custom Plan',
-            slug: (p.slug || p.id || 'plan').toLowerCase().replace(/[^a-z0-9-]/g, ''),
-            badge: p.badge || '',
-            monthlyPriceDollars: Number(p.monthlyPriceDollars ?? p.monthly_price ?? p.price ?? 0),
-            annualPriceDollars: Number(p.annualPriceDollars ?? p.annual_price ?? 0),
-            descriptionMonthly: p.descriptionMonthly || p.description_monthly || '',
-            descriptionAnnual: p.descriptionAnnual || p.description_annual || '',
-            tokensMonthly: Number(p.tokensMonthly ?? p.tokens_monthly ?? p.tokenLimit ?? 0),
-            tokensAnnual: Number(p.tokensAnnual ?? p.tokens_annual ?? 0),
-            tokenLimit: Number(p.tokensMonthly ?? p.tokens_monthly ?? p.tokenLimit ?? 0),
-            maxSavedRecipes: Number(p.maxSavedRecipes ?? p.max_saved_recipes ?? 50),
-            allowedModels: Array.isArray(p.allowedModels || p.allowed_models) ? (p.allowedModels || p.allowed_models) : ['gemini-2.5-flash'],
-            features: Array.isArray(p.features) ? p.features : [],
-            canViewMacros: Boolean(p.canViewMacros ?? p.can_view_macros),
-            isFree: Boolean(p.isFree ?? p.is_free ?? (Number(p.monthlyPriceDollars ?? p.monthly_price ?? 0) === 0 && Number(p.annualPriceDollars ?? p.annual_price ?? 0))),
-            isDefault: Boolean(p.isDefault ?? p.is_default ?? p.slug === 'taster')
-          }));
+          const normalized: PlanConfig[] = rawList.map((p: any) => {
+            const isFreeTier = Boolean(p.isFree ?? p.is_free ?? (Number(p.monthlyPriceDollars ?? p.monthly_price ?? 0) === 0 && Number(p.annualPriceDollars ?? p.annual_price ?? 0)));
+            return {
+              id: p.id || ('plan_' + p.slug),
+              name: p.name || 'Custom Plan',
+              slug: (p.slug || p.id || 'plan').toLowerCase().replace(/[^a-z0-9-]/g, ''),
+              badge: p.badge || '',
+              monthlyPriceDollars: Number(p.monthlyPriceDollars ?? p.monthly_price ?? p.price ?? 0),
+              annualPriceDollars: Number(p.annualPriceDollars ?? p.annual_price ?? 0),
+              descriptionMonthly: p.descriptionMonthly || p.description_monthly || '',
+              descriptionAnnual: p.descriptionAnnual || p.description_annual || '',
+              tokensMonthly: Number(p.tokensMonthly ?? p.tokens_monthly ?? p.tokenLimit ?? 0),
+              tokensAnnual: Number(p.tokensAnnual ?? p.tokens_annual ?? 0),
+              tokenLimit: Number(p.tokensMonthly ?? p.tokens_monthly ?? p.tokenLimit ?? 0),
+              maxSavedRecipes: Number(p.maxSavedRecipes ?? p.max_saved_recipes ?? 50),
+              allowedModels: Array.isArray(p.allowedModels || p.allowed_models) ? (p.allowedModels || p.allowed_models) : ['gemini-2.5-flash'],
+              features: Array.isArray(p.features) ? p.features : [],
+              canViewMacros: Boolean(p.canViewMacros ?? p.can_view_macros),
+              isFree: isFreeTier,
+              isDefault: Boolean(p.isDefault ?? p.is_default ?? p.slug === 'taster'),
+              allowWalletPayment: p.allowWalletPayment !== undefined ? Boolean(p.allowWalletPayment) : (p.allow_wallet_payment !== undefined ? Boolean(p.allow_wallet_payment) : !isFreeTier),
+              allowGatewayPayment: p.allowGatewayPayment !== undefined ? Boolean(p.allowGatewayPayment) : (p.allow_gateway_payment !== undefined ? Boolean(p.allow_gateway_payment) : !isFreeTier),
+              allowedGateways: Array.isArray(p.allowedGateways || p.allowed_gateways) ? (p.allowedGateways || p.allowed_gateways) : ['stripe', 'paypal', 'manual']
+            };
+          });
           setPlans(normalized);
           return;
         }
       }
-      setPlans([DEFAULT_PRESET_TASTER]);
+      setPlans(DEFAULT_PLANS);
     } catch (err) {
       console.warn('Notice loading /admin/plans:', err);
-      setPlans([DEFAULT_PRESET_TASTER]);
+      setPlans(DEFAULT_PLANS);
     } finally {
       setLoading(false);
     }
@@ -337,66 +494,61 @@ export default function AdminPlansPage() {
     document.title = tr('adminPlansDocTitle', 'Subscription Plans - Admin Console');
     fetchTokenSetting();
     fetchSystemSettings();
+    fetchAiSettings();
+    fetchPaymentGatewaySettings();
     loadPlans();
 
     const handleSync = () => {
       fetchTokenSetting();
       fetchSystemSettings();
+      fetchAiSettings();
+      fetchPaymentGatewaySettings();
       loadPlans();
     };
 
-    // Dedicated Token Settings real-time event listener
-    const handleTokenUpdate = (e: any) => {
-      const newSym = e?.detail?.tokenSymbol || e?.detail?.settings?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
-      const newName = e?.detail?.tokenName || e?.detail?.settings?.tokenName || localStorage.getItem('zecratary_token_name');
-      if (newSym) setTokenSymbol(newSym);
-      if (newName) setTokenName(newName);
-      fetchTokenSetting();
-    };
+    // Cross-tab BroadcastChannels
+    let balanceBc: BroadcastChannel | null = null;
+    let aiBc: BroadcastChannel | null = null;
+    let paymentBc: BroadcastChannel | null = null;
 
-    // BroadcastChannel for cross-tab instant synchronization
-    let bc: BroadcastChannel | null = null;
     try {
-      bc = new BroadcastChannel('zecratary_balance_channel');
-      bc.onmessage = (event) => {
+      balanceBc = new BroadcastChannel('zecratary_balance_channel');
+      balanceBc.onmessage = (event) => {
         if (event?.data?.type === 'TOKEN_SETTINGS_UPDATED') {
-          if (event.data.tokenSymbol) setTokenSymbol(event.data.tokenSymbol);
-          if (event.data.settings?.tokenName) setTokenName(event.data.settings.tokenName);
           fetchTokenSetting();
         }
       };
+
+      aiBc = new BroadcastChannel('zecratary_ai_settings_sync');
+      aiBc.onmessage = () => {
+        fetchAiSettings();
+      };
+
+      paymentBc = new BroadcastChannel('zecratary_payment_sync');
+      paymentBc.onmessage = () => {
+        fetchPaymentGatewaySettings();
+      };
     } catch (_) {}
 
-    window.addEventListener('zecratary_token_settings_updated', handleTokenUpdate);
-    window.addEventListener('zecratary_tokens_updated', handleTokenUpdate);
-    window.addEventListener('zecratary_admin_settings_updated', handleTokenUpdate);
+    window.addEventListener('zecratary_payment_gateway_updated', fetchPaymentGatewaySettings);
+    window.addEventListener('zecratary_payment_updated', fetchPaymentGatewaySettings);
+    window.addEventListener('zecratary_wallet_settings_updated', fetchPaymentGatewaySettings);
+    window.addEventListener('zecratary_wallet_updated', fetchPaymentGatewaySettings);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
-    window.addEventListener('zecratary_theme_mode_changed', handleSync);
-    window.addEventListener('zecratary_theme_updated', handleSync);
-    window.addEventListener('storage', (e) => {
-      if (!e.key || e.key.includes('token') || e.key.includes('plan')) {
-        handleTokenUpdate(e);
-      }
-    });
 
     return () => {
-      window.removeEventListener('zecratary_token_settings_updated', handleTokenUpdate);
-      window.removeEventListener('zecratary_tokens_updated', handleTokenUpdate);
-      window.removeEventListener('zecratary_admin_settings_updated', handleTokenUpdate);
+      window.removeEventListener('zecratary_payment_gateway_updated', fetchPaymentGatewaySettings);
+      window.removeEventListener('zecratary_payment_updated', fetchPaymentGatewaySettings);
+      window.removeEventListener('zecratary_wallet_settings_updated', fetchPaymentGatewaySettings);
+      window.removeEventListener('zecratary_wallet_updated', fetchPaymentGatewaySettings);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
       window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
-      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
-      window.removeEventListener('zecratary_theme_updated', handleSync);
-      if (bc) {
-        bc.close();
-      }
+      if (balanceBc) balanceBc.close();
+      if (aiBc) aiBc.close();
+      if (paymentBc) paymentBc.close();
     };
-  }, [fetchTokenSetting, fetchSystemSettings, loadPlans, tr]);
+  }, [fetchTokenSetting, fetchSystemSettings, fetchAiSettings, fetchPaymentGatewaySettings, loadPlans, tr]);
 
   // Load preset plan directly into editor
   const applyPreset = (preset: PlanConfig) => {
@@ -415,6 +567,9 @@ export default function AdminPlansPage() {
     setFeatures(preset.features);
     setCanViewMacros(preset.canViewMacros);
     setIsFree(Boolean(preset.isFree));
+    setAllowWalletPayment(preset.allowWalletPayment ?? !preset.isFree);
+    setAllowGatewayPayment(preset.allowGatewayPayment ?? !preset.isFree);
+    setAllowedGateways(preset.allowedGateways || ['stripe', 'paypal', 'manual']);
     setStatus({
       type: 'success',
       msg: `${tr('adminPlansPresetLoaded', 'Loaded preset')}: ${preset.name}`
@@ -438,6 +593,9 @@ export default function AdminPlansPage() {
     setFeatures(plan.features || []);
     setCanViewMacros(Boolean(plan.canViewMacros));
     setIsFree(Boolean(plan.isFree));
+    setAllowWalletPayment(plan.allowWalletPayment ?? !plan.isFree);
+    setAllowGatewayPayment(plan.allowGatewayPayment ?? !plan.isFree);
+    setAllowedGateways(plan.allowedGateways || ['stripe', 'paypal', 'manual']);
     setStatus(null);
   };
 
@@ -461,6 +619,9 @@ export default function AdminPlansPage() {
     ]);
     setCanViewMacros(true);
     setIsFree(false);
+    setAllowWalletPayment(true);
+    setAllowGatewayPayment(true);
+    setAllowedGateways(['stripe', 'paypal', 'manual']);
   };
 
   // Toggle model selection
@@ -471,6 +632,17 @@ export default function AdminPlansPage() {
       }
     } else {
       setAllowedModels([...allowedModels, modelId]);
+    }
+  };
+
+  // Toggle allowed payment gateway
+  const handleToggleGateway = (gwId: string) => {
+    if (allowedGateways.includes(gwId)) {
+      if (allowedGateways.length > 1 || allowWalletPayment) {
+        setAllowedGateways(allowedGateways.filter(g => g !== gwId));
+      }
+    } else {
+      setAllowedGateways([...allowedGateways, gwId]);
     }
   };
 
@@ -511,7 +683,10 @@ export default function AdminPlansPage() {
       features,
       canViewMacros: isFree ? false : Boolean(canViewMacros),
       isFree: Boolean(isFree),
-      isDefault: cleanSlug === 'taster'
+      isDefault: cleanSlug === 'taster',
+      allowWalletPayment: isFree ? false : Boolean(allowWalletPayment),
+      allowGatewayPayment: isFree ? false : Boolean(allowGatewayPayment),
+      allowedGateways: isFree ? [] : allowedGateways
     };
 
     const nextPlans = editingId 
@@ -536,9 +711,7 @@ export default function AdminPlansPage() {
       setPlans(nextPlans);
       setEditingId(null);
 
-      // Broadcast update across /subscriptions, /profile, /admin/payment
       window.dispatchEvent(new Event('zecratary_plans_updated'));
-      localStorage.setItem('zecratary_plans_updated_at', Date.now().toString());
 
       setStatus({
         type: 'success',
@@ -582,7 +755,6 @@ export default function AdminPlansPage() {
       }
 
       window.dispatchEvent(new Event('zecratary_plans_updated'));
-      localStorage.setItem('zecratary_plans_updated_at', Date.now().toString());
 
       setStatus({
         type: 'success',
@@ -598,7 +770,7 @@ export default function AdminPlansPage() {
     if (!confirm(tr('adminPlansConfirmRestore', 'Restore default subscription packages (Taster, Nutrition Pro, Executive Chef)?'))) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/plans', {
+      await fetch('/api/admin/plans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -611,7 +783,6 @@ export default function AdminPlansPage() {
       handleResetForm();
 
       window.dispatchEvent(new Event('zecratary_plans_updated'));
-      localStorage.setItem('zecratary_plans_updated_at', Date.now().toString());
 
       setStatus({
         type: 'success',
@@ -629,11 +800,12 @@ export default function AdminPlansPage() {
     setTransactions(prev => prev.map(t => t.id === txId ? { ...t, autoRenew: !t.autoRenew } : t));
   };
 
-  // Add or Edit Transaction
+  // Add or Edit Transaction with Payment Mode
   const handleSaveTransaction = () => {
     if (!modalEmail.trim()) return;
     const selectedPlan = plans.find(p => p.slug === modalPlanSlug) || DEFAULT_PRESET_NUTRITION_PRO;
-    
+    const finalGateway = modalPaymentMode === 'wallet' ? 'wallet' : modalGateway;
+
     if (txEditingId) {
       setTransactions(prev => prev.map(t => t.id === txEditingId ? {
         ...t,
@@ -642,7 +814,8 @@ export default function AdminPlansPage() {
         planName: selectedPlan.name,
         amount: Number(modalAmount || 0),
         billingInterval: modalInterval,
-        autoRenew: modalAutoRenew
+        autoRenew: modalAutoRenew,
+        gateway: finalGateway
       } : t));
     } else {
       const newTx: PaymentTransaction = {
@@ -656,7 +829,8 @@ export default function AdminPlansPage() {
         billingInterval: modalInterval,
         status: 'active',
         autoRenew: modalAutoRenew,
-        createdAt: new Date().toISOString().slice(0, 16).replace('T', ' ')
+        createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        gateway: finalGateway
       };
       setTransactions([newTx, ...transactions]);
     }
@@ -675,9 +849,10 @@ export default function AdminPlansPage() {
         t.id.toLowerCase().includes(txSearch.toLowerCase());
       const matchesPlan = txPlanFilter === 'all' || t.planSlug === txPlanFilter;
       const matchesStatus = txStatusFilter === 'all' || t.status === txStatusFilter;
-      return matchesSearch && matchesPlan && matchesStatus;
+      const matchesGateway = txGatewayFilter === 'all' || t.gateway === txGatewayFilter;
+      return matchesSearch && matchesPlan && matchesStatus && matchesGateway;
     });
-  }, [transactions, txSearch, txPlanFilter, txStatusFilter]);
+  }, [transactions, txSearch, txPlanFilter, txStatusFilter, txGatewayFilter]);
 
   // Calculate live savings percentage on the mockup
   const savingsPercent = useMemo(() => {
@@ -693,7 +868,7 @@ export default function AdminPlansPage() {
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 pb-24 font-sans transition-colors duration-200 box-border space-y-6"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. TOP HEADER (Clear Title, Sync Badges, Global Utilities) */}
+      {/* 1. TOP HEADER */}
       <div 
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-5 pt-3" 
         style={{ borderColor: 'var(--color-border)' }}
@@ -716,11 +891,11 @@ export default function AdminPlansPage() {
             </div>
           </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {tr('adminPlansSubtitle', 'Configure billing intervals, token quotas, AI model access, and feature limits synced to PostgreSQL & MySQL.')}
+            {tr('adminPlansSubtitle', 'Configure billing intervals, token quotas, AI model access, and purchase payment modes synced with /admin/payment-gateway.')}
           </p>
         </div>
 
-        {/* Global Utilities (Reload, Reset Defaults) */}
+        {/* Global Utilities */}
         <div className="flex items-center gap-2.5 shrink-0">
           <button
             type="button"
@@ -760,7 +935,6 @@ export default function AdminPlansPage() {
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-2 rounded-2xl border shadow-sm transition-colors duration-200"
         style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
       >
-        {/* Navigation Tabs (Subscription Plans vs Plan Transactions Ledger) */}
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -817,7 +991,6 @@ export default function AdminPlansPage() {
           </button>
         </div>
 
-        {/* View-Specific Contextual Action Button */}
         <div className="flex items-center gap-2">
           {activeTab === 'plans' ? (
             <button
@@ -840,6 +1013,8 @@ export default function AdminPlansPage() {
                 setTxEditingId(null);
                 setModalEmail('');
                 setModalAmount(8.99);
+                setModalPaymentMode('gateway');
+                setModalGateway('stripe');
                 setIsTxModalOpen(true);
               }}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition hover:opacity-90 cursor-pointer shadow-sm text-white"
@@ -874,7 +1049,7 @@ export default function AdminPlansPage() {
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
               >
                 <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                <span>{tr('adminPlansPresetNutritionPro', 'Preset: Nutrition Pro (Paid, Macros Active)')}</span>
+                <span>{tr('adminPlansPresetNutritionPro', 'Preset: Nutrition Pro (Paid, Gateways & Wallet Active)')}</span>
               </button>
               <button
                 type="button"
@@ -883,12 +1058,12 @@ export default function AdminPlansPage() {
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
               >
                 <Lock className="h-3.5 w-3.5" />
-                <span>{tr('adminPlansPresetTaster', 'Preset: Taster (Free, Macros Locked)')}</span>
+                <span>{tr('adminPlansPresetTaster', 'Preset: Taster (Free, Payment Disabled)')}</span>
               </button>
             </div>
           </div>
 
-          {/* Main 2-Column Responsive Layout: Editor (Left 7 cols) & Live Card Mockup (Right 5 cols) */}
+          {/* Main 2-Column Responsive Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* LEFT COLUMN: PLAN CONFIGURATION EDITOR (7 Cols) */}
             <div 
@@ -908,7 +1083,7 @@ export default function AdminPlansPage() {
                     {tr('adminPlansEditorHeading', 'Plan Configuration & Parameters')}
                   </h2>
                   <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {tr('adminPlansEditorSubtitle', 'Define pricing tiers, token allowances, model permissions, and feature lists.')}
+                    {tr('adminPlansEditorSubtitle', 'Define pricing tiers, payment purchase modes, token allowances, model permissions, and features.')}
                   </p>
                 </div>
 
@@ -988,30 +1163,63 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              {/* Pricing Controls */}
+              {/* Pricing Controls with Slide-Toggle for Free Tier */}
               <div className="p-4 rounded-2xl border space-y-3" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
                     {tr('adminPlansBillingPricingHeading', 'Billing & Pricing ({currency})').replace('{currency}', currencyCode)}
                   </span>
 
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
-                    <input
-                      type="checkbox"
-                      checked={isFree}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setIsFree(checked);
-                        if (checked) {
+                  {/* Slide-Toggle for Free Tier */}
+                  <div
+                    onClick={() => {
+                      const nextVal = !isFree;
+                      setIsFree(nextVal);
+                      if (nextVal) {
+                        setMonthlyPriceDollars(0);
+                        setAnnualPriceDollars(0);
+                        setCanViewMacros(false);
+                        setAllowWalletPayment(false);
+                        setAllowGatewayPayment(false);
+                      } else {
+                        setAllowWalletPayment(true);
+                        setAllowGatewayPayment(true);
+                      }
+                    }}
+                    role="switch"
+                    aria-checked={isFree}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === ' ' || e.key === 'Enter') {
+                        e.preventDefault();
+                        const nextVal = !isFree;
+                        setIsFree(nextVal);
+                        if (nextVal) {
                           setMonthlyPriceDollars(0);
                           setAnnualPriceDollars(0);
                           setCanViewMacros(false);
+                          setAllowWalletPayment(false);
+                          setAllowGatewayPayment(false);
+                        } else {
+                          setAllowWalletPayment(true);
+                          setAllowGatewayPayment(true);
                         }
+                      }
+                    }}
+                    className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold"
+                  >
+                    <div 
+                      className="w-10 h-5 rounded-full transition-colors relative"
+                      style={{
+                        backgroundColor: isFree ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
                       }}
-                      className="rounded border"
-                    />
+                    >
+                      <div 
+                        className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${isFree ? 'right-0.5' : 'left-0.5'}`}
+                      />
+                    </div>
                     <span>{tr('adminPlansLabelFreeTier', 'Mark as Free Tier (Taster)')}</span>
-                  </label>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1091,7 +1299,245 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              {/* Tokens & Recipe Capacity (With Dynamic Token Emoji Sync) */}
+              {/* PAYMENT PURCHASE MODES & GATEWAY CONFIGURATION (SYNCED WITH /admin/payment-gateway) */}
+              <div 
+                className="p-4 rounded-2xl border space-y-4 transition-colors duration-200"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                      <span className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                        {tr('adminPlansPaymentModesTitle', 'Plan Purchase Payment Modes')}
+                      </span>
+                    </div>
+                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      {tr('adminPlansPaymentModesSubtitle', 'Enable Payment Gateways and/or Store Wallet Balance to allow purchasing this tier.')}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href="/admin/payment-gateway"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border text-[10px] font-bold transition hover:opacity-85 shadow-xs"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+                      title="Manage Gateways in /admin/payment-gateway"
+                    >
+                      <span>/admin/payment-gateway</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={fetchPaymentGatewaySettings}
+                      disabled={syncingGateways}
+                      title="Refresh Payment Gateways Telemetry"
+                      className="p-1 rounded-lg border text-[10px] hover:opacity-80 transition cursor-pointer"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                    >
+                      <RefreshCw className={`h-3 w-3 ${syncingGateways ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {isFree ? (
+                  <div 
+                    className="p-3 rounded-xl border text-xs font-semibold flex items-center gap-2"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                    <span>{tr('adminPlansFreeTierNoPayment', 'Free Tier Plan: Subscribers activate without payment gateways or wallet deductions.')}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Mode 1: Wallet Balance Toggle-Slide */}
+                    <div 
+                      className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs transition"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: allowWalletPayment ? 'var(--color-emerald, #10b981)' : 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div 
+                          className="w-9 h-9 rounded-xl border flex items-center justify-center shrink-0"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: allowWalletPayment ? 'var(--color-emerald, #10b981)' : 'var(--color-border)',
+                            color: allowWalletPayment ? 'var(--color-emerald, #10b981)' : 'var(--color-text-secondary)'
+                          }}
+                        >
+                          <Wallet className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                              {tr('adminPlansAllowWalletLabel', 'Allow Store Wallet Balance to Purchase Plan')}
+                            </span>
+                            {walletGloballyEnabled ? (
+                              <span 
+                                className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wide border"
+                                style={{
+                                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                                  borderColor: 'var(--color-emerald, #10b981)',
+                                  color: 'var(--color-emerald, #10b981)'
+                                }}
+                              >
+                                {tr('adminPlansWalletActiveBadge', 'Wallet Active')}
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase text-amber-500 border border-amber-500/30">
+                                {tr('adminPlansWalletDisabledBadge', 'Global Wallet Off')}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] block opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                            {tr('adminPlansAllowWalletSub', 'Customers can spend accrued store balance from /admin/wallet-settings to buy or renew.')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Slide-Toggle */}
+                      <div
+                        onClick={() => setAllowWalletPayment(!allowWalletPayment)}
+                        role="switch"
+                        aria-checked={allowWalletPayment}
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            setAllowWalletPayment(!allowWalletPayment);
+                          }
+                        }}
+                        className="w-10 h-5 rounded-full transition-colors relative shrink-0 cursor-pointer select-none"
+                        style={{
+                          backgroundColor: allowWalletPayment ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
+                        }}
+                      >
+                        <div 
+                          className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${allowWalletPayment ? 'right-0.5' : 'left-0.5'}`} 
+                        />
+                      </div>
+                    </div>
+
+                    {/* Mode 2: Payment Gateway Master Toggle-Slide */}
+                    <div 
+                      className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs transition"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: allowGatewayPayment ? 'var(--color-primary)' : 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div 
+                          className="w-9 h-9 rounded-xl border flex items-center justify-center shrink-0"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: allowGatewayPayment ? 'var(--color-primary)' : 'var(--color-border)',
+                            color: allowGatewayPayment ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                          }}
+                        >
+                          <CreditCard className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
+                            {tr('adminPlansAllowGatewayLabel', 'Allow Payment Gateways to Purchase Plan')}
+                          </span>
+                          <span className="text-[10px] block opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                            {tr('adminPlansAllowGatewaySub', 'Authorize Stripe, PayPal, or Manual Bank Wire to process this plan tier.')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Slide-Toggle */}
+                      <div
+                        onClick={() => setAllowGatewayPayment(!allowGatewayPayment)}
+                        role="switch"
+                        aria-checked={allowGatewayPayment}
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            setAllowGatewayPayment(!allowGatewayPayment);
+                          }
+                        }}
+                        className="w-10 h-5 rounded-full transition-colors relative shrink-0 cursor-pointer select-none"
+                        style={{
+                          backgroundColor: allowGatewayPayment ? 'var(--color-primary)' : 'var(--color-border)'
+                        }}
+                      >
+                        <div 
+                          className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${allowGatewayPayment ? 'right-0.5' : 'left-0.5'}`} 
+                        />
+                      </div>
+                    </div>
+
+                    {/* Individual Gateways Sub-Grid (Dynamic Sync with /admin/payment-gateway) */}
+                    {allowGatewayPayment && (
+                      <div className="pl-3 sm:pl-4 border-l-2 space-y-2 mt-2" style={{ borderColor: 'var(--color-primary)' }}>
+                        <span className="text-[10px] font-black uppercase tracking-wider block opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
+                          {tr('adminPlansSelectGateways', 'Authorized Gateways for this Plan (Synced with /admin/payment-gateway):')}
+                        </span>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {availableGateways.map(gw => {
+                            const isAllowed = allowedGateways.includes(gw.id);
+                            return (
+                              <div
+                                key={gw.id}
+                                onClick={() => handleToggleGateway(gw.id)}
+                                role="switch"
+                                aria-checked={isAllowed}
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                  if (e.key === ' ' || e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleToggleGateway(gw.id);
+                                  }
+                                }}
+                                className="p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 cursor-pointer select-none transition hover:opacity-95"
+                                style={isAllowed ? {
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-primary)',
+                                  color: 'var(--color-text)'
+                                } : {
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)',
+                                  opacity: 0.7
+                                }}
+                              >
+                                <div className="truncate">
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    {gw.id === 'stripe' ? (
+                                      <CreditCard className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                                    ) : gw.id === 'paypal' ? (
+                                      <Sparkles className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                                    ) : (
+                                      <Landmark className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                    )}
+                                    <span className="font-extrabold truncate">{gw.name}</span>
+                                  </div>
+                                  <span className="block text-[9px] font-mono opacity-60 truncate">{gw.description}</span>
+                                </div>
+
+                                {/* Slide-Toggle for Gateway */}
+                                <div 
+                                  className="w-7 h-3.5 rounded-full transition-colors relative shrink-0"
+                                  style={{
+                                    backgroundColor: isAllowed ? 'var(--color-primary)' : 'var(--color-border)'
+                                  }}
+                                >
+                                  <div 
+                                    className={`w-2.5 h-2.5 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${isAllowed ? 'right-0.5' : 'left-0.5'}`} 
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Tokens & Recipe Capacity */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <div>
                   <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
@@ -1163,50 +1609,133 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              {/* Model Permissions & Macronutrients Tracking */}
-              <div className="space-y-3 pt-1">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                    {tr('adminPlansLabelAllowedModels', 'Allowed AI Chef Models')}
-                  </label>
+              {/* Dynamic AI Models Sync & Slide-Toggles for Models & Macros */}
+              <div className="space-y-3.5 pt-1">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
+                  <div>
+                    <label className="block text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                      {tr('adminPlansLabelAllowedModels', 'Allowed AI Chef Models')}
+                    </label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border text-[10px] font-mono font-semibold" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <span>{tr('adminPlansAiSyncLabel', 'Synced with /admin/ai-settings')}:</span>
+                        <span className="font-bold text-emerald-400">{activeModelVersionIdentifier}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={fetchAiSettings}
+                        disabled={syncingAiModels}
+                        title="Re-sync Model Version Identifier"
+                        className="p-1 rounded-lg border text-[10px] hover:opacity-80 transition cursor-pointer"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                      >
+                        <RefreshCw className={`h-3 w-3 ${syncingAiModels ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
 
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
-                    <input
-                      type="checkbox"
-                      checked={canViewMacros}
-                      disabled={isFree}
-                      onChange={(e) => setCanViewMacros(e.target.checked)}
-                      className="rounded border"
-                    />
-                    <span className={isFree ? 'opacity-40' : ''}>
-                      {tr('adminPlansLabelMacros', 'Enable Macronutrient Tracking (can_view_macros)')}
-                    </span>
-                  </label>
+                  {/* Slide-Toggle for Macronutrient Tracking */}
+                  <div
+                    onClick={() => {
+                      if (!isFree) setCanViewMacros(!canViewMacros);
+                    }}
+                    role="switch"
+                    aria-checked={canViewMacros && !isFree}
+                    tabIndex={isFree ? -1 : 0}
+                    onKeyDown={(e) => {
+                      if (!isFree && (e.key === ' ' || e.key === 'Enter')) {
+                        e.preventDefault();
+                        setCanViewMacros(!canViewMacros);
+                      }
+                    }}
+                    className={`flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold ${isFree ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  >
+                    <div 
+                      className="w-10 h-5 rounded-full transition-colors relative shrink-0"
+                      style={{
+                        backgroundColor: canViewMacros && !isFree ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
+                      }}
+                    >
+                      <div 
+                        className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${canViewMacros && !isFree ? 'right-0.5' : 'left-0.5'}`} 
+                      />
+                    </div>
+                    <span>{tr('adminPlansLabelMacros', 'Enable Macronutrient Tracking (can_view_macros)')}</span>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {AVAILABLE_AI_MODELS.map(model => {
+                {/* Dynamic Model Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {availableAiModels.map(model => {
                     const isSelected = allowedModels.includes(model.id);
+                    const isSystemActive = model.id === activeModelVersionIdentifier;
+
                     return (
-                      <button
+                      <div
                         key={model.id}
-                        type="button"
                         onClick={() => handleToggleModel(model.id)}
-                        className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                        role="switch"
+                        aria-checked={isSelected}
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            handleToggleModel(model.id);
+                          }
+                        }}
+                        className="px-3.5 py-2.5 rounded-2xl border text-xs font-bold flex items-center justify-between gap-3 transition cursor-pointer select-none shadow-xs hover:opacity-95"
                         style={isSelected ? {
-                          backgroundColor: 'var(--color-primary)',
+                          backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-primary)',
-                          color: '#ffffff'
+                          color: 'var(--color-text)'
                         } : {
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-secondary)'
+                          color: 'var(--color-text-secondary)',
+                          opacity: 0.75
                         }}
                       >
-                        <Cpu className="h-3.5 w-3.5" />
-                        <span>{model.name}</span>
-                        {isSelected && <Check className="h-3.5 w-3.5" />}
-                      </button>
+                        <div className="flex items-center gap-2.5 truncate">
+                          <Cpu 
+                            className="h-4 w-4 shrink-0 transition-colors" 
+                            style={{ color: isSelected ? 'var(--color-primary)' : 'inherit' }} 
+                          />
+                          <div className="text-left truncate">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold truncate">{model.name}</span>
+                              {isSystemActive && (
+                                <span 
+                                  className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wide border shrink-0"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                    borderColor: 'var(--color-emerald, #10b981)',
+                                    color: 'var(--color-emerald, #10b981)'
+                                  }}
+                                >
+                                  {tr('adminPlansActiveModelBadge', 'Active Identifier')}
+                                </span>
+                              )}
+                            </div>
+                            <span className="block text-[10px] font-mono opacity-60 truncate">{model.id}</span>
+                          </div>
+                        </div>
+
+                        {/* Slide-Toggle */}
+                        <div 
+                          className="w-8 h-4 rounded-full transition-colors relative shrink-0"
+                          style={{
+                            backgroundColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)'
+                          }}
+                        >
+                          <div 
+                            className={`w-3 h-3 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${isSelected ? 'right-0.5' : 'left-0.5'}`}
+                          />
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -1301,7 +1830,7 @@ export default function AdminPlansPage() {
                   {tr('adminPlansMockupHeading', 'Live Pricing Card Mockup')}
                 </h3>
                 <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {tr('adminPlansMockupSubtitle', 'Real-time interactive preview of how this card renders on /subscriptions and landing pages.')}
+                  {tr('adminPlansMockupSubtitle', 'Real-time interactive preview of how this card renders on /subscriptions and checkout.')}
                 </p>
               </div>
 
@@ -1435,7 +1964,89 @@ export default function AdminPlansPage() {
                   </div>
                 </div>
 
-                {/* Nutritional Macro Analysis Telemetry Mockup Preview */}
+                {/* ACCEPTED PAYMENT PURCHASE MODES TELEMETRY BADGES */}
+                <div 
+                  className="p-3.5 rounded-2xl border space-y-2 transition-colors"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="text-[10px] font-black uppercase tracking-wider block opacity-70" style={{ color: 'var(--color-text)' }}>
+                    {tr('adminPlansAcceptedPaymentModes', 'Accepted Purchase Payment Modes')}
+                  </span>
+
+                  {isFree ? (
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>{tr('adminPlansFreeActivationDirect', 'Free Instant Activation (No Payment Gateway Needed)')}</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {allowWalletPayment && (
+                        <span 
+                          className="px-2.5 py-1 rounded-xl text-[10px] font-bold border flex items-center gap-1.5 shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-emerald, #10b981)',
+                            color: 'var(--color-emerald, #10b981)'
+                          }}
+                        >
+                          <Wallet className="h-3 w-3" />
+                          <span>{tr('adminPlansModeWalletBadge', 'Store Wallet Balance')}</span>
+                        </span>
+                      )}
+
+                      {allowGatewayPayment && allowedGateways.includes('stripe') && (
+                        <span 
+                          className="px-2.5 py-1 rounded-xl text-[10px] font-bold border flex items-center gap-1.5 shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <CreditCard className="h-3 w-3 text-blue-500" />
+                          <span>Stripe Card</span>
+                        </span>
+                      )}
+
+                      {allowGatewayPayment && allowedGateways.includes('paypal') && (
+                        <span 
+                          className="px-2.5 py-1 rounded-xl text-[10px] font-bold border flex items-center gap-1.5 shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Sparkles className="h-3 w-3 text-indigo-400" />
+                          <span>PayPal</span>
+                        </span>
+                      )}
+
+                      {allowGatewayPayment && allowedGateways.includes('manual') && (
+                        <span 
+                          className="px-2.5 py-1 rounded-xl text-[10px] font-bold border flex items-center gap-1.5 shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Landmark className="h-3 w-3 text-amber-500" />
+                          <span>Bank Wire</span>
+                        </span>
+                      )}
+
+                      {!allowWalletPayment && (!allowGatewayPayment || allowedGateways.length === 0) && (
+                        <span className="text-[10px] font-bold text-red-500 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          <span>{tr('adminPlansNoPaymentActive', 'Warning: No purchase method enabled for this plan!')}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Nutritional Macro Analysis Telemetry Mockup */}
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2 relative"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -1456,7 +2067,6 @@ export default function AdminPlansPage() {
                     )}
                   </div>
 
-                  {/* Macro telemetry data grid */}
                   <div className={`grid grid-cols-4 gap-2 text-center transition-all ${canViewMacros && !isFree ? '' : 'blur-[4px] select-none opacity-60 pointer-events-none'}`}>
                     <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
                       <span className="block text-[9px] opacity-60">{tr('adminPlansCalories', 'Calories')}</span>
@@ -1502,7 +2112,7 @@ export default function AdminPlansPage() {
                         className="px-2 py-0.5 rounded-lg border text-[10px] font-bold"
                         style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                       >
-                        {AVAILABLE_AI_MODELS.find(x => x.id === m)?.name || m}
+                        {availableAiModels.find(x => x.id === m)?.name || formatModelDisplayName(m)}
                       </span>
                     ))}
                   </div>
@@ -1531,7 +2141,7 @@ export default function AdminPlansPage() {
                   </ul>
                 </div>
 
-                {/* Simulated Action CTA Button */}
+                {/* Action CTA Button */}
                 <button
                   type="button"
                   className="w-full py-3 rounded-2xl text-xs font-extrabold text-white shadow-lg transition hover:opacity-90 cursor-pointer"
@@ -1550,7 +2160,7 @@ export default function AdminPlansPage() {
                 {tr('adminPlansTableHeading', 'Published Subscription Packages')}
               </h2>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {tr('adminPlansTableSubtitle', 'Authoritative plan records currently active and available across the system.')}
+                {tr('adminPlansTableSubtitle', 'Authoritative plan records with active payment modes synced to PostgreSQL & MySQL.')}
               </p>
             </div>
 
@@ -1569,7 +2179,7 @@ export default function AdminPlansPage() {
                       <th className="px-5 py-4">{tr('adminPlansColSlug', 'Slug')}</th>
                       <th className="px-5 py-4">{tr('adminPlansColPricing', 'Monthly / Annual')}</th>
                       <th className="px-5 py-4">{tr('adminPlansColTokens', 'Token Quota')}</th>
-                      <th className="px-5 py-4">{tr('adminPlansColMacros', 'Macro Gating')}</th>
+                      <th className="px-5 py-4">{tr('adminPlansColPaymentModes', 'Payment Modes')}</th>
                       <th className="px-5 py-4">{tr('adminPlansColStatus', 'Tier Type')}</th>
                       <th className="px-5 py-4 text-right">{tr('adminPlansColActions', 'Actions')}</th>
                     </tr>
@@ -1638,29 +2248,39 @@ export default function AdminPlansPage() {
                             </div>
                           </td>
 
+                          {/* Payment Modes Column */}
                           <td className="px-5 py-4">
-                            {p.canViewMacros && !p.isFree ? (
-                              <span 
-                                className="px-2 py-0.5 rounded text-[10px] font-bold border"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-emerald, #10b981)',
-                                  color: 'var(--color-emerald, #10b981)'
-                                }}
-                              >
-                                {tr('adminPlansMacrosActive', 'Macros Active')}
-                              </span>
+                            {p.isFree ? (
+                              <span className="text-[10px] font-bold text-emerald-500">Free Tier</span>
                             ) : (
-                              <span 
-                                className="px-2 py-0.5 rounded text-[10px] font-bold border"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'rgba(245, 158, 11, 0.4)',
-                                  color: '#f59e0b'
-                                }}
-                              >
-                                {tr('adminPlansMacrosLocked', 'Macros Locked (blur)')}
-                              </span>
+                              <div className="flex flex-wrap items-center gap-1">
+                                {p.allowWalletPayment && (
+                                  <span 
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-bold border flex items-center gap-1"
+                                    style={{
+                                      backgroundColor: 'var(--color-inner-dark)',
+                                      borderColor: 'var(--color-emerald, #10b981)',
+                                      color: 'var(--color-emerald, #10b981)'
+                                    }}
+                                  >
+                                    <Wallet className="h-2.5 w-2.5" />
+                                    <span>Wallet</span>
+                                  </span>
+                                )}
+                                {p.allowGatewayPayment && (
+                                  <span 
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-bold border flex items-center gap-1"
+                                    style={{
+                                      backgroundColor: 'var(--color-inner-dark)',
+                                      borderColor: 'var(--color-primary)',
+                                      color: 'var(--color-text)'
+                                    }}
+                                  >
+                                    <CreditCard className="h-2.5 w-2.5 text-blue-400" />
+                                    <span>Gateways ({p.allowedGateways?.length || 0})</span>
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </td>
 
@@ -1756,11 +2376,11 @@ export default function AdminPlansPage() {
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <span className="text-[11px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1.5">
-                <Shield className="h-3.5 w-3.5 text-amber-500" />
-                {tr('adminPlansMetricFreeUsers', 'Free Taster Accounts')}
+                <Wallet className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                {tr('adminPlansMetricWalletSubs', 'Wallet Balance Purchases')}
               </span>
               <span className="text-2xl font-black block">
-                {transactions.filter(t => t.planSlug === 'taster').length}
+                {transactions.filter(t => t.gateway === 'wallet').length}
               </span>
             </div>
 
@@ -1813,6 +2433,19 @@ export default function AdminPlansPage() {
               </select>
 
               <select
+                value={txGatewayFilter}
+                onChange={(e) => setTxGatewayFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl border text-xs outline-none font-bold cursor-pointer transition"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <option value="all">{tr('adminPlansFilterAllGateways', 'All Gateways')}</option>
+                <option value="wallet">Wallet Balance</option>
+                <option value="stripe">Stripe</option>
+                <option value="paypal">PayPal</option>
+                <option value="manual">Manual Bank Wire</option>
+              </select>
+
+              <select
                 value={txStatusFilter}
                 onChange={(e) => setTxStatusFilter(e.target.value)}
                 className="px-3 py-2 rounded-xl border text-xs outline-none font-bold cursor-pointer transition"
@@ -1826,7 +2459,7 @@ export default function AdminPlansPage() {
             </div>
           </div>
 
-          {/* Transactions Table */}
+          {/* Transactions Table with Gateway & Auto-Renew Slide-Toggle */}
           <div 
             className="border rounded-3xl overflow-hidden shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -1840,6 +2473,7 @@ export default function AdminPlansPage() {
                   <tr>
                     <th className="px-5 py-4">{tr('adminPlansColCustomer', 'Customer / User')}</th>
                     <th className="px-5 py-4">{tr('adminPlansColPlan', 'Plan Tier')}</th>
+                    <th className="px-5 py-4">{tr('adminPlansColPaymentMode', 'Payment Gateway / Mode')}</th>
                     <th className="px-5 py-4">{tr('adminPlansColAmount', 'Amount')}</th>
                     <th className="px-5 py-4">{tr('adminPlansColAutoRenew', 'Auto-Renew')}</th>
                     <th className="px-5 py-4">{tr('adminPlansColDate', 'Date')}</th>
@@ -1863,6 +2497,38 @@ export default function AdminPlansPage() {
                         </span>
                       </td>
 
+                      {/* Payment Mode / Gateway Badge */}
+                      <td className="px-5 py-4">
+                        {tx.gateway === 'wallet' ? (
+                          <span 
+                            className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wide border flex items-center gap-1.5 w-fit"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-emerald, #10b981)',
+                              color: 'var(--color-emerald, #10b981)'
+                            }}
+                          >
+                            <Wallet className="h-3 w-3" />
+                            <span>Wallet Balance</span>
+                          </span>
+                        ) : tx.gateway === 'stripe' ? (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wide border flex items-center gap-1.5 w-fit border-blue-500/40 text-blue-400 bg-blue-500/10">
+                            <CreditCard className="h-3 w-3" />
+                            <span>Stripe</span>
+                          </span>
+                        ) : tx.gateway === 'paypal' ? (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wide border flex items-center gap-1.5 w-fit border-indigo-500/40 text-indigo-400 bg-indigo-500/10">
+                            <Sparkles className="h-3 w-3" />
+                            <span>PayPal</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wide border flex items-center gap-1.5 w-fit border-amber-500/40 text-amber-500 bg-amber-500/10">
+                            <Landmark className="h-3 w-3" />
+                            <span>Bank Wire</span>
+                          </span>
+                        )}
+                      </td>
+
                       <td className="px-5 py-4 font-mono font-bold">
                         {tx.amount === 0 ? (
                           <span className="font-extrabold" style={{ color: 'var(--color-emerald, #10b981)' }}>
@@ -1874,19 +2540,27 @@ export default function AdminPlansPage() {
                       </td>
 
                       <td className="px-5 py-4">
-                        <button
-                          type="button"
+                        <div
                           onClick={() => handleToggleAutoRenew(tx.id)}
+                          role="switch"
+                          aria-checked={tx.autoRenew}
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === ' ' || e.key === 'Enter') {
+                              e.preventDefault();
+                              handleToggleAutoRenew(tx.id);
+                            }
+                          }}
                           aria-label={tr('adminPlansLabelEnableAutoRenew', 'Enable Auto-Renew')}
-                          className="w-10 h-5 rounded-full transition-colors relative cursor-pointer"
+                          className="w-10 h-5 rounded-full transition-colors relative cursor-pointer select-none"
                           style={{
                             backgroundColor: tx.autoRenew ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
                           }}
                         >
                           <div 
-                            className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${tx.autoRenew ? 'right-0.5' : 'left-0.5'}`} 
+                            className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${tx.autoRenew ? 'right-0.5' : 'left-0.5'}`} 
                           />
-                        </button>
+                        </div>
                       </td>
 
                       <td className="px-5 py-4 font-mono text-[11px] opacity-70">
@@ -1916,6 +2590,8 @@ export default function AdminPlansPage() {
                             setModalAmount(tx.amount);
                             setModalInterval(tx.billingInterval);
                             setModalAutoRenew(tx.autoRenew);
+                            setModalPaymentMode(tx.gateway === 'wallet' ? 'wallet' : 'gateway');
+                            setModalGateway(tx.gateway === 'wallet' ? 'stripe' : (tx.gateway || 'stripe'));
                             setIsTxModalOpen(true);
                           }}
                           className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85 mr-1"
@@ -1934,7 +2610,7 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* 3. TRANSACTION MODAL (Add/Edit) */}
+      {/* 3. TRANSACTION MODAL (Add/Edit with Slide-Toggles for Payment Mode & Gateways) */}
       {isTxModalOpen && (
         <div 
           role="dialog"
@@ -2000,6 +2676,70 @@ export default function AdminPlansPage() {
                 </select>
               </div>
 
+              {/* PAYMENT PURCHASE MODE SELECTION WITH SLIDE-TOGGLES */}
+              <div className="p-3 rounded-2xl border space-y-2.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <span className="text-[10px] font-black uppercase tracking-wider block opacity-70" style={{ color: 'var(--color-text)' }}>
+                  {tr('adminPlansModalPaymentMode', 'Payment Source to Purchase Plan')}
+                </span>
+
+                {/* Segmented Switcher for Wallet Balance vs Payment Gateway */}
+                <div className="flex p-1 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setModalPaymentMode('gateway')}
+                    className="flex-1 py-1.5 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    style={modalPaymentMode === 'gateway' ? {
+                      backgroundColor: 'var(--color-inner-dark)',
+                      color: 'var(--color-primary)',
+                      border: '1px solid var(--color-border)'
+                    } : { color: 'var(--color-text-secondary)' }}
+                  >
+                    <CreditCard className="h-3 w-3" />
+                    <span>Payment Gateway</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setModalPaymentMode('wallet')}
+                    className="flex-1 py-1.5 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    style={modalPaymentMode === 'wallet' ? {
+                      backgroundColor: 'var(--color-inner-dark)',
+                      color: 'var(--color-emerald, #10b981)',
+                      border: '1px solid var(--color-border)'
+                    } : { color: 'var(--color-text-secondary)' }}
+                  >
+                    <Wallet className="h-3 w-3" />
+                    <span>Wallet Balance</span>
+                  </button>
+                </div>
+
+                {modalPaymentMode === 'gateway' ? (
+                  <div className="space-y-1">
+                    <label className="block font-bold text-[11px] opacity-80">{tr('adminPlansLabelSelectGateway', 'Select Payment Gateway')}</label>
+                    <select
+                      value={modalGateway}
+                      onChange={(e) => setModalGateway(e.target.value as any)}
+                      className="w-full px-3 py-2 rounded-xl border outline-none font-bold cursor-pointer transition text-xs"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                    >
+                      {availableGateways.map(gw => (
+                        <option key={gw.id} value={gw.id}>
+                          {gw.name} ({gw.description})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div 
+                    className="p-2 rounded-xl border text-[11px] flex items-center gap-2"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                    <span>{tr('adminPlansModalWalletNote', 'Plan purchase amount will settle against customer store wallet balance.')}</span>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block font-bold mb-1">{tr('adminPlansLabelBillingInterval', 'Billing Interval')}</label>
@@ -2041,16 +2781,33 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
+              {/* Slide-Toggle for Modal Auto-Renew */}
               <div className="pt-1">
-                <label className="flex items-center gap-2 cursor-pointer font-bold">
-                  <input
-                    type="checkbox"
-                    checked={modalAutoRenew}
-                    onChange={(e) => setModalAutoRenew(e.target.checked)}
-                    className="rounded border"
-                  />
+                <div
+                  onClick={() => setModalAutoRenew(!modalAutoRenew)}
+                  role="switch"
+                  aria-checked={modalAutoRenew}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === ' ' || e.key === 'Enter') {
+                      e.preventDefault();
+                      setModalAutoRenew(!modalAutoRenew);
+                    }
+                  }}
+                  className="flex items-center gap-2.5 cursor-pointer select-none font-bold text-xs"
+                >
+                  <div 
+                    className="w-10 h-5 rounded-full transition-colors relative shrink-0"
+                    style={{
+                      backgroundColor: modalAutoRenew ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
+                    }}
+                  >
+                    <div 
+                      className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${modalAutoRenew ? 'right-0.5' : 'left-0.5'}`} 
+                    />
+                  </div>
                   <span>{tr('adminPlansLabelEnableAutoRenew', 'Enable Auto-Renew')}</span>
-                </label>
+                </div>
               </div>
             </div>
 

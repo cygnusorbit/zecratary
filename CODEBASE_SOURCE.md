@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.94",
+  "version": "8.1.95",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.94",
+  "version": "8.1.95",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -17065,10 +17065,11 @@ import Link from 'next/link';
 import { 
   CreditCard, Sparkles, Plus, Trash2, Edit3, Check, RefreshCw, 
   RotateCcw, CheckCircle2, AlertCircle, Shield, Zap, Flame, 
-  Lock, Eye, Cpu, Database, Search, SlidersHorizontal, DollarSign,
+  Lock, Eye, Cpu, Database, Search, DollarSign,
   Users, TrendingUp, X, ExternalLink, Layers
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
+import { DynamicTokenIcon } from '@/components/DynamicTokenIcon';
 
 export interface PlanConfig {
   id: string;
@@ -17208,7 +17209,7 @@ export default function AdminPlansPage() {
   const [saving, setSaving] = useState<boolean>(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  // Dynamic Currency & Token Telemetry
+  // Dynamic Currency & Token Telemetry (Synced with /admin/token-setting)
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [currencyCode, setCurrencyCode] = useState('USD');
   const [tokenSymbol, setTokenSymbol] = useState('🪙');
@@ -17296,14 +17297,44 @@ export default function AdminPlansPage() {
   const [modalInterval, setModalInterval] = useState<'monthly' | 'annual'>('monthly');
   const [modalAutoRenew, setModalAutoRenew] = useState(true);
 
-  // Fetch token settings from /api/admin/token-setting
+  // Fetch token settings from /api/admin/token-setting with comprehensive payload fallback
   const fetchTokenSetting = useCallback(async () => {
+    // 1. Instant hydration from localStorage to prevent flash
+    if (typeof window !== 'undefined') {
+      const cachedSym = localStorage.getItem('zecratary_token_symbol');
+      const cachedName = localStorage.getItem('zecratary_token_name');
+      if (cachedSym) setTokenSymbol(cachedSym);
+      if (cachedName) setTokenName(cachedName);
+    }
+
     try {
+      // 2. Query /api/admin/token-setting
       const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
-        if (data.tokenName) setTokenName(data.tokenName);
+        const cfg = data.tokenSettings || data.settings || data;
+        const sym = cfg?.tokenSymbol || data?.tokenSymbol;
+        const nameVal = cfg?.tokenName || data?.tokenName;
+
+        if (sym) {
+          setTokenSymbol(sym);
+          if (typeof window !== 'undefined') localStorage.setItem('zecratary_token_symbol', sym);
+        }
+        if (nameVal) {
+          setTokenName(nameVal);
+          if (typeof window !== 'undefined') localStorage.setItem('zecratary_token_name', nameVal);
+        }
+        return;
+      }
+
+      // 3. Fallback to /api/tokens
+      const altRes = await fetch('/api/tokens?t=' + Date.now(), { cache: 'no-store' });
+      if (altRes.ok) {
+        const altData = await altRes.json();
+        const sym = altData.tokenSymbol || altData.symbol;
+        const nameVal = altData.tokenName || altData.name;
+        if (sym) setTokenSymbol(sym);
+        if (nameVal) setTokenName(nameVal);
       }
     } catch (_) {}
   }, []);
@@ -17373,18 +17404,56 @@ export default function AdminPlansPage() {
       loadPlans();
     };
 
+    // Dedicated Token Settings real-time event listener
+    const handleTokenUpdate = (e: any) => {
+      const newSym = e?.detail?.tokenSymbol || e?.detail?.settings?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
+      const newName = e?.detail?.tokenName || e?.detail?.settings?.tokenName || localStorage.getItem('zecratary_token_name');
+      if (newSym) setTokenSymbol(newSym);
+      if (newName) setTokenName(newName);
+      fetchTokenSetting();
+    };
+
+    // BroadcastChannel for cross-tab instant synchronization
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('zecratary_balance_channel');
+      bc.onmessage = (event) => {
+        if (event?.data?.type === 'TOKEN_SETTINGS_UPDATED') {
+          if (event.data.tokenSymbol) setTokenSymbol(event.data.tokenSymbol);
+          if (event.data.settings?.tokenName) setTokenName(event.data.settings.tokenName);
+          fetchTokenSetting();
+        }
+      };
+    } catch (_) {}
+
+    window.addEventListener('zecratary_token_settings_updated', handleTokenUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleTokenUpdate);
+    window.addEventListener('zecratary_admin_settings_updated', handleTokenUpdate);
     window.addEventListener('zecratary_plans_updated', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
+    window.addEventListener('zecratary_theme_updated', handleSync);
+    window.addEventListener('storage', (e) => {
+      if (!e.key || e.key.includes('token') || e.key.includes('plan')) {
+        handleTokenUpdate(e);
+      }
+    });
 
     return () => {
+      window.removeEventListener('zecratary_token_settings_updated', handleTokenUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleTokenUpdate);
+      window.removeEventListener('zecratary_admin_settings_updated', handleTokenUpdate);
       window.removeEventListener('zecratary_plans_updated', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+      window.removeEventListener('zecratary_theme_updated', handleSync);
+      if (bc) {
+        bc.close();
+      }
     };
   }, [fetchTokenSetting, fetchSystemSettings, loadPlans, tr]);
 
@@ -17407,7 +17476,7 @@ export default function AdminPlansPage() {
     setIsFree(Boolean(preset.isFree));
     setStatus({
       type: 'success',
-      msg: `Loaded preset: ${preset.name}`
+      msg: `${tr('adminPlansPresetLoaded', 'Loaded preset')}: ${preset.name}`
     });
   };
 
@@ -17544,7 +17613,7 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Delete plan safely (protecting taster default and cascading user reassignment)
+  // Delete plan safely (protecting taster default)
   const handleDeletePlan = async (plan: PlanConfig) => {
     if (plan.slug === 'taster' || plan.isDefault) {
       alert(tr('adminPlansCannotDeleteDefault', 'Cannot delete default free plan (taster)'));
@@ -17585,7 +17654,7 @@ export default function AdminPlansPage() {
 
   // Restore Default Seeded Plans
   const handleResetDefaults = async () => {
-    if (!confirm('Restore default subscription packages (Taster, Nutrition Pro, Executive Chef)?')) return;
+    if (!confirm(tr('adminPlansConfirmRestore', 'Restore default subscription packages (Taster, Nutrition Pro, Executive Chef)?'))) return;
     setSaving(true);
     try {
       const res = await fetch('/api/admin/plans', {
@@ -17680,21 +17749,21 @@ export default function AdminPlansPage() {
 
   return (
     <div 
-      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 pb-24 font-sans transition-colors duration-200 box-border"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 pb-24 font-sans transition-colors duration-200 box-border space-y-6"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* Top Header with Telemetry Badges & Action Bar */}
+      {/* 1. TOP HEADER (Clear Title, Sync Badges, Global Utilities) */}
       <div 
-        className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b pb-5 pt-2" 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-5 pt-3" 
         style={{ borderColor: 'var(--color-border)' }}
       >
-        <div>
-          <div className="flex items-center gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
               <CreditCard className="h-6 w-6" /> {tr('adminPlansTitle', 'Subscription Plans & Pricing Packages')}
             </h1>
             <div 
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-xl border text-[11px] font-bold shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border text-[11px] font-bold shadow-xs"
               style={{ 
                 backgroundColor: 'var(--color-inner-dark)', 
                 borderColor: 'var(--color-border)', 
@@ -17705,54 +17774,24 @@ export default function AdminPlansPage() {
               <span>{tr('adminPlansSyncBadge', 'Synced with PostgreSQL & MySQL')}</span>
             </div>
           </div>
-          <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {tr('adminPlansSubtitle', 'Configure billing intervals, token quotas, AI model access, and feature limits synced to PostgreSQL & MySQL.')}
           </p>
         </div>
 
-        {/* Global Toolbar & Tab Switcher */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Tabs */}
-          <div 
-            className="flex p-1 rounded-xl border mr-1"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveTab('plans')}
-              className="px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer"
-              style={activeTab === 'plans' ? {
-                backgroundColor: 'var(--color-card)',
-                color: 'var(--color-primary)',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-              } : { color: 'var(--color-text-secondary)' }}
-            >
-              {tr('adminPlansTabPlans', 'Subscription Plans')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('transactions')}
-              className="px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer"
-              style={activeTab === 'transactions' ? {
-                backgroundColor: 'var(--color-card)',
-                color: 'var(--color-primary)',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-              } : { color: 'var(--color-text-secondary)' }}
-            >
-              {tr('adminPlansTabTransactions', 'Plan Transactions Ledger')}
-            </button>
-          </div>
-
+        {/* Global Utilities (Reload, Reset Defaults) */}
+        <div className="flex items-center gap-2.5 shrink-0">
           <button
             type="button"
             onClick={loadPlans}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-xs disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-bold transition hover:opacity-85 cursor-pointer shadow-xs disabled:opacity-50"
             style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
+              backgroundColor: 'var(--color-card)', 
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
+            title={tr('adminPlansReloadBtn', 'Reload')}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>{tr('adminPlansReloadBtn', 'Reload')}</span>
@@ -17761,24 +17800,91 @@ export default function AdminPlansPage() {
           <button
             type="button"
             onClick={handleResetDefaults}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-xs"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-bold transition hover:opacity-85 cursor-pointer shadow-xs"
             style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
+              backgroundColor: 'var(--color-card)', 
               borderColor: 'var(--color-border)',
               color: 'var(--color-text-secondary)'
             }}
+            title={tr('adminPlansResetDefaults', 'Reset Defaults')}
           >
             <RotateCcw className="h-3.5 w-3.5" />
             <span>{tr('adminPlansResetDefaults', 'Reset Defaults')}</span>
           </button>
+        </div>
+      </div>
 
+      {/* 2. DEDICATED NAVIGATION TAB BAR & CONTEXTUAL ACTIONS */}
+      <div 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-2 rounded-2xl border shadow-sm transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+      >
+        {/* Navigation Tabs (Subscription Plans vs Plan Transactions Ledger) */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setActiveTab('plans')}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer"
+            style={activeTab === 'plans' ? {
+              backgroundColor: 'var(--color-card)',
+              color: 'var(--color-primary)',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+              border: '1px solid var(--color-border)'
+            } : { 
+              color: 'var(--color-text-secondary)',
+              border: '1px solid transparent'
+            }}
+          >
+            <Layers className="h-4 w-4" />
+            <span>{tr('adminPlansTabPlans', 'Subscription Plans')}</span>
+            <span 
+              className="px-2 py-0.5 rounded-full text-[10px] font-mono font-black"
+              style={{ 
+                backgroundColor: activeTab === 'plans' ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                color: activeTab === 'plans' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+              }}
+            >
+              {plans.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('transactions')}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer"
+            style={activeTab === 'transactions' ? {
+              backgroundColor: 'var(--color-card)',
+              color: 'var(--color-primary)',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+              border: '1px solid var(--color-border)'
+            } : { 
+              color: 'var(--color-text-secondary)',
+              border: '1px solid transparent'
+            }}
+          >
+            <CreditCard className="h-4 w-4" />
+            <span>{tr('adminPlansTabTransactions', 'Plan Transactions Ledger')}</span>
+            <span 
+              className="px-2 py-0.5 rounded-full text-[10px] font-mono font-black"
+              style={{ 
+                backgroundColor: activeTab === 'transactions' ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                color: activeTab === 'transactions' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+              }}
+            >
+              {transactions.length}
+            </span>
+          </button>
+        </div>
+
+        {/* View-Specific Contextual Action Button */}
+        <div className="flex items-center gap-2">
           {activeTab === 'plans' ? (
             <button
               type="button"
               onClick={handleResetForm}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer shadow-xs"
               style={{ 
-                backgroundColor: 'var(--color-inner-dark)', 
+                backgroundColor: 'var(--color-card)', 
                 borderColor: 'var(--color-emerald, #10b981)',
                 color: 'var(--color-emerald, #10b981)'
               }}
@@ -17795,7 +17901,7 @@ export default function AdminPlansPage() {
                 setModalAmount(8.99);
                 setIsTxModalOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer shadow-xs text-white"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition hover:opacity-90 cursor-pointer shadow-sm text-white"
               style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
             >
               <Plus className="h-4 w-4" />
@@ -17805,34 +17911,42 @@ export default function AdminPlansPage() {
         </div>
       </div>
 
-      {/* Quick Presets Bar (Source 3) */}
-      {activeTab === 'plans' && (
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          <span className="text-[11px] font-bold uppercase tracking-wider opacity-60">Quick Presets:</span>
-          <button
-            type="button"
-            onClick={() => applyPreset(DEFAULT_PRESET_NUTRITION_PRO)}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-bold transition cursor-pointer hover:opacity-80"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-          >
-            <Zap className="h-3.5 w-3.5 text-emerald-400" />
-            <span>{tr('adminPlansPresetNutritionPro', 'Preset: Nutrition Pro (Paid, Macros Active)')}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPreset(DEFAULT_PRESET_TASTER)}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-bold transition cursor-pointer hover:opacity-80"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-          >
-            <Lock className="h-3.5 w-3.5" />
-            <span>{tr('adminPlansPresetTaster', 'Preset: Taster (Free, Macros Locked)')}</span>
-          </button>
-        </div>
-      )}
-
       {/* TAB 1: SUBSCRIPTION PLANS & MOCKUP */}
       {activeTab === 'plans' && (
-        <div className="space-y-8">
+        <div className="space-y-6">
+          {/* Quick-Fill Presets Sub-Banner */}
+          <div 
+            className="p-3.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 shadow-xs transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+              <span className="text-xs font-extrabold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+                {tr('adminPlansQuickPresets', 'Quick Presets:')}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => applyPreset(DEFAULT_PRESET_NUTRITION_PRO)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer hover:opacity-85 shadow-xs"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+              >
+                <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                <span>{tr('adminPlansPresetNutritionPro', 'Preset: Nutrition Pro (Paid, Macros Active)')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset(DEFAULT_PRESET_TASTER)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer hover:opacity-85 shadow-xs"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                <Lock className="h-3.5 w-3.5" />
+                <span>{tr('adminPlansPresetTaster', 'Preset: Taster (Free, Macros Locked)')}</span>
+              </button>
+            </div>
+          </div>
+
           {/* Main 2-Column Responsive Layout: Editor (Left 7 cols) & Live Card Mockup (Right 5 cols) */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* LEFT COLUMN: PLAN CONFIGURATION EDITOR (7 Cols) */}
@@ -17858,8 +17972,15 @@ export default function AdminPlansPage() {
                 </div>
 
                 {editingId && (
-                  <span className="px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                    Editing: {name}
+                  <span 
+                    className="px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold border"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    {tr('adminPlansEditingBadge', 'Editing: {name}').replace('{name}', name)}
                   </span>
                 )}
               </div>
@@ -17884,7 +18005,7 @@ export default function AdminPlansPage() {
                       }
                     }}
                     placeholder={tr('adminPlansPlaceholderName', 'e.g. Culinary Pro')}
-                    className="w-full px-3 py-2 rounded-xl border font-bold outline-none"
+                    className="w-full px-3 py-2 rounded-xl border font-bold outline-none transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -17902,7 +18023,7 @@ export default function AdminPlansPage() {
                     value={slug}
                     onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                     placeholder={tr('adminPlansPlaceholderSlug', 'e.g. culinary-pro')}
-                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -17920,7 +18041,7 @@ export default function AdminPlansPage() {
                     value={badge}
                     onChange={(e) => setBadge(e.target.value)}
                     placeholder={tr('adminPlansPlaceholderBadge', 'e.g. Most Popular, Best Value')}
-                    className="w-full px-3 py-2 rounded-xl border font-bold outline-none"
+                    className="w-full px-3 py-2 rounded-xl border font-bold outline-none transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -17930,7 +18051,7 @@ export default function AdminPlansPage() {
               <div className="p-4 rounded-2xl border space-y-3" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                    Billing & Pricing ({currencyCode})
+                    {tr('adminPlansBillingPricingHeading', 'Billing & Pricing ({currency})').replace('{currency}', currencyCode)}
                   </span>
 
                   <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
@@ -17968,7 +18089,7 @@ export default function AdminPlansPage() {
                       spellCheck="false"
                       value={monthlyPriceDollars}
                       onChange={(e) => setMonthlyPriceDollars(parseFloat(e.target.value) || 0)}
-                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none disabled:opacity-40"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none disabled:opacity-40 transition"
                       style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     />
                   </div>
@@ -17988,7 +18109,7 @@ export default function AdminPlansPage() {
                       spellCheck="false"
                       value={annualPriceDollars}
                       onChange={(e) => setAnnualPriceDollars(parseFloat(e.target.value) || 0)}
-                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none disabled:opacity-40"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none disabled:opacity-40 transition"
                       style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     />
                   </div>
@@ -18006,7 +18127,7 @@ export default function AdminPlansPage() {
                       value={descriptionMonthly}
                       onChange={(e) => setDescriptionMonthly(e.target.value)}
                       placeholder={tr('adminPlansPlaceholderMonthlyDesc', 'e.g. Ideal for passionate home cooks.')}
-                      className="w-full px-3 py-2 rounded-xl border outline-none font-medium"
+                      className="w-full px-3 py-2 rounded-xl border outline-none font-medium transition"
                       style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     />
                   </div>
@@ -18022,18 +18143,24 @@ export default function AdminPlansPage() {
                       value={descriptionAnnual}
                       onChange={(e) => setDescriptionAnnual(e.target.value)}
                       placeholder={tr('adminPlansPlaceholderAnnualDesc', 'e.g. Maximum savings with yearly billing.')}
-                      className="w-full px-3 py-2 rounded-xl border outline-none font-medium"
+                      className="w-full px-3 py-2 rounded-xl border outline-none font-medium transition"
                       style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Tokens & Recipe Capacity */}
+              {/* Tokens & Recipe Capacity (With Dynamic Token Emoji Sync) */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <div>
                   <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                    {tr('adminPlansLabelMonthlyTokens', 'Monthly Token Grant ({symbol})').replace('{symbol}', tokenSymbol)}
+                    <span className="flex items-center gap-1.5">
+                      <span>{tr('adminPlansLabelMonthlyTokens', 'Monthly Token Grant')}</span>
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px]" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <DynamicTokenIcon size={12} symbol={tokenSymbol} />
+                        <span>{tokenName}</span>
+                      </span>
+                    </span>
                   </label>
                   <input
                     type="number"
@@ -18045,14 +18172,20 @@ export default function AdminPlansPage() {
                     spellCheck="false"
                     value={tokensMonthly}
                     onChange={(e) => setTokensMonthly(parseInt(e.target.value, 10) || 0)}
-                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
 
                 <div>
                   <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                    {tr('adminPlansLabelAnnualTokens', 'Annual Token Grant ({symbol})').replace('{symbol}', tokenSymbol)}
+                    <span className="flex items-center gap-1.5">
+                      <span>{tr('adminPlansLabelAnnualTokens', 'Annual Token Grant')}</span>
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px]" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <DynamicTokenIcon size={12} symbol={tokenSymbol} />
+                        <span>{tokenName}</span>
+                      </span>
+                    </span>
                   </label>
                   <input
                     type="number"
@@ -18064,7 +18197,7 @@ export default function AdminPlansPage() {
                     spellCheck="false"
                     value={tokensAnnual}
                     onChange={(e) => setTokensAnnual(parseInt(e.target.value, 10) || 0)}
-                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -18082,10 +18215,10 @@ export default function AdminPlansPage() {
                     spellCheck="false"
                     value={maxSavedRecipes}
                     onChange={(e) => setMaxSavedRecipes(parseInt(e.target.value, 10) || 0)}
-                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                    className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
-                  <span className="text-[10px] opacity-60 mt-0.5 block">(-1 = Unlimited)</span>
+                  <span className="text-[10px] opacity-60 mt-0.5 block">{tr('adminPlansUnlimitedHint', '(-1 = Unlimited)')}</span>
                 </div>
               </div>
 
@@ -18155,13 +18288,13 @@ export default function AdminPlansPage() {
                     onChange={(e) => setNewFeatureText(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleAddFeature(); }}
                     placeholder={tr('adminPlansPlaceholderFeature', 'e.g. Real-time ingredient nutritional breakdowns')}
-                    className="flex-1 px-3 py-2 rounded-xl border text-xs outline-none font-medium"
+                    className="flex-1 px-3 py-2 rounded-xl border text-xs outline-none font-medium transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                   <button
                     type="button"
                     onClick={handleAddFeature}
-                    className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                    className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-85 cursor-pointer shadow-xs"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
                   >
                     {tr('adminPlansAddFeatureBtn', '+ Add Feature')}
@@ -18172,7 +18305,7 @@ export default function AdminPlansPage() {
                   {features.map((feat, idx) => (
                     <div 
                       key={idx}
-                      className="px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-2 shadow-xs"
+                      className="px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-2 shadow-xs transition"
                       style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                     >
                       <div className="flex items-center gap-2">
@@ -18182,7 +18315,9 @@ export default function AdminPlansPage() {
                       <button
                         type="button"
                         onClick={() => handleRemoveFeature(idx)}
-                        className="text-red-400 hover:text-red-300 p-1 cursor-pointer"
+                        className="hover:opacity-75 p-1 cursor-pointer"
+                        style={{ color: '#ef4444' }}
+                        title="Remove feature"
                       >
                         ✕
                       </button>
@@ -18197,7 +18332,7 @@ export default function AdminPlansPage() {
                   <button
                     type="button"
                     onClick={handleResetForm}
-                    className="px-4 py-2.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                    className="px-4 py-2.5 rounded-xl border text-xs font-bold transition hover:opacity-85 cursor-pointer shadow-xs"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
                   >
                     {tr('adminPlansBtnCancelEdit', 'Cancel Edit')}
@@ -18217,8 +18352,8 @@ export default function AdminPlansPage() {
               </div>
             </div>
 
-            {/* RIGHT COLUMN: INTERACTIVE LIVE PRICING CARD MOCKUP (5 Cols) */}
-            <div className="lg:col-span-5 space-y-4">
+            {/* RIGHT COLUMN: STICKY LIVE PRICING CARD MOCKUP (5 Cols) */}
+            <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-6 self-start">
               <div className="space-y-1">
                 <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                   <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
@@ -18231,7 +18366,7 @@ export default function AdminPlansPage() {
 
               {/* Interactive Billing Interval Switcher */}
               <div 
-                className="flex p-1.5 rounded-2xl border transition-colors duration-200"
+                className="flex p-1.5 rounded-2xl border transition-colors duration-200 shadow-sm"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
               >
                 <button
@@ -18241,8 +18376,7 @@ export default function AdminPlansPage() {
                   style={mockupBillingInterval === 'monthly' ? {
                     backgroundColor: 'var(--color-card)',
                     color: 'var(--color-primary)',
-                    borderColor: 'var(--color-primary)',
-                    borderWidth: '1px'
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
                   } : { color: 'var(--color-text-secondary)' }}
                 >
                   {tr('adminPlansMockupMonthly', 'Monthly Billing')}
@@ -18255,13 +18389,19 @@ export default function AdminPlansPage() {
                   style={mockupBillingInterval === 'annual' ? {
                     backgroundColor: 'var(--color-card)',
                     color: 'var(--color-primary)',
-                    borderColor: 'var(--color-primary)',
-                    borderWidth: '1px'
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
                   } : { color: 'var(--color-text-secondary)' }}
                 >
                   <span>{tr('adminPlansMockupAnnual', 'Annual Billing')}</span>
                   {savingsPercent > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-400">
+                    <span 
+                      className="px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald, #10b981)',
+                        color: 'var(--color-emerald, #10b981)'
+                      }}
+                    >
                       {tr('adminPlansMockupSaveBadge', 'Save ~{pct}%').replace('{pct}', String(savingsPercent))}
                     </span>
                   )}
@@ -18294,7 +18434,7 @@ export default function AdminPlansPage() {
 
                 <div>
                   <h4 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                    {name || 'Plan Title'}
+                    {name || tr('adminPlansDefaultPlanTitle', 'Plan Title')}
                   </h4>
                   <p className="text-xs mt-1 font-medium leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
                     {mockupBillingInterval === 'monthly' ? descriptionMonthly : descriptionAnnual}
@@ -18304,8 +18444,8 @@ export default function AdminPlansPage() {
                 {/* Price Display */}
                 <div className="border-t border-b py-4" style={{ borderColor: 'var(--color-border)' }}>
                   {isFree ? (
-                    <div className="text-3xl font-black text-emerald-400">
-                      Free
+                    <div className="text-3xl font-black" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                      {tr('adminPlansPriceFree', 'Free')}
                     </div>
                   ) : (
                     <div className="flex items-baseline gap-1">
@@ -18318,21 +18458,35 @@ export default function AdminPlansPage() {
                     </div>
                   )}
 
-                  {/* Token Grant Badge */}
+                  {/* Dynamic Token Grant Badge */}
                   <div className="flex items-center gap-2 mt-2">
-                    <span className="px-2.5 py-1 rounded-xl text-[11px] font-black font-mono border flex items-center gap-1.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                      <span>{tokenSymbol}</span>
+                    <span className="px-2.5 py-1 rounded-xl text-[11px] font-black font-mono border flex items-center gap-1.5 shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                      <DynamicTokenIcon size={14} symbol={tokenSymbol} />
                       <span>
                         {(tr('adminPlansMockupTokensPerCycle', '{tokens} {symbol} / cycle')).replace('{tokens}', (mockupBillingInterval === 'monthly' ? tokensMonthly : tokensAnnual).toLocaleString()).replace('{symbol}', tokenName)}
                       </span>
                     </span>
                     {canViewMacros && !isFree ? (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                      <span 
+                        className="px-2 py-0.5 rounded text-[10px] font-bold border flex items-center gap-1"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald, #10b981)',
+                          color: 'var(--color-emerald, #10b981)'
+                        }}
+                      >
                         <CheckCircle2 className="h-3 w-3" />
                         {tr('adminPlansMacrosActive', 'Macros Active')}
                       </span>
                     ) : (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                      <span 
+                        className="px-2 py-0.5 rounded text-[10px] font-bold border flex items-center gap-1"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'rgba(245, 158, 11, 0.4)',
+                          color: '#f59e0b'
+                        }}
+                      >
                         <Lock className="h-3 w-3" />
                         {tr('adminPlansMacrosLocked', 'Macros Locked (blur)')}
                       </span>
@@ -18340,7 +18494,7 @@ export default function AdminPlansPage() {
                   </div>
                 </div>
 
-                {/* Nutritional Macro Analysis Telemetry Mockup Preview (Source 3) */}
+                {/* Nutritional Macro Analysis Telemetry Mockup Preview */}
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2 relative"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -18351,10 +18505,12 @@ export default function AdminPlansPage() {
                       {tr('adminPlansDailyMacros', 'Daily Average Macros')}
                     </span>
                     {canViewMacros && !isFree ? (
-                      <span className="text-[9px] font-extrabold text-emerald-400 uppercase">Unlocked</span>
+                      <span className="text-[9px] font-extrabold uppercase" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                        {tr('adminPlansMacroUnlocked', 'Unlocked')}
+                      </span>
                     ) : (
-                      <span className="text-[9px] font-extrabold text-amber-400 uppercase flex items-center gap-1">
-                        <Lock className="h-2.5 w-2.5" /> Gated
+                      <span className="text-[9px] font-extrabold text-amber-500 uppercase flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5" /> {tr('adminPlansMacroGated', 'Gated')}
                       </span>
                     )}
                   </div>
@@ -18367,11 +18523,11 @@ export default function AdminPlansPage() {
                     </div>
                     <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
                       <span className="block text-[9px] opacity-60">{tr('adminPlansProtein', 'Protein')}</span>
-                      <span className="text-xs font-black text-emerald-400">32g</span>
+                      <span className="text-xs font-black" style={{ color: 'var(--color-emerald, #10b981)' }}>32g</span>
                     </div>
                     <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
                       <span className="block text-[9px] opacity-60">{tr('adminPlansCarbs', 'Carbs')}</span>
-                      <span className="text-xs font-black text-amber-400">45g</span>
+                      <span className="text-xs font-black text-amber-500">45g</span>
                     </div>
                     <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
                       <span className="block text-[9px] opacity-60">{tr('adminPlansFat', 'Fat')}</span>
@@ -18383,7 +18539,8 @@ export default function AdminPlansPage() {
                     <div className="text-center pt-1">
                       <Link 
                         href="/subscriptions"
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:underline cursor-pointer"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold hover:underline cursor-pointer"
+                        style={{ color: 'var(--color-emerald, #10b981)' }}
                       >
                         <span>{tr('adminPlansUpgradeToUnlock', 'Upgrade to Unlock Macros')}</span>
                         <ExternalLink className="h-3 w-3" />
@@ -18395,7 +18552,7 @@ export default function AdminPlansPage() {
                 {/* Models Access Tags */}
                 <div className="space-y-1.5">
                   <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-60">
-                    Included AI Models
+                    {tr('adminPlansIncludedAiModels', 'Included AI Models')}
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {allowedModels.map(m => (
@@ -18413,13 +18570,15 @@ export default function AdminPlansPage() {
                 {/* Features Checklist */}
                 <div className="space-y-2">
                   <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-60">
-                    Features & Quotas
+                    {tr('adminPlansFeaturesAndQuotas', 'Features & Quotas')}
                   </span>
                   <ul className="space-y-1.5 text-xs font-medium" style={{ color: 'var(--color-text)' }}>
                     <li className="flex items-center gap-2">
                       <Check className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
                       <span>
-                        {maxSavedRecipes === -1 ? tr('adminPlansUnlimitedRecipes', 'Unlimited Recipes') : `${maxSavedRecipes} Saved Recipes Capacity`}
+                        {maxSavedRecipes === -1 
+                          ? tr('adminPlansUnlimitedRecipes', 'Unlimited Recipes') 
+                          : tr('adminPlansSavedRecipesLimit', '{count} Saved Recipes Capacity').replace('{count}', String(maxSavedRecipes))}
                       </span>
                     </li>
                     {features.map((feat, idx) => (
@@ -18521,7 +18680,9 @@ export default function AdminPlansPage() {
 
                           <td className="px-5 py-4 font-mono font-bold">
                             {p.isFree ? (
-                              <span className="text-emerald-400 font-extrabold">Free</span>
+                              <span className="font-extrabold" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                                {tr('adminPlansPriceFree', 'Free')}
+                              </span>
                             ) : (
                               <span>
                                 {currencySymbol}{p.monthlyPriceDollars.toFixed(2)} / {currencySymbol}{p.annualPriceDollars.toFixed(2)}
@@ -18530,16 +18691,33 @@ export default function AdminPlansPage() {
                           </td>
 
                           <td className="px-5 py-4 font-mono font-semibold" style={{ color: 'var(--color-text)' }}>
-                            {tokenSymbol} {p.tokensMonthly.toLocaleString()} / mo
+                            <div className="inline-flex items-center gap-1.5">
+                              <DynamicTokenIcon size={14} symbol={tokenSymbol} />
+                              <span>{p.tokensMonthly.toLocaleString()} / mo</span>
+                            </div>
                           </td>
 
                           <td className="px-5 py-4">
                             {p.canViewMacros && !p.isFree ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                              <span 
+                                className="px-2 py-0.5 rounded text-[10px] font-bold border"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-emerald, #10b981)',
+                                  color: 'var(--color-emerald, #10b981)'
+                                }}
+                              >
                                 {tr('adminPlansMacrosActive', 'Macros Active')}
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                              <span 
+                                className="px-2 py-0.5 rounded text-[10px] font-bold border"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'rgba(245, 158, 11, 0.4)',
+                                  color: '#f59e0b'
+                                }}
+                              >
                                 {tr('adminPlansMacrosLocked', 'Macros Locked (blur)')}
                               </span>
                             )}
@@ -18607,11 +18785,11 @@ export default function AdminPlansPage() {
           {/* Quick Metrics Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div 
-              className="p-5 rounded-3xl border shadow-md space-y-1"
+              className="p-5 rounded-3xl border shadow-md space-y-1 transition-colors duration-200"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <span className="text-[11px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1.5">
-                <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
+                <DollarSign className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
                 {tr('adminPlansMetricTotalRevenue', 'Total Revenue')}
               </span>
               <span className="text-2xl font-black block" style={{ color: 'var(--color-primary)' }}>
@@ -18620,7 +18798,7 @@ export default function AdminPlansPage() {
             </div>
 
             <div 
-              className="p-5 rounded-3xl border shadow-md space-y-1"
+              className="p-5 rounded-3xl border shadow-md space-y-1 transition-colors duration-200"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <span className="text-[11px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1.5">
@@ -18633,11 +18811,11 @@ export default function AdminPlansPage() {
             </div>
 
             <div 
-              className="p-5 rounded-3xl border shadow-md space-y-1"
+              className="p-5 rounded-3xl border shadow-md space-y-1 transition-colors duration-200"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <span className="text-[11px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1.5">
-                <Shield className="h-3.5 w-3.5 text-amber-400" />
+                <Shield className="h-3.5 w-3.5 text-amber-500" />
                 {tr('adminPlansMetricFreeUsers', 'Free Taster Accounts')}
               </span>
               <span className="text-2xl font-black block">
@@ -18646,7 +18824,7 @@ export default function AdminPlansPage() {
             </div>
 
             <div 
-              className="p-5 rounded-3xl border shadow-md space-y-1"
+              className="p-5 rounded-3xl border shadow-md space-y-1 transition-colors duration-200"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <span className="text-[11px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1.5">
@@ -18661,7 +18839,7 @@ export default function AdminPlansPage() {
 
           {/* Search & Filter Toolbar */}
           <div 
-            className="p-4 rounded-3xl border flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md"
+            className="p-4 rounded-3xl border flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
             <div className="relative w-full sm:w-80">
@@ -18675,7 +18853,7 @@ export default function AdminPlansPage() {
                 value={txSearch}
                 onChange={(e) => setTxSearch(e.target.value)}
                 placeholder={tr('adminPlansSearchPlaceholder', 'Search by email, transaction ID, or plan...')}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none transition"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
             </div>
@@ -18684,7 +18862,7 @@ export default function AdminPlansPage() {
               <select
                 value={txPlanFilter}
                 onChange={(e) => setTxPlanFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl border text-xs outline-none font-bold cursor-pointer"
+                className="px-3 py-2 rounded-xl border text-xs outline-none font-bold cursor-pointer transition"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
                 <option value="all">{tr('adminPlansFilterAllPlans', 'All Plans')}</option>
@@ -18696,7 +18874,7 @@ export default function AdminPlansPage() {
               <select
                 value={txStatusFilter}
                 onChange={(e) => setTxStatusFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl border text-xs outline-none font-bold cursor-pointer"
+                className="px-3 py-2 rounded-xl border text-xs outline-none font-bold cursor-pointer transition"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
                 <option value="all">{tr('adminPlansFilterAllStatus', 'All Statuses')}</option>
@@ -18709,7 +18887,7 @@ export default function AdminPlansPage() {
 
           {/* Transactions Table */}
           <div 
-            className="border rounded-3xl overflow-hidden shadow-xl"
+            className="border rounded-3xl overflow-hidden shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
             <div className="overflow-x-auto">
@@ -18746,7 +18924,9 @@ export default function AdminPlansPage() {
 
                       <td className="px-5 py-4 font-mono font-bold">
                         {tx.amount === 0 ? (
-                          <span className="text-emerald-400 font-extrabold">Free ($0.00)</span>
+                          <span className="font-extrabold" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                            {tr('adminPlansPriceFree', 'Free')} ($0.00)
+                          </span>
                         ) : (
                           <span>{currencySymbol}{tx.amount.toFixed(2)} {tx.currency}</span>
                         )}
@@ -18756,7 +18936,11 @@ export default function AdminPlansPage() {
                         <button
                           type="button"
                           onClick={() => handleToggleAutoRenew(tx.id)}
-                          className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${tx.autoRenew ? 'bg-emerald-500' : 'bg-gray-400 opacity-60'}`}
+                          aria-label={tr('adminPlansLabelEnableAutoRenew', 'Enable Auto-Renew')}
+                          className="w-10 h-5 rounded-full transition-colors relative cursor-pointer"
+                          style={{
+                            backgroundColor: tx.autoRenew ? 'var(--color-emerald, #10b981)' : 'var(--color-border)'
+                          }}
                         >
                           <div 
                             className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${tx.autoRenew ? 'right-0.5' : 'left-0.5'}`} 
@@ -18769,7 +18953,14 @@ export default function AdminPlansPage() {
                       </td>
 
                       <td className="px-5 py-4">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${tx.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-gray-500/10 text-gray-400 border border-gray-500/30'}`}>
+                        <span 
+                          className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase border"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: tx.status === 'active' ? 'var(--color-emerald, #10b981)' : 'var(--color-border)',
+                            color: tx.status === 'active' ? 'var(--color-emerald, #10b981)' : 'var(--color-text-secondary)'
+                          }}
+                        >
                           {tx.status}
                         </span>
                       </td>
@@ -18788,7 +18979,7 @@ export default function AdminPlansPage() {
                           }}
                           className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85 mr-1"
                           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                          title="Edit Transaction"
+                          title={tr('adminPlansEditTxTooltip', 'Edit Transaction')}
                         >
                           <Edit3 className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                         </button>
@@ -18802,15 +18993,16 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* Transaction Modal (Add/Edit) */}
+      {/* 3. TRANSACTION MODAL (Add/Edit) */}
       {isTxModalOpen && (
         <div 
           role="dialog"
-          aria-label="Payment Transaction Modal"
+          aria-modal="true"
+          aria-label={txEditingId ? tr('adminPlansModalEditPaymentTitle', 'Edit Payment Transaction') : tr('adminPlansModalAddPaymentTitle', 'Record New Plan Payment')}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
         >
           <div 
-            className="w-full max-w-md rounded-3xl p-6 border shadow-2xl space-y-4 animate-in fade-in zoom-in-95"
+            className="w-full max-w-md rounded-3xl p-6 border shadow-2xl space-y-4 animate-in fade-in zoom-in-95 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
@@ -18839,7 +19031,7 @@ export default function AdminPlansPage() {
                   value={modalEmail}
                   onChange={(e) => setModalEmail(e.target.value)}
                   placeholder="e.g. chef@gourmet.com"
-                  className="w-full px-3 py-2 rounded-xl border outline-none font-bold"
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-bold transition"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -18856,11 +19048,13 @@ export default function AdminPlansPage() {
                       setModalAmount(modalInterval === 'monthly' ? targetP.monthlyPriceDollars : targetP.annualPriceDollars);
                     }
                   }}
-                  className="w-full px-3 py-2 rounded-xl border outline-none font-bold cursor-pointer"
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-bold cursor-pointer transition"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
                   {plans.map(p => (
-                    <option key={p.slug} value={p.slug}>{p.name} ({p.isFree ? 'Free' : `${currencySymbol}${p.monthlyPriceDollars}`})</option>
+                    <option key={p.slug} value={p.slug}>
+                      {p.name} ({p.isFree ? tr('adminPlansPriceFree', 'Free') : `${currencySymbol}${p.monthlyPriceDollars}`})
+                    </option>
                   ))}
                 </select>
               </div>
@@ -18878,11 +19072,11 @@ export default function AdminPlansPage() {
                         setModalAmount(iv === 'monthly' ? targetP.monthlyPriceDollars : targetP.annualPriceDollars);
                       }
                     }}
-                    className="w-full px-3 py-2 rounded-xl border outline-none font-bold cursor-pointer"
+                    className="w-full px-3 py-2 rounded-xl border outline-none font-bold cursor-pointer transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
-                    <option value="monthly">Monthly</option>
-                    <option value="annual">Annual</option>
+                    <option value="monthly">{tr('adminPlansIntervalMonthly', 'Monthly')}</option>
+                    <option value="annual">{tr('adminPlansIntervalAnnual', 'Annual')}</option>
                   </select>
                 </div>
 
@@ -18900,7 +19094,7 @@ export default function AdminPlansPage() {
                     spellCheck="false"
                     value={modalAmount}
                     onChange={(e) => setModalAmount(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-2 rounded-xl border outline-none font-mono font-bold"
+                    className="w-full px-3 py-2 rounded-xl border outline-none font-mono font-bold transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -18914,7 +19108,7 @@ export default function AdminPlansPage() {
                     onChange={(e) => setModalAutoRenew(e.target.checked)}
                     className="rounded border"
                   />
-                  <span>Enable Auto-Renew</span>
+                  <span>{tr('adminPlansLabelEnableAutoRenew', 'Enable Auto-Renew')}</span>
                 </label>
               </div>
             </div>
@@ -18923,7 +19117,7 @@ export default function AdminPlansPage() {
               <button
                 type="button"
                 onClick={() => setIsTxModalOpen(false)}
-                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-85 cursor-pointer shadow-xs"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
               >
                 {tr('adminPlansBtnCancel', 'Cancel')}
@@ -18942,13 +19136,13 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* Status Toast Banner */}
+      {/* 4. STATUS TOAST BANNER */}
       {status && (
         <div
           className="fixed bottom-6 right-6 p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2 shadow-2xl z-50 animate-in slide-in-from-bottom-5"
           style={{
             backgroundColor: 'var(--color-card)',
-            borderColor: status.type === 'success' ? 'var(--color-emerald, #10b981)' : 'rgba(239, 68, 68, 0.4)',
+            borderColor: status.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444',
             color: status.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444'
           }}
         >
@@ -51747,6 +51941,8 @@ export async function GET() {
     success: true,
     tokenSettings: finalConfig,
     settings: finalConfig,
+    tokenSymbol: finalConfig.tokenSymbol,
+    tokenName: finalConfig.tokenName,
     currency,
     currencySymbol,
     plans,
@@ -78049,7 +78245,7 @@ export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: Dy
       if (stored) setActiveSymbol(stored);
 
       const handleSettingsUpdate = (e: any) => {
-        const sym = e?.detail?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
+        const sym = e?.detail?.tokenSymbol || e?.detail?.settings?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
         if (sym) setActiveSymbol(sym);
       };
 
@@ -78063,14 +78259,18 @@ export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: Dy
     }
   }, [symbol]);
 
-  // If icon is a URL (HTTP, HTTPS, or root path)
-  if (icon && (icon.startsWith('http') || icon.startsWith('/'))) {
+  // If icon or activeSymbol is a remote or local image URL
+  const targetImage = (icon && (icon.startsWith('http') || icon.startsWith('/'))) 
+    ? icon 
+    : (activeSymbol && (activeSymbol.startsWith('http') || activeSymbol.startsWith('/')) ? activeSymbol : null);
+
+  if (targetImage) {
     return (
       <img 
-        src={icon} 
+        src={targetImage} 
         alt="Token" 
         style={{ width: `${size}px`, height: `${size}px` }} 
-        className={`inline-block object-contain ${className}`} 
+        className={`inline-block object-contain shrink-0 ${className}`} 
       />
     );
   }
@@ -78080,7 +78280,7 @@ export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: Dy
     return (
       <span 
         style={{ fontSize: `${size}px`, lineHeight: 1 }} 
-        className={`inline-flex items-center justify-center select-none ${className}`}
+        className={`inline-flex items-center justify-center select-none shrink-0 ${className}`}
       >
         {activeSymbol}
       </span>
@@ -78088,7 +78288,7 @@ export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: Dy
   }
 
   // Fallback to themed Coins icon
-  return <Coins style={{ width: `${size}px`, height: `${size}px` }} className={className} />;
+  return <Coins style={{ width: `${size}px`, height: `${size}px` }} className={`shrink-0 ${className}`} />;
 }
 
 export default DynamicTokenIcon;
