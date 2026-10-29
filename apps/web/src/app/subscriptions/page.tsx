@@ -6,13 +6,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { 
   Layers, CheckCircle2, AlertCircle, ShieldCheck, ArrowRight, 
-  Coins, Wallet, RefreshCw, Sparkles, Zap, Lock, Calendar, 
+  Wallet, RefreshCw, Sparkles, Zap, Lock, Calendar, 
   HelpCircle, ChevronDown, Check, X, Search, ChevronLeft, ChevronRight,
   ExternalLink, CreditCard, Shield, AlertTriangle, Clock, Ban, Landmark,
-  Copy, Info, ArrowUpRight
+  Copy, Info, ArrowUpRight, Building
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { DynamicTokenIcon, TokenEmojiLoader } from '@/components/DynamicTokenIcon';
 
 export interface SubscriptionPlan {
   id: string;
@@ -47,7 +48,6 @@ export interface SubscriptionPlan {
   trialBadge?: string;
   monthlyBadge?: string;
   annualBadge?: string;
-  // Dynamic sync with /admin/plans
   allowWalletPayment?: boolean;
   allow_wallet_payment?: boolean;
   allowGatewayPayment?: boolean;
@@ -83,66 +83,6 @@ export interface PaymentTransaction {
   createdAt?: string;
 }
 
-const DEFAULT_PLANS: SubscriptionPlan[] = [
-  {
-    id: 'preset_taster',
-    name: 'Taster',
-    slug: 'taster',
-    is_free: true,
-    monthly_price_dollars: 0,
-    annual_price_dollars: 0,
-    tokensMonthly: 25000,
-    tokensAnnual: 25000,
-    token_limit: 25000,
-    trialBadge: 'Free Forever',
-    description_monthly: 'Essential culinary companion for exploring AI recipes.',
-    description_annual: 'Essential culinary companion for exploring AI recipes.',
-    features: ['25,000 Culinary AI Tokens / month', 'Basic Recipe Generator', 'Standard Ingredient Conversion', 'Community Cookbooks Access'],
-    allowWalletPayment: false,
-    allowGatewayPayment: false,
-    allowedGateways: []
-  },
-  {
-    id: 'preset_nutrition_pro',
-    name: 'Nutrition Pro',
-    slug: 'nutrition-pro',
-    is_free: false,
-    monthly_price_dollars: 8.99,
-    annual_price_dollars: 59.99,
-    tokensMonthly: 250000,
-    tokensAnnual: 3000000,
-    token_limit: 250000,
-    popular: true,
-    monthlyBadge: 'Popular',
-    annualBadge: 'Save ~44%',
-    description_monthly: 'Advanced meal planning with macro telemetry and custom diets.',
-    description_annual: 'Ultimate savings on personalized culinary formulation.',
-    features: ['250,000 Foodie AI Tokens / month', 'Full Macronutrient Tracking (Macros)', 'Automated Aisle Grocery Consolidation', 'AI Smart Sub-Recipe Formulator'],
-    allowWalletPayment: true,
-    allowGatewayPayment: true,
-    allowedGateways: ['stripe', 'paypal', 'manual']
-  },
-  {
-    id: 'preset_executive_chef',
-    name: 'Executive Chef',
-    slug: 'executive-chef',
-    is_free: false,
-    monthly_price_dollars: 19.99,
-    annual_price_dollars: 149.99,
-    tokensMonthly: 1000000,
-    tokensAnnual: 12000000,
-    token_limit: 1000000,
-    monthlyBadge: 'Best Value',
-    annualBadge: 'VIP Value',
-    description_monthly: 'Unrestricted culinary power for chefs and nutritionists.',
-    description_annual: 'VIP annual pass with maximum token allowances.',
-    features: ['1,000,000 Foodie AI Tokens / month', 'Unlimited Saved Recipes', 'Priority High-Tier Model Access', 'Custom Dietary Export to PDF & CSV'],
-    allowWalletPayment: true,
-    allowGatewayPayment: true,
-    allowedGateways: ['stripe', 'paypal', 'manual']
-  }
-];
-
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', THB: '฿', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$'
 };
@@ -177,19 +117,40 @@ export default function SubscriptionsPage() {
   const { t } = useTranslation();
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [plans, setPlans] = useState<SubscriptionPlan[]>(DEFAULT_PLANS);
+  
+  // Default hardcoded plans removed - populated dynamically from database
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
   const [activeTransaction, setActiveTransaction] = useState<PaymentTransaction | null>(null);
 
   // Billing Interval: 'monthly' | 'annual'
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
 
-  // Balances, Currency & Gateway Settings
+  // Balances & Currency
   const [tokenBalance, setTokenBalance] = useState<number>(25000);
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
   const [currencyCode, setCurrencyCode] = useState<string>('USD');
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
-  const [tokenIdentity, setTokenIdentity] = useState<{ tokenName: string; tokenSymbol: string }>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
+
+  // Dynamic Token Identity with NO default hardcoded emoji (replaces default emoji with loader animation)
+  const [tokenIdentity, setTokenIdentity] = useState<{ tokenName: string; tokenSymbol: string }>(() => {
+    if (typeof window !== 'undefined') {
+      const storedSym = localStorage.getItem('zecratary_token_symbol');
+      const storedName = localStorage.getItem('zecratary_token_name');
+      return {
+        tokenName: storedName || '',
+        tokenSymbol: storedSym || ''
+      };
+    }
+    return { tokenName: '', tokenSymbol: '' };
+  });
+
+  const [isTokenEmojiLoading, setIsTokenEmojiLoading] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return !localStorage.getItem('zecratary_token_symbol');
+    }
+    return true;
+  });
 
   // Dynamic Gateway and Wallet Configuration (Synced with /admin/payment-gateway & /admin/wallet-settings)
   const [gatewayConfig, setGatewayConfig] = useState<any>({
@@ -242,7 +203,6 @@ export default function SubscriptionsPage() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Normalization helper for incoming transactions
   const normalizeTransaction = (tx: any): PaymentTransaction => ({
     id: tx.id || tx.transaction_id || `tx_${Date.now()}`,
     customerName: tx.customerName || tx.customer_name || tx.userName || '',
@@ -260,7 +220,6 @@ export default function SubscriptionsPage() {
     created_at: tx.created_at || tx.createdAt || new Date().toISOString()
   });
 
-  // Normalization helper for incoming plans (Fully synchronized with /admin/plans)
   const normalizePlan = (plan: any): SubscriptionPlan => {
     const rawSlug = String(plan.slug || plan.id || 'plan').toLowerCase().trim();
     const baseSlug = cleanSlug(rawSlug);
@@ -312,7 +271,6 @@ export default function SubscriptionsPage() {
       (tokensMonthly * 12)
     );
 
-    // Sync Payment Settings from /admin/plans
     const allowWallet = isFree ? false : (
       plan.allowWalletPayment !== undefined ? Boolean(plan.allowWalletPayment) :
       plan.allow_wallet_payment !== undefined ? Boolean(plan.allow_wallet_payment) : true
@@ -331,7 +289,7 @@ export default function SubscriptionsPage() {
 
     return {
       id: plan.id || baseSlug,
-      name: plan.name || baseSlug.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+      name: plan.name || baseSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
       slug: baseSlug,
       is_free: isFree,
       monthly_price_dollars: monthlyPrice,
@@ -352,7 +310,86 @@ export default function SubscriptionsPage() {
     };
   };
 
-  // Fetch plans, user billing info, and balances
+  // Authoritative token settings synchronization with /admin/token-setting
+  const fetchTokenSetting = useCallback(async () => {
+    if (typeof window !== 'undefined') {
+      const cachedSym = localStorage.getItem('zecratary_token_symbol');
+      const cachedName = localStorage.getItem('zecratary_token_name');
+      if (cachedSym) {
+        setTokenIdentity({
+          tokenName: cachedName || 'Tokens',
+          tokenSymbol: cachedSym
+        });
+        setIsTokenEmojiLoading(false);
+      }
+    }
+
+    try {
+      // 1. Check /api/admin/token-setting
+      const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const cfg = data.tokenSettings || data.settings || data;
+        const sym = cfg?.tokenSymbol || cfg?.token_symbol || data?.tokenSymbol || data?.token_symbol;
+        const nameVal = cfg?.tokenName || cfg?.token_name || data?.tokenName || data?.token_name;
+        if (sym) {
+          setTokenIdentity({
+            tokenName: nameVal || 'Tokens',
+            tokenSymbol: sym
+          });
+          setIsTokenEmojiLoading(false);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_token_symbol', sym);
+            if (nameVal) localStorage.setItem('zecratary_token_name', nameVal);
+          }
+          return;
+        }
+      }
+
+      // 2. Check /api/admin/token-settings
+      const altAdmin = await fetch('/api/admin/token-settings?t=' + Date.now(), { cache: 'no-store' });
+      if (altAdmin.ok) {
+        const aData = await altAdmin.json();
+        const cfg = aData.tokenSettings || aData.settings || aData;
+        const sym = cfg?.tokenSymbol || cfg?.token_symbol || aData?.tokenSymbol;
+        const nameVal = cfg?.tokenName || cfg?.token_name || aData?.tokenName;
+        if (sym) {
+          setTokenIdentity({
+            tokenName: nameVal || 'Tokens',
+            tokenSymbol: sym
+          });
+          setIsTokenEmojiLoading(false);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_token_symbol', sym);
+            if (nameVal) localStorage.setItem('zecratary_token_name', nameVal);
+          }
+          return;
+        }
+      }
+
+      // 3. Fallback to /api/tokens
+      const altRes = await fetch('/api/tokens?t=' + Date.now(), { cache: 'no-store' });
+      if (altRes.ok) {
+        const altData = await altRes.json();
+        const sym = altData.tokenSymbol || altData.symbol;
+        const nameVal = altData.tokenName || altData.name;
+        if (sym) {
+          setTokenIdentity({
+            tokenName: nameVal || 'Tokens',
+            tokenSymbol: sym
+          });
+          setIsTokenEmojiLoading(false);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_token_symbol', sym);
+            if (nameVal) localStorage.setItem('zecratary_token_name', nameVal);
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // Fetch plans, user billing info, and balances directly from PostgreSQL/MySQL
   const fetchSubscriptionData = useCallback(async (activeUser: User | null) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -399,35 +436,8 @@ export default function SubscriptionsPage() {
       setCurrencyCode(activeCur.toUpperCase());
       setCurrencySymbol(CURRENCY_SYMBOLS[activeCur.toUpperCase()] || '$');
 
-      // 2. Ingest Plans from /api/admin/plans (Authoritative source)
-      let fetchedPlansList: any[] = [];
-      try {
-        const pRes = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
-        if (pRes.ok) {
-          const pData = await pRes.json();
-          const list = Array.isArray(pData)
-            ? pData
-            : (pData?.packages || pData?.plans || pData?.configs || pData?.subscriptionPlans || pData?.data);
-          if (Array.isArray(list) && list.length > 0) {
-            fetchedPlansList = [...list];
-          }
-        }
-      } catch (_) {}
-
-      if (fetchedPlansList.length === 0) {
-        try {
-          const pubRes = await fetch(`/api/plans?t=${Date.now()}`, { cache: 'no-store' });
-          if (pubRes.ok) {
-            const pubData = await pubRes.json();
-            const list = Array.isArray(pubData)
-              ? pubData
-              : (pubData?.packages || pubData?.plans || pubData?.configs || pubData?.subscriptionPlans || pubData?.data);
-            if (Array.isArray(list) && list.length > 0) {
-              fetchedPlansList = [...list];
-            }
-          }
-        } catch (_) {}
-      }
+      // 2. Authoritative Token Settings Ingestion
+      await fetchTokenSetting();
 
       // 3. User Billing Details & Transactions Ingestion
       try {
@@ -484,34 +494,48 @@ export default function SubscriptionsPage() {
               }
             }
 
-            if (fetchedPlansList.length === 0 && bData.plans && Array.isArray(bData.plans) && bData.plans.length > 0) {
-              fetchedPlansList = bData.plans;
-            }
-
-            if (bData.tokenIdentity) {
-              setTokenIdentity(bData.tokenIdentity);
+            // Only synchronize tokenIdentity if the endpoint actually retrieved a non-empty symbol
+            if (bData.tokenIdentity && bData.tokenIdentity.tokenSymbol) {
+              setTokenIdentity({
+                tokenName: bData.tokenIdentity.tokenName || 'Tokens',
+                tokenSymbol: bData.tokenIdentity.tokenSymbol
+              });
+              setIsTokenEmojiLoading(false);
             }
           }
         }
       } catch (_) {}
 
-      // 4. Token Settings Ingestion
+      // 4. Ingest Plans strictly from /api/admin/plans (Authoritative source - NO DEFAULT_PLANS)
+      let fetchedPlansList: any[] = [];
       try {
-        const tokRes = await fetch(`/api/token-settings?t=${Date.now()}`, { cache: 'no-store' });
-        if (tokRes.ok) {
-          const tokData = await tokRes.json();
-          if (tokData?.tokenIdentity) {
-            setTokenIdentity(tokData.tokenIdentity);
-          } else if (tokData?.token_name || tokData?.token_symbol) {
-            setTokenIdentity({
-              tokenName: tokData.token_name || 'Tokens',
-              tokenSymbol: tokData.token_symbol || '🪙'
-            });
+        const pRes = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          const list = Array.isArray(pData)
+            ? pData
+            : (pData?.packages || pData?.plans || pData?.configs || pData?.subscriptionPlans || pData?.data);
+          if (Array.isArray(list) && list.length > 0) {
+            fetchedPlansList = [...list];
           }
         }
       } catch (_) {}
 
-      // Finalize Plan Normalization
+      if (fetchedPlansList.length === 0) {
+        try {
+          const pubRes = await fetch(`/api/plans?t=${Date.now()}`, { cache: 'no-store' });
+          if (pubRes.ok) {
+            const pubData = await pubRes.json();
+            const list = Array.isArray(pubData)
+              ? pubData
+              : (pubData?.packages || pubData?.plans || pubData?.configs || pubData?.subscriptionPlans || pubData?.data);
+            if (Array.isArray(list) && list.length > 0) {
+              fetchedPlansList = [...list];
+            }
+          }
+        } catch (_) {}
+      }
+
       if (fetchedPlansList.length > 0) {
         const uniqueMap = new Map<string, SubscriptionPlan>();
         fetchedPlansList.forEach((raw) => {
@@ -520,25 +544,19 @@ export default function SubscriptionsPage() {
             uniqueMap.set(norm.slug, norm);
           }
         });
-
-        let finalList = Array.from(uniqueMap.values());
-        const hasFree = finalList.some(p => p.is_free || cleanSlug(p.slug) === 'taster');
-        if (!hasFree) {
-          finalList.unshift(DEFAULT_PLANS[0]);
-        }
-        setPlans(finalList);
+        setPlans(Array.from(uniqueMap.values()));
       } else {
-        setPlans(DEFAULT_PLANS);
+        setPlans([]);
       }
 
     } catch (err) {
       console.warn('[SubscriptionsPage] Data ingestion notice:', err);
-      setPlans(DEFAULT_PLANS);
+      setPlans([]);
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
     }
-  }, [currencyCode]);
+  }, [currencyCode, fetchTokenSetting]);
 
   const fetchRef = useRef(fetchSubscriptionData);
   useEffect(() => {
@@ -570,21 +588,52 @@ export default function SubscriptionsPage() {
       }, 200);
     };
 
-    // Cross-tab broadcast listener
+    const handleTokenUpdate = (e: any) => {
+      const sym = e?.detail?.tokenSymbol || e?.detail?.settings?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
+      const nameVal = e?.detail?.tokenName || e?.detail?.settings?.tokenName || localStorage.getItem('zecratary_token_name');
+      if (sym) {
+        setTokenIdentity({
+          tokenName: nameVal || 'Tokens',
+          tokenSymbol: sym
+        });
+        setIsTokenEmojiLoading(false);
+      }
+      fetchTokenSetting();
+    };
+
     let paymentBc: BroadcastChannel | null = null;
+    let balanceBc: BroadcastChannel | null = null;
+
     try {
       paymentBc = new BroadcastChannel('zecratary_payment_sync');
       paymentBc.onmessage = () => handleDebouncedSync();
+
+      balanceBc = new BroadcastChannel('zecratary_balance_channel');
+      balanceBc.onmessage = (event) => {
+        if (event?.data?.type === 'TOKEN_SETTINGS_UPDATED' || event?.data?.tokenSymbol) {
+          const sym = event.data.tokenSymbol || event.data.settings?.tokenSymbol;
+          const nameVal = event.data.tokenName || event.data.settings?.tokenName;
+          if (sym) {
+            setTokenIdentity({
+              tokenName: nameVal || 'Tokens',
+              tokenSymbol: sym
+            });
+            setIsTokenEmojiLoading(false);
+          }
+          fetchTokenSetting();
+        }
+      };
     } catch (_) {}
 
     window.addEventListener('storage', handleDebouncedSync);
+    window.addEventListener('zecratary_token_settings_updated', handleTokenUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleTokenUpdate);
+    window.addEventListener('zecratary_token_identity_updated', handleTokenUpdate);
     window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
     window.addEventListener('zecratary_payment_gateway_updated', handleDebouncedSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleDebouncedSync);
     window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
     window.addEventListener('zecratary_wallet_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_tokens_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_token_settings_updated', handleDebouncedSync);
     window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
     window.addEventListener('zecratary_users_updated', handleDebouncedSync);
     window.addEventListener('zecratary_user_plan_updated', handleDebouncedSync);
@@ -595,14 +644,16 @@ export default function SubscriptionsPage() {
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       if (paymentBc) paymentBc.close();
+      if (balanceBc) balanceBc.close();
       window.removeEventListener('storage', handleDebouncedSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleTokenUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleTokenUpdate);
+      window.removeEventListener('zecratary_token_identity_updated', handleTokenUpdate);
       window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_payment_gateway_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_wallet_settings_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_wallet_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_tokens_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_token_settings_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_user_plan_updated', handleDebouncedSync);
@@ -610,7 +661,7 @@ export default function SubscriptionsPage() {
       window.removeEventListener('zecratary_theme_mode_changed', handleDebouncedSync);
       window.removeEventListener('zecratary_theme_changed', handleDebouncedSync);
     };
-  }, [router]);
+  }, [router, fetchTokenSetting]);
 
   const activeUserSlug = useMemo(() => {
     return cleanSlug(currentUser?.subscription_plan || (currentUser as any)?.subscriptionPlan || activeTransaction?.plan_slug || 'taster');
@@ -672,13 +723,11 @@ export default function SubscriptionsPage() {
       return;
     }
 
-    // Generate reference code for audit or manual wire transfer
     const ref = `SUB-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
     setManualRefCode(ref);
     setUserTransferSlip('');
     setCopiedRef(false);
 
-    // Pick optimal starting method permitted by the plan
     const price = billingInterval === 'annual' ? Number(plan.annual_price_dollars || 0) : Number(plan.monthly_price_dollars || 0);
     const isWalletEligible = plan.allowWalletPayment !== false && walletConfig.enabled !== false && walletConfig.allowSubscriptionPayment !== false;
     
@@ -695,8 +744,7 @@ export default function SubscriptionsPage() {
     setTargetModalPlan(plan);
   };
 
-  // Execute Plan Switch and synchronize in database
-    const executePlanSwitch = async (plan: SubscriptionPlan, paymentMethod: string, amountToPay: number) => {
+  const executePlanSwitch = async (plan: SubscriptionPlan, paymentMethod: string, amountToPay: number) => {
     if (!currentUser) return;
     setSubmitting(true);
 
@@ -737,7 +785,6 @@ export default function SubscriptionsPage() {
         })
       });
 
-      // Safe Stream Deserialization Guard
       const responseText = await res.text();
       let data: any = null;
       try {
@@ -913,7 +960,7 @@ export default function SubscriptionsPage() {
           </div>
         )}
 
-        {/* Header Bar */}
+        {/* 1. Header Bar (Clean bar: token link removed) */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
           <div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-3">
@@ -941,19 +988,6 @@ export default function SubscriptionsPage() {
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald, #10b981)' }} />
               <span>{t('reloadBtn', 'Refresh Status')}</span>
             </button>
-
-            <Link
-              href="/token"
-              className="px-4 py-2.5 rounded-xl text-xs font-bold border transition shadow-xs flex items-center gap-1.5 hover:opacity-80"
-              style={{ 
-                backgroundColor: 'var(--color-card, #0f172a)', 
-                borderColor: 'var(--color-border, #1e293b)', 
-                color: 'var(--color-text, #f8fafc)' 
-              }}
-            >
-              <Coins className="h-4 w-4 text-amber-500" />
-              <span>{tokenBalance.toLocaleString()} {tokenIdentity.tokenSymbol}</span>
-            </Link>
           </div>
         </div>
 
@@ -1114,6 +1148,7 @@ export default function SubscriptionsPage() {
               </div>
             </div>
 
+            {/* DYNAMIC TOKEN TELEMETRY WITH LOADER ANIMATION */}
             <div 
               className="p-4 rounded-2xl border transition-colors"
               style={{
@@ -1122,12 +1157,16 @@ export default function SubscriptionsPage() {
               }}
             >
               <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                <Coins className="w-3.5 h-3.5 text-amber-400" />
+                <DynamicTokenIcon symbol={tokenIdentity.tokenSymbol} size={15} loading={isTokenEmojiLoading} />
                 <span>{t('availableTokensLabel', 'Available Tokens')}</span>
               </div>
               <div className="font-bold text-base flex items-center gap-1.5" style={{ color: '#f59e0b' }}>
                 <span>{tokenBalance.toLocaleString()}</span>
-                <span className="text-xs font-semibold opacity-75">{tokenIdentity.tokenSymbol}</span>
+                {isTokenEmojiLoading ? (
+                  <TokenEmojiLoader size={13} className="ml-0.5" />
+                ) : (
+                  <span className="text-xs font-semibold opacity-75">{tokenIdentity.tokenSymbol}</span>
+                )}
               </div>
               <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
                 {t('replenishedOnCycle', 'Replenished on every billing cycle')}
@@ -1251,220 +1290,299 @@ export default function SubscriptionsPage() {
             </div>
           </div>
 
-          {/* Pricing Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {plans.map((plan) => {
-              const planBase = cleanSlug(plan.slug);
-              const isPlanFree = Boolean(plan.is_free || planBase === 'taster' || Number(plan.monthly_price_dollars || 0) === 0);
-              const isSameTier = isFreeUser ? isPlanFree : planBase === activeUserSlug;
-              const isExactActive = isFreeUser ? isPlanFree : (isSameTier && billingInterval === activeUserInterval);
-              const isMatchingTierOtherInterval = isSameTier && !isExactActive;
-
-              const price = billingInterval === 'annual' ? plan.annual_price_dollars : plan.monthly_price_dollars;
-              const badge = isPlanFree 
-                ? plan.trialBadge 
-                : (billingInterval === 'annual' ? plan.annualBadge : plan.monthlyBadge);
-              const featuresList = parsePlanFeatures(plan.features);
-
-              const tokenQuota = billingInterval === 'annual'
-                ? (plan.tokensAnnual || (plan.tokensMonthly ? plan.tokensMonthly * 12 : 3000000))
-                : (plan.tokensMonthly || plan.token_limit || (isPlanFree ? 25000 : 250000));
-
-              return (
+          {/* SKELETON LOADER ANIMATION (Replaces default hardcoded plans) */}
+          {loading && plans.length === 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-pulse">
+              {[1, 2, 3].map((n) => (
                 <div
-                  key={plan.id}
-                  className={`rounded-3xl border p-6 sm:p-8 flex flex-col justify-between transition-all duration-200 relative ${
-                    isExactActive 
-                      ? 'ring-2 ring-emerald-500/90 shadow-2xl shadow-emerald-500/15' 
-                      : (isMatchingTierOtherInterval ? 'ring-1 ring-amber-500/50 shadow-md' : 'hover:shadow-lg')
-                  }`}
+                  key={n}
+                  className="rounded-3xl border p-6 sm:p-8 flex flex-col justify-between space-y-6"
                   style={{
-                    backgroundColor: isExactActive 
-                      ? 'rgba(16, 185, 129, 0.05)' 
-                      : 'var(--color-card, #0f172a)',
-                    borderColor: isExactActive 
-                      ? 'var(--color-emerald, #10b981)' 
-                      : (isMatchingTierOtherInterval ? 'rgba(245, 158, 11, 0.4)' : 'var(--color-border, #1e293b)')
+                    backgroundColor: 'var(--color-card, #0f172a)',
+                    borderColor: 'var(--color-border, #1e293b)'
                   }}
                 >
-                  {/* Badge Ribbon */}
-                  {isExactActive ? (
-                    <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 shadow-lg flex items-center gap-1.5 z-10 animate-in fade-in">
-                      <CheckCircle2 className="w-3.5 h-3.5 fill-slate-950 text-emerald-500" />
-                      <span>{t('currentActivePlanBadge', 'Current Active Plan')}</span>
-                    </div>
-                  ) : isMatchingTierOtherInterval ? (
-                    <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md flex items-center gap-1 z-10">
-                      <Sparkles className="w-3 h-3 fill-slate-950 text-amber-500" />
-                      <span>{(t('subscribedTierBadge', 'Subscribed Tier ({interval})')).replace('{interval}', activeUserInterval === 'annual' ? t('annualBilling', 'Annual') : t('monthlyBilling', 'Monthly'))}</span>
-                    </div>
-                  ) : badge ? (
-                    <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md z-10">
-                      {badge}
-                    </div>
-                  ) : null}
-
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                        {plan.name}
-                      </h4>
-                      {isExactActive ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                          <span>{t('activePlanTag', 'Active Plan')}</span>
-                        </span>
-                      ) : isMatchingTierOtherInterval ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                          <Sparkles className="w-3 h-3 text-amber-400" />
-                          <span>{t('currentTierTag', 'Current Tier')}</span>
-                        </span>
-                      ) : null}
+                      <div className="h-6 w-32 rounded-xl bg-white/10" />
+                      <div className="h-5 w-20 rounded-md bg-white/10" />
                     </div>
+                    <div className="space-y-2">
+                      <div className="h-3.5 w-full rounded-md bg-white/5" />
+                      <div className="h-3.5 w-4/5 rounded-md bg-white/5" />
+                    </div>
+                    <div className="py-3 border-y border-white/5 space-y-2">
+                      <div className="h-9 w-28 rounded-xl bg-white/10" />
+                      <div className="h-5 w-44 rounded-md bg-white/5" />
+                    </div>
+                    <div className="space-y-2.5 pt-2">
+                      <div className="h-3 w-28 rounded bg-white/5" />
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <div className="w-3.5 h-3.5 rounded-full bg-emerald-500/20" />
+                          <div className="h-3 w-3/4 rounded bg-white/5" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="pt-6 border-t border-white/5">
+                    <div className="h-12 w-full rounded-2xl bg-white/10" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : plans.length === 0 ? (
+            <div 
+              className="p-10 rounded-3xl border text-center space-y-3"
+              style={{
+                backgroundColor: 'var(--color-card, #0f172a)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <Layers className="w-10 h-10 mx-auto opacity-40 text-emerald-400" />
+              <h4 className="text-base font-bold" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                {t('noPlansAvailable', 'No Subscription Plans Available')}
+              </h4>
+              <p className="text-xs opacity-60 max-w-md mx-auto" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('noPlansDesc', 'There are currently no active packages configured in the database. Please check back later or refresh.')}
+              </p>
+              <button
+                type="button"
+                onClick={() => fetchRef.current(currentUser)}
+                className="px-4 py-2 rounded-xl text-xs font-bold border transition hover:opacity-80 cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #070b13)',
+                  borderColor: 'var(--color-border, #1e293b)',
+                  color: 'var(--color-emerald, #10b981)'
+                }}
+              >
+                <RefreshCw className="w-3.5 h-3.5 inline mr-1.5" />
+                <span>{t('reloadPlansBtn', 'Reload Packages')}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {plans.map((plan) => {
+                const planBase = cleanSlug(plan.slug);
+                const isPlanFree = Boolean(plan.is_free || planBase === 'taster' || Number(plan.monthly_price_dollars || 0) === 0);
+                const isSameTier = isFreeUser ? isPlanFree : planBase === activeUserSlug;
+                const isExactActive = isFreeUser ? isPlanFree : (isSameTier && billingInterval === activeUserInterval);
+                const isMatchingTierOtherInterval = isSameTier && !isExactActive;
 
-                    <p className="text-xs opacity-70 leading-relaxed min-h-[36px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                      {billingInterval === 'annual' ? (plan.description_annual || plan.description_monthly) : plan.description_monthly}
-                    </p>
+                const price = billingInterval === 'annual' ? plan.annual_price_dollars : plan.monthly_price_dollars;
+                const badge = isPlanFree 
+                  ? plan.trialBadge 
+                  : (billingInterval === 'annual' ? plan.annualBadge : plan.monthlyBadge);
+                const featuresList = parsePlanFeatures(plan.features);
 
-                    {/* Price Tag */}
-                    <div className="py-2 border-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-3xl sm:text-4xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                          {isPlanFree ? '0.00' : `${currencySymbol}${Number(price || 0).toFixed(2)}`}
-                        </span>
-                        {!isPlanFree && (
-                          <span className="text-xs opacity-60 font-semibold" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                            {billingInterval === 'annual' ? t('perYear', '/ year') : t('perMonth', '/ month')}
+                const tokenQuota = billingInterval === 'annual'
+                  ? (plan.tokensAnnual || (plan.tokensMonthly ? plan.tokensMonthly * 12 : 3000000))
+                  : (plan.tokensMonthly || plan.token_limit || (isPlanFree ? 25000 : 250000));
+
+                return (
+                  <div
+                    key={plan.id}
+                    className={`rounded-3xl border p-6 sm:p-8 flex flex-col justify-between transition-all duration-200 relative ${
+                      isExactActive 
+                        ? 'ring-2 ring-emerald-500/90 shadow-2xl shadow-emerald-500/15' 
+                        : (isMatchingTierOtherInterval ? 'ring-1 ring-amber-500/50 shadow-md' : 'hover:shadow-lg')
+                    }`}
+                    style={{
+                      backgroundColor: isExactActive 
+                        ? 'rgba(16, 185, 129, 0.05)' 
+                        : 'var(--color-card, #0f172a)',
+                      borderColor: isExactActive 
+                        ? 'var(--color-emerald, #10b981)' 
+                        : (isMatchingTierOtherInterval ? 'rgba(245, 158, 11, 0.4)' : 'var(--color-border, #1e293b)')
+                    }}
+                  >
+                    {/* Badge Ribbon */}
+                    {isExactActive ? (
+                      <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 shadow-lg flex items-center gap-1.5 z-10 animate-in fade-in">
+                        <CheckCircle2 className="w-3.5 h-3.5 fill-slate-950 text-emerald-500" />
+                        <span>{t('currentActivePlanBadge', 'Current Active Plan')}</span>
+                      </div>
+                    ) : isMatchingTierOtherInterval ? (
+                      <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md flex items-center gap-1 z-10">
+                        <Sparkles className="w-3 h-3 fill-slate-950 text-amber-500" />
+                        <span>{(t('subscribedTierBadge', 'Subscribed Tier ({interval})')).replace('{interval}', activeUserInterval === 'annual' ? t('annualBilling', 'Annual') : t('monthlyBilling', 'Monthly'))}</span>
+                      </div>
+                    ) : badge ? (
+                      <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md z-10">
+                        {badge}
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                          {plan.name}
+                        </h4>
+                        {isExactActive ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>{t('activePlanTag', 'Active Plan')}</span>
                           </span>
-                        )}
+                        ) : isMatchingTierOtherInterval ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                            <Sparkles className="w-3 h-3 text-amber-400" />
+                            <span>{t('currentTierTag', 'Current Tier')}</span>
+                          </span>
+                        ) : null}
                       </div>
 
-                      {/* Token Allowance Tag */}
-                      <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        <Coins className="w-3.5 h-3.5" />
-                        <span>+{tokenQuota.toLocaleString()} {tokenIdentity.tokenSymbol} / {billingInterval === 'annual' && !isPlanFree ? 'year' : 'month'}</span>
-                      </div>
+                      <p className="text-xs opacity-70 leading-relaxed min-h-[36px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                        {billingInterval === 'annual' ? (plan.description_annual || plan.description_monthly) : plan.description_monthly}
+                      </p>
 
-                      {/* Dynamic Payment Gateways & Wallet Support Badges (Synced with /admin/plans) */}
-                      {!isPlanFree && (
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          {plan.allowWalletPayment && (
-                            <span 
-                              className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border flex items-center gap-1"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark, #070b13)',
-                                borderColor: 'var(--color-emerald, #10b981)',
-                                color: 'var(--color-emerald, #10b981)'
-                              }}
-                            >
-                              <Wallet className="h-2.5 w-2.5" />
-                              <span>Wallet</span>
-                            </span>
-                          )}
-
-                          {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('stripe') && (
-                            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-blue-500/30 text-blue-400 bg-blue-500/10 flex items-center gap-1">
-                              <CreditCard className="h-2.5 w-2.5" />
-                              <span>Card</span>
-                            </span>
-                          )}
-
-                          {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('paypal') && (
-                            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-sky-500/30 text-sky-400 bg-sky-500/10 flex items-center gap-1">
-                              <Sparkles className="h-2.5 w-2.5" />
-                              <span>PayPal</span>
-                            </span>
-                          )}
-
-                          {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('manual') && (
-                            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-amber-500/30 text-amber-400 bg-amber-500/10 flex items-center gap-1">
-                              <Landmark className="h-2.5 w-2.5" />
-                              <span>Wire</span>
+                      {/* Price Tag */}
+                      <div className="py-2 border-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl sm:text-4xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                            {isPlanFree ? '0.00' : `${currencySymbol}${Number(price || 0).toFixed(2)}`}
+                          </span>
+                          {!isPlanFree && (
+                            <span className="text-xs opacity-60 font-semibold" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                              {billingInterval === 'annual' ? t('perYear', '/ year') : t('perMonth', '/ month')}
                             </span>
                           )}
                         </div>
+
+                        {/* DYNAMIC TOKEN QUOTA WITH LOADER ANIMATION UNTIL EMOJI RESOLVES */}
+                        <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          <DynamicTokenIcon symbol={tokenIdentity.tokenSymbol} size={14} loading={isTokenEmojiLoading} />
+                          <span className="flex items-center gap-1">
+                            <span>+{tokenQuota.toLocaleString()}</span>
+                            {isTokenEmojiLoading ? (
+                              <TokenEmojiLoader size={12} className="mx-0.5" />
+                            ) : (
+                              <span>{tokenIdentity.tokenName || tokenIdentity.tokenSymbol}</span>
+                            )}
+                            <span>/ {billingInterval === 'annual' && !isPlanFree ? 'year' : 'month'}</span>
+                          </span>
+                        </div>
+
+                        {/* Dynamic Payment Gateways & Wallet Support Badges */}
+                        {!isPlanFree && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            {plan.allowWalletPayment && (
+                              <span 
+                                className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border flex items-center gap-1"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark, #070b13)',
+                                  borderColor: 'var(--color-emerald, #10b981)',
+                                  color: 'var(--color-emerald, #10b981)'
+                                }}
+                              >
+                                <Wallet className="h-2.5 w-2.5" />
+                                <span>Wallet</span>
+                              </span>
+                            )}
+
+                            {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('stripe') && (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-blue-500/30 text-blue-400 bg-blue-500/10 flex items-center gap-1">
+                                <CreditCard className="h-2.5 w-2.5" />
+                                <span>Card</span>
+                              </span>
+                            )}
+
+                            {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('paypal') && (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-sky-500/30 text-sky-400 bg-sky-500/10 flex items-center gap-1">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                <span>PayPal</span>
+                              </span>
+                            )}
+
+                            {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('manual') && (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-amber-500/30 text-amber-400 bg-amber-500/10 flex items-center gap-1">
+                                <Landmark className="h-2.5 w-2.5" />
+                                <span>Wire</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Features Matrix */}
+                      <div className="space-y-2 pt-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider opacity-50" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                          {t('includedFeaturesLabel', 'Included Features')}:
+                        </span>
+                        <ul className="space-y-2 text-xs">
+                          {featuresList.map((feat, fIdx) => (
+                            <li key={fIdx} className="flex items-start gap-2">
+                              <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                              <span style={{ color: 'var(--color-text, #f8fafc)' }}>{feat}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* CTA Action Button */}
+                    <div className="pt-6 mt-6 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                      {isExactActive ? (
+                        <button
+                          type="button"
+                          disabled={true}
+                          aria-disabled="true"
+                          className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-not-allowed opacity-90 border select-none transition shadow-sm"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark, #070b13)',
+                            borderColor: 'var(--color-emerald, #10b981)',
+                            color: 'var(--color-emerald, #10b981)'
+                          }}
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>{t('currentPlanBtn', 'Current Active Plan')}</span>
+                        </button>
+                      ) : isMatchingTierOtherInterval && !isPlanFree ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPlanAction(plan)}
+                          disabled={submitting}
+                          className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md text-white hover:opacity-90 active:scale-98 disabled:opacity-50"
+                          style={{
+                            backgroundColor: 'var(--color-emerald, #10b981)'
+                          }}
+                        >
+                          <RefreshCw className={`w-4 h-4 ${submitting ? 'animate-spin' : ''}`} />
+                          <span>
+                            {billingInterval === 'annual' 
+                              ? (t('switchIntervalBtn', 'Switch to {interval} Billing')).replace('{interval}', t('annualBilling', 'Annual'))
+                              : (t('switchIntervalBtn', 'Switch to {interval} Billing')).replace('{interval}', t('monthlyBilling', 'Monthly'))}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPlanAction(plan)}
+                          disabled={submitting}
+                          className={`w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md disabled:opacity-50 ${
+                            isPlanFree ? 'border hover:bg-white/5' : 'text-white hover:opacity-90 active:scale-98'
+                          }`}
+                          style={isPlanFree ? {
+                            backgroundColor: 'var(--color-inner-dark, #070b13)',
+                            borderColor: 'var(--color-border, #1e293b)',
+                            color: 'var(--color-text, #f8fafc)'
+                          } : {
+                            backgroundColor: 'var(--color-emerald, #10b981)'
+                          }}
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                          <span>
+                            {isPlanFree 
+                              ? t('downgradeFreeBtn', 'Switch to Free Tier')
+                              : (t('upgradePlanBtn', 'Upgrade to {plan}')).replace('{plan}', plan.name)}
+                          </span>
+                        </button>
                       )}
                     </div>
-
-                    {/* Features Matrix */}
-                    <div className="space-y-2 pt-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-50" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                        {t('includedFeaturesLabel', 'Included Features')}:
-                      </span>
-                      <ul className="space-y-2 text-xs">
-                        {featuresList.map((feat, fIdx) => (
-                          <li key={fIdx} className="flex items-start gap-2">
-                            <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                            <span style={{ color: 'var(--color-text, #f8fafc)' }}>{feat}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
                   </div>
-
-                  {/* CTA Action Button */}
-                  <div className="pt-6 mt-6 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                    {isExactActive ? (
-                      <button
-                        type="button"
-                        disabled={true}
-                        aria-disabled="true"
-                        className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-not-allowed opacity-90 border select-none transition shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark, #070b13)',
-                          borderColor: 'var(--color-emerald, #10b981)',
-                          color: 'var(--color-emerald, #10b981)'
-                        }}
-                      >
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        <span>{t('currentPlanBtn', 'Current Active Plan')}</span>
-                      </button>
-                    ) : isMatchingTierOtherInterval && !isPlanFree ? (
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPlanAction(plan)}
-                        disabled={submitting}
-                        className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md text-white hover:opacity-90 active:scale-98 disabled:opacity-50"
-                        style={{
-                          backgroundColor: 'var(--color-emerald, #10b981)'
-                        }}
-                      >
-                        <RefreshCw className={`w-4 h-4 ${submitting ? 'animate-spin' : ''}`} />
-                        <span>
-                          {billingInterval === 'annual' 
-                            ? (t('switchIntervalBtn', 'Switch to {interval} Billing')).replace('{interval}', t('annualBilling', 'Annual'))
-                            : (t('switchIntervalBtn', 'Switch to {interval} Billing')).replace('{interval}', t('monthlyBilling', 'Monthly'))}
-                        </span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPlanAction(plan)}
-                        disabled={submitting}
-                        className={`w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md disabled:opacity-50 ${
-                          isPlanFree ? 'border hover:bg-white/5' : 'text-white hover:opacity-90 active:scale-98'
-                        }`}
-                        style={isPlanFree ? {
-                          backgroundColor: 'var(--color-inner-dark, #070b13)',
-                          borderColor: 'var(--color-border, #1e293b)',
-                          color: 'var(--color-text, #f8fafc)'
-                        } : {
-                          backgroundColor: 'var(--color-emerald, #10b981)'
-                        }}
-                      >
-                        <ArrowRight className="w-4 h-4" />
-                        <span>
-                          {isPlanFree 
-                            ? t('downgradeFreeBtn', 'Switch to Free Tier')
-                            : (t('upgradePlanBtn', 'Upgrade to {plan}')).replace('{plan}', plan.name)}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* SECTION 3: SUBSCRIPTION TRANSACTION HISTORY LEDGER */}
@@ -1702,7 +1820,7 @@ export default function SubscriptionsPage() {
           </div>
         </div>
 
-        {/* PAYMENT METHOD SELECTION MODAL (Synchronized with /admin/plans & /admin/payment-gateway) */}
+        {/* PAYMENT METHOD SELECTION MODAL */}
         {targetModalPlan && (
           <div 
             onClick={() => !submitting && setTargetModalPlan(null)}
@@ -1737,8 +1855,6 @@ export default function SubscriptionsPage() {
                     : Number(targetModalPlan.monthly_price_dollars || 0);
 
                   const hasWalletFunds = walletBalance >= planPrice;
-
-                  // Plan-specific authorization checked against /admin/plans
                   const isWalletPlanAllowed = targetModalPlan.allowWalletPayment !== false && walletConfig.enabled !== false && walletConfig.allowSubscriptionPayment !== false;
                   const isGatewayPlanAllowed = targetModalPlan.allowGatewayPayment !== false;
                   const allowedGws = targetModalPlan.allowedGateways || ['stripe', 'paypal', 'manual'];
@@ -1768,7 +1884,7 @@ export default function SubscriptionsPage() {
                         )}
                       </div>
 
-                      {/* Store Wallet Payment (Controlled by /admin/plans) */}
+                      {/* Store Wallet Payment */}
                       {isWalletPlanAllowed && (
                         <div className="space-y-1.5">
                           <button

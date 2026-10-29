@@ -2,73 +2,144 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Coins } from 'lucide-react';
+import { Coins, Sparkles, Zap } from 'lucide-react';
+
+export function TokenEmojiLoader({ size = 14, className = "" }: { size?: number; className?: string }) {
+  return (
+    <span 
+      className={`inline-flex items-center justify-center shrink-0 align-middle ${className}`}
+      style={{ width: `${size}px`, height: `${size}px` }}
+      title="Loading token emoji..."
+    >
+      <span 
+        className="rounded-full border-2 border-amber-400 border-t-transparent animate-spin inline-block"
+        style={{ width: `${size}px`, height: `${size}px` }}
+      />
+    </span>
+  );
+}
 
 export interface DynamicTokenIconProps {
   icon?: string;
   symbol?: string;
   size?: number;
+  loading?: boolean;
   className?: string;
+  style?: React.CSSProperties;
 }
 
-export function DynamicTokenIcon({ icon, symbol, size = 18, className = '' }: DynamicTokenIconProps) {
-  const [activeSymbol, setActiveSymbol] = useState<string>(symbol || '🪙');
+export function DynamicTokenIcon({ 
+  icon, 
+  symbol, 
+  size = 16, 
+  loading = false,
+  className = '', 
+  style = {} 
+}: DynamicTokenIconProps) {
+  const [activeSymbol, setActiveSymbol] = useState<string>(() => {
+    if (symbol) return symbol;
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('zecratary_token_symbol') || '';
+    }
+    return '';
+  });
+
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    if (loading) return true;
+    if (symbol) return false;
+    if (typeof window !== 'undefined') {
+      return !localStorage.getItem('zecratary_token_symbol');
+    }
+    return true;
+  });
 
   useEffect(() => {
     if (symbol) {
       setActiveSymbol(symbol);
+      setIsLoading(false);
       return;
     }
 
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('zecratary_token_symbol');
-      if (stored) setActiveSymbol(stored);
+      if (stored) {
+        setActiveSymbol(stored);
+        setIsLoading(false);
+      }
 
       const handleSettingsUpdate = (e: any) => {
         const sym = e?.detail?.tokenSymbol || e?.detail?.settings?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
-        if (sym) setActiveSymbol(sym);
+        if (sym) {
+          setActiveSymbol(sym);
+          setIsLoading(false);
+        }
       };
+
+      let balanceBc: BroadcastChannel | null = null;
+      try {
+        balanceBc = new BroadcastChannel('zecratary_balance_channel');
+        balanceBc.onmessage = (event) => {
+          if (event?.data?.tokenSymbol || event?.data?.settings?.tokenSymbol) {
+            const sym = event.data.tokenSymbol || event.data.settings?.tokenSymbol;
+            if (sym) {
+              setActiveSymbol(sym);
+              setIsLoading(false);
+            }
+          }
+        };
+      } catch (_) {}
 
       window.addEventListener('zecratary_token_settings_updated', handleSettingsUpdate);
       window.addEventListener('zecratary_tokens_updated', handleSettingsUpdate);
 
       return () => {
+        if (balanceBc) balanceBc.close();
         window.removeEventListener('zecratary_token_settings_updated', handleSettingsUpdate);
         window.removeEventListener('zecratary_tokens_updated', handleSettingsUpdate);
       };
     }
   }, [symbol]);
 
-  // If icon or activeSymbol is a remote or local image URL
-  const targetImage = (icon && (icon.startsWith('http') || icon.startsWith('/'))) 
+  // If explicitly loading or symbol has not yet resolved, show loader animation
+  if (loading || isLoading || (!activeSymbol && !icon)) {
+    return <TokenEmojiLoader size={size} className={className} />;
+  }
+
+  const targetImage = (icon && (icon.startsWith('http') || icon.startsWith('/') || icon.startsWith('data:image'))) 
     ? icon 
-    : (activeSymbol && (activeSymbol.startsWith('http') || activeSymbol.startsWith('/')) ? activeSymbol : null);
+    : (activeSymbol && (activeSymbol.startsWith('http') || activeSymbol.startsWith('/') || activeSymbol.startsWith('data:image')) ? activeSymbol : null);
 
   if (targetImage) {
     return (
       <img 
         src={targetImage} 
         alt="Token" 
-        style={{ width: `${size}px`, height: `${size}px` }} 
+        style={{ width: `${size}px`, height: `${size}px`, ...style }} 
         className={`inline-block object-contain shrink-0 ${className}`} 
       />
     );
   }
 
-  // Display custom unicode emoji/glyph
-  if (activeSymbol && activeSymbol !== 'Coins') {
-    return (
-      <span 
-        style={{ fontSize: `${size}px`, lineHeight: 1 }} 
-        className={`inline-flex items-center justify-center select-none shrink-0 ${className}`}
-      >
-        {activeSymbol}
-      </span>
-    );
+  const lower = activeSymbol.toLowerCase();
+  if (lower === 'coins' || lower === 'coin') {
+    return <Coins style={{ width: `${size}px`, height: `${size}px`, ...style }} className={`shrink-0 ${className}`} />;
+  }
+  if (lower === 'sparkles' || lower === 'sparkle') {
+    return <Sparkles style={{ width: `${size}px`, height: `${size}px`, ...style }} className={`shrink-0 ${className}`} />;
+  }
+  if (lower === 'zap' || lower === 'lightning' || lower === 'flash') {
+    return <Zap style={{ width: `${size}px`, height: `${size}px`, ...style }} className={`shrink-0 ${className}`} />;
   }
 
-  // Fallback to themed Coins icon
-  return <Coins style={{ width: `${size}px`, height: `${size}px` }} className={`shrink-0 ${className}`} />;
+  // Unicode emoji glyph
+  return (
+    <span 
+      style={{ fontSize: `${size}px`, lineHeight: 1, ...style }} 
+      className={`inline-flex items-center justify-center select-none shrink-0 ${className}`}
+    >
+      {activeSymbol}
+    </span>
+  );
 }
 
 export default DynamicTokenIcon;

@@ -6,14 +6,16 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { 
   Layers, CheckCircle2, AlertCircle, ShieldCheck, ArrowRight, 
-  Coins, Wallet, RefreshCw, Sparkles, Zap, Lock, Calendar, 
+  Wallet, RefreshCw, Sparkles, Zap, Lock, Calendar, 
   HelpCircle, ChevronDown, Check, X, Search, ChevronLeft, ChevronRight,
-  ExternalLink, CreditCard, Shield, AlertTriangle, Clock, Ban, Landmark
+  ExternalLink, CreditCard, Shield, AlertTriangle, Clock, Ban, Landmark,
+  Copy, Info, ArrowUpRight, Building
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { DynamicTokenIcon, TokenEmojiLoader } from '@/components/DynamicTokenIcon';
 
-interface SubscriptionPlan {
+export interface SubscriptionPlan {
   id: string;
   name: string;
   slug: string;
@@ -31,6 +33,10 @@ interface SubscriptionPlan {
   descriptionAnnual?: string;
   token_limit?: number;
   tokenLimit?: number;
+  tokensMonthly?: number;
+  tokensAnnual?: number;
+  tokens_monthly?: number;
+  tokens_annual?: number;
   recipe_library_limit?: number;
   recipeLibraryLimit?: number;
   ai_recipe_limit?: number;
@@ -42,9 +48,15 @@ interface SubscriptionPlan {
   trialBadge?: string;
   monthlyBadge?: string;
   annualBadge?: string;
+  allowWalletPayment?: boolean;
+  allow_wallet_payment?: boolean;
+  allowGatewayPayment?: boolean;
+  allow_gateway_payment?: boolean;
+  allowedGateways?: string[];
+  allowed_gateways?: string[];
 }
 
-interface PaymentTransaction {
+export interface PaymentTransaction {
   id: string;
   customerName?: string;
   customer_name?: string;
@@ -70,51 +82,6 @@ interface PaymentTransaction {
   created_at?: string;
   createdAt?: string;
 }
-
-const DEFAULT_PLANS: SubscriptionPlan[] = [
-  {
-    id: 'preset_taster',
-    name: 'Taster',
-    slug: 'taster',
-    is_free: true,
-    monthly_price_dollars: 0,
-    annual_price_dollars: 0,
-    token_limit: 50,
-    trialBadge: 'Free Forever',
-    description_monthly: 'Explore foundational culinary features with initial free tokens.',
-    description_annual: 'Explore foundational culinary features with initial free tokens.',
-    features: ['50 Foodie AI Tokens / month', 'Basic Recipe Generator', 'Standard Ingredient Conversion', 'Community Support']
-  },
-  {
-    id: 'preset_foodie_pro',
-    name: 'Foodie Pro',
-    slug: 'foodie-pro',
-    is_free: false,
-    monthly_price_dollars: 9.99,
-    annual_price_dollars: 95.88,
-    token_limit: 600,
-    popular: true,
-    monthlyBadge: 'Popular',
-    annualBadge: 'Save ~20%',
-    description_monthly: 'Advanced AI cooking partner with abundant monthly tokens and smart meal planning.',
-    description_annual: 'Advanced AI cooking partner with abundant monthly tokens and ~20% annual savings.',
-    features: ['600 Foodie AI Tokens / month', 'Unlimited Recipe Storage', 'Advanced Nutritional Macros Tracking', 'Live Culinary Web & Scraping Engine', 'Priority AI Model Access']
-  },
-  {
-    id: 'preset_master_chef',
-    name: 'Master Kitchen',
-    slug: 'master-chef',
-    is_free: false,
-    monthly_price_dollars: 24.99,
-    annual_price_dollars: 239.88,
-    token_limit: 1800,
-    monthlyBadge: 'Pro Chef',
-    annualBadge: 'Best Value',
-    description_monthly: 'The ultimate culinary suite for food enthusiasts, culinary creators, and chefs.',
-    description_annual: 'The ultimate culinary suite for food enthusiasts, culinary creators, and chefs.',
-    features: ['1,800 Foodie AI Tokens / month', 'Unlimited Recipe Storage', 'High-Resolution AI Recipe Visualizer', 'Dedicated Priority Processing', '24/7 Dedicated Support']
-  }
-];
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', THB: '฿', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$'
@@ -150,26 +117,61 @@ export default function SubscriptionsPage() {
   const { t } = useTranslation();
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [plans, setPlans] = useState<SubscriptionPlan[]>(DEFAULT_PLANS);
+  
+  // Default hardcoded plans removed - populated dynamically from database
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
   const [activeTransaction, setActiveTransaction] = useState<PaymentTransaction | null>(null);
 
   // Billing Interval: 'monthly' | 'annual'
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
 
-  // Balances, Currency & Gateway Settings
-  const [tokenBalance, setTokenBalance] = useState<number>(50);
+  // Balances & Currency
+  const [tokenBalance, setTokenBalance] = useState<number>(25000);
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
   const [currencyCode, setCurrencyCode] = useState<string>('USD');
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
-  const [tokenIdentity, setTokenIdentity] = useState<{ tokenName: string; tokenSymbol: string }>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
+
+  // Dynamic Token Identity with NO default hardcoded emoji (replaces default emoji with loader animation)
+  const [tokenIdentity, setTokenIdentity] = useState<{ tokenName: string; tokenSymbol: string }>(() => {
+    if (typeof window !== 'undefined') {
+      const storedSym = localStorage.getItem('zecratary_token_symbol');
+      const storedName = localStorage.getItem('zecratary_token_name');
+      return {
+        tokenName: storedName || '',
+        tokenSymbol: storedSym || ''
+      };
+    }
+    return { tokenName: '', tokenSymbol: '' };
+  });
+
+  const [isTokenEmojiLoading, setIsTokenEmojiLoading] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return !localStorage.getItem('zecratary_token_symbol');
+    }
+    return true;
+  });
+
+  // Dynamic Gateway and Wallet Configuration (Synced with /admin/payment-gateway & /admin/wallet-settings)
   const [gatewayConfig, setGatewayConfig] = useState<any>({
     activeGateway: 'both',
     currency: 'USD',
     currencySymbol: '$',
-    stripe: { enabled: true },
-    paypal: { enabled: true },
-    manual: { enabled: true }
+    stripe: { enabled: true, mode: 'test' },
+    paypal: { enabled: true, mode: 'sandbox' },
+    manual: { 
+      enabled: true,
+      bankName: 'Global Commercial Bank',
+      accountNumber: '4820-9182-3819-001',
+      accountHolder: 'Zecratary AI Solutions Inc.',
+      swiftCode: 'GCBNUS33',
+      instructions: 'Please include your Reference Code in the bank wire transfer note for swift verification.'
+    }
+  });
+
+  const [walletConfig, setWalletConfig] = useState<any>({
+    enabled: true,
+    allowSubscriptionPayment: true
   });
 
   // Transaction Ledger Filters & Pagination
@@ -183,8 +185,12 @@ export default function SubscriptionsPage() {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Payment Selection Modal
+  // Payment Selection Modal State
   const [targetModalPlan, setTargetModalPlan] = useState<SubscriptionPlan | null>(null);
+  const [modalPaymentMethod, setModalPaymentMethod] = useState<'wallet' | 'stripe' | 'paypal' | 'manual'>('wallet');
+  const [manualRefCode, setManualRefCode] = useState<string>('');
+  const [userTransferSlip, setUserTransferSlip] = useState<string>('');
+  const [copiedRef, setCopiedRef] = useState<boolean>(false);
 
   // FAQ Accordion
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
@@ -197,7 +203,6 @@ export default function SubscriptionsPage() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Normalization helper for incoming transactions
   const normalizeTransaction = (tx: any): PaymentTransaction => ({
     id: tx.id || tx.transaction_id || `tx_${Date.now()}`,
     customerName: tx.customerName || tx.customer_name || tx.userName || '',
@@ -215,7 +220,6 @@ export default function SubscriptionsPage() {
     created_at: tx.created_at || tx.createdAt || new Date().toISOString()
   });
 
-  // Normalization helper for incoming plans
   const normalizePlan = (plan: any): SubscriptionPlan => {
     const rawSlug = String(plan.slug || plan.id || 'plan').toLowerCase().trim();
     const baseSlug = cleanSlug(rawSlug);
@@ -251,33 +255,141 @@ export default function SubscriptionsPage() {
       annualPrice = Number((monthlyPrice * 10).toFixed(2));
     }
 
-    const tokenLimit = Number(
+    const tokensMonthly = Number(
+      plan.tokensMonthly ??
+      plan.tokens_monthly ??
       plan.token_limit ??
       plan.tokenLimit ??
       plan.monthly_tokens ??
       plan.tokenQuota ??
-      (isFree ? 50 : 500)
+      (isFree ? 25000 : 250000)
+    );
+
+    const tokensAnnual = Number(
+      plan.tokensAnnual ??
+      plan.tokens_annual ??
+      (tokensMonthly * 12)
+    );
+
+    const allowWallet = isFree ? false : (
+      plan.allowWalletPayment !== undefined ? Boolean(plan.allowWalletPayment) :
+      plan.allow_wallet_payment !== undefined ? Boolean(plan.allow_wallet_payment) : true
+    );
+
+    const allowGateway = isFree ? false : (
+      plan.allowGatewayPayment !== undefined ? Boolean(plan.allowGatewayPayment) :
+      plan.allow_gateway_payment !== undefined ? Boolean(plan.allow_gateway_payment) : true
+    );
+
+    const allowedGws = isFree ? [] : (
+      Array.isArray(plan.allowedGateways || plan.allowed_gateways)
+        ? (plan.allowedGateways || plan.allowed_gateways)
+        : ['stripe', 'paypal', 'manual']
     );
 
     return {
       id: plan.id || baseSlug,
-      name: plan.name || baseSlug.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+      name: plan.name || baseSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
       slug: baseSlug,
       is_free: isFree,
       monthly_price_dollars: monthlyPrice,
       annual_price_dollars: annualPrice,
-      token_limit: tokenLimit,
+      token_limit: tokensMonthly,
+      tokensMonthly,
+      tokensAnnual,
       trialBadge: plan.trialBadge || plan.trial_badge || (isFree ? 'Free Forever' : undefined),
       monthlyBadge: plan.monthlyBadge || plan.monthly_badge || (plan.popular ? 'Popular' : undefined),
       annualBadge: plan.annualBadge || plan.annual_badge || 'Save ~20%',
       description_monthly: plan.description_monthly || plan.descriptionMonthly || plan.description || '',
       description_annual: plan.description_annual || plan.descriptionAnnual || plan.description || plan.description_monthly || '',
       features: parsePlanFeatures(plan.featuresText || plan.features),
-      popular: Boolean(plan.popular)
+      popular: Boolean(plan.popular),
+      allowWalletPayment: allowWallet,
+      allowGatewayPayment: allowGateway,
+      allowedGateways: allowedGws
     };
   };
 
-  // Fetch plans, user billing info, and balances
+  // Authoritative token settings synchronization with /admin/token-setting
+  const fetchTokenSetting = useCallback(async () => {
+    if (typeof window !== 'undefined') {
+      const cachedSym = localStorage.getItem('zecratary_token_symbol');
+      const cachedName = localStorage.getItem('zecratary_token_name');
+      if (cachedSym) {
+        setTokenIdentity({
+          tokenName: cachedName || 'Tokens',
+          tokenSymbol: cachedSym
+        });
+        setIsTokenEmojiLoading(false);
+      }
+    }
+
+    try {
+      // 1. Check /api/admin/token-setting
+      const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const cfg = data.tokenSettings || data.settings || data;
+        const sym = cfg?.tokenSymbol || cfg?.token_symbol || data?.tokenSymbol || data?.token_symbol;
+        const nameVal = cfg?.tokenName || cfg?.token_name || data?.tokenName || data?.token_name;
+        if (sym) {
+          setTokenIdentity({
+            tokenName: nameVal || 'Tokens',
+            tokenSymbol: sym
+          });
+          setIsTokenEmojiLoading(false);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_token_symbol', sym);
+            if (nameVal) localStorage.setItem('zecratary_token_name', nameVal);
+          }
+          return;
+        }
+      }
+
+      // 2. Check /api/admin/token-settings
+      const altAdmin = await fetch('/api/admin/token-settings?t=' + Date.now(), { cache: 'no-store' });
+      if (altAdmin.ok) {
+        const aData = await altAdmin.json();
+        const cfg = aData.tokenSettings || aData.settings || aData;
+        const sym = cfg?.tokenSymbol || cfg?.token_symbol || aData?.tokenSymbol;
+        const nameVal = cfg?.tokenName || cfg?.token_name || aData?.tokenName;
+        if (sym) {
+          setTokenIdentity({
+            tokenName: nameVal || 'Tokens',
+            tokenSymbol: sym
+          });
+          setIsTokenEmojiLoading(false);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_token_symbol', sym);
+            if (nameVal) localStorage.setItem('zecratary_token_name', nameVal);
+          }
+          return;
+        }
+      }
+
+      // 3. Fallback to /api/tokens
+      const altRes = await fetch('/api/tokens?t=' + Date.now(), { cache: 'no-store' });
+      if (altRes.ok) {
+        const altData = await altRes.json();
+        const sym = altData.tokenSymbol || altData.symbol;
+        const nameVal = altData.tokenName || altData.name;
+        if (sym) {
+          setTokenIdentity({
+            tokenName: nameVal || 'Tokens',
+            tokenSymbol: sym
+          });
+          setIsTokenEmojiLoading(false);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zecratary_token_symbol', sym);
+            if (nameVal) localStorage.setItem('zecratary_token_name', nameVal);
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // Fetch plans, user billing info, and balances directly from PostgreSQL/MySQL
   const fetchSubscriptionData = useCallback(async (activeUser: User | null) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -287,7 +399,7 @@ export default function SubscriptionsPage() {
     const targetEmail = activeUser?.email || 'admin@zecratary.com';
 
     try {
-      // 1. Ingest Settings & Currency
+      // 1. Ingest Currency & Gateway Settings
       let activeCur = 'USD';
       if (typeof window !== 'undefined') {
         activeCur = localStorage.getItem('zecratary_currency') || 'USD';
@@ -298,7 +410,7 @@ export default function SubscriptionsPage() {
         if (sRes.ok) {
           const sData = await sRes.json();
           if (sData?.settings?.currency) activeCur = sData.settings.currency;
-          if (sData?.settings?.payment_settings) setGatewayConfig(sData.settings.payment_settings);
+          if (sData?.settings?.payment_settings) setGatewayConfig((prev: any) => ({ ...prev, ...sData.settings.payment_settings }));
         }
       } catch (_) {}
 
@@ -306,44 +418,26 @@ export default function SubscriptionsPage() {
         const gwRes = await fetch(`/api/admin/payment-gateway?t=${Date.now()}`, { cache: 'no-store' });
         if (gwRes.ok) {
           const gwData = await gwRes.json();
-          if (gwData?.gatewayConfig) setGatewayConfig(gwData.gatewayConfig);
+          if (gwData?.gatewayConfig) setGatewayConfig((prev: any) => ({ ...prev, ...gwData.gatewayConfig }));
+          else if (gwData?.stripe || gwData?.paypal || gwData?.manual) setGatewayConfig((prev: any) => ({ ...prev, ...gwData }));
           if (gwData?.currency) activeCur = gwData.currency;
+        }
+      } catch (_) {}
+
+      try {
+        const wRes = await fetch(`/api/admin/wallet-settings?t=${Date.now()}`, { cache: 'no-store' });
+        if (wRes.ok) {
+          const wData = await wRes.json();
+          const wCfg = wData.walletSettings || wData.settings || wData;
+          setWalletConfig(wCfg);
         }
       } catch (_) {}
 
       setCurrencyCode(activeCur.toUpperCase());
       setCurrencySymbol(CURRENCY_SYMBOLS[activeCur.toUpperCase()] || '$');
 
-      // 2. Authoritative Subscription Plans Ingestion
-      let fetchedPlansList: any[] = [];
-
-      try {
-        const pRes = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
-        if (pRes.ok) {
-          const pData = await pRes.json();
-          const list = Array.isArray(pData)
-            ? pData
-            : (pData?.packages || pData?.plans || pData?.configs || pData?.subscriptionPlans || pData?.data);
-          if (Array.isArray(list) && list.length > 0) {
-            fetchedPlansList = [...list];
-          }
-        }
-      } catch (_) {}
-
-      if (fetchedPlansList.length === 0) {
-        try {
-          const pubRes = await fetch(`/api/plans?t=${Date.now()}`, { cache: 'no-store' });
-          if (pubRes.ok) {
-            const pubData = await pubRes.json();
-            const list = Array.isArray(pubData)
-              ? pubData
-              : (pubData?.packages || pubData?.plans || pubData?.configs || pubData?.subscriptionPlans || pubData?.data);
-            if (Array.isArray(list) && list.length > 0) {
-              fetchedPlansList = [...list];
-            }
-          }
-        } catch (_) {}
-      }
+      // 2. Authoritative Token Settings Ingestion
+      await fetchTokenSetting();
 
       // 3. User Billing Details & Transactions Ingestion
       try {
@@ -351,7 +445,6 @@ export default function SubscriptionsPage() {
         if (bRes.ok) {
           const bData = await bRes.json();
           if (bData.success) {
-            // Reconcile and synchronize authoritative user state from database
             if (bData.user) {
               const u = bData.user;
               const reconciledUser: User = {
@@ -380,14 +473,6 @@ export default function SubscriptionsPage() {
               } catch (_) {}
             }
 
-            if (bData.gatewayConfig) {
-              setGatewayConfig(bData.gatewayConfig);
-              if (bData.gatewayConfig.currency) {
-                setCurrencyCode(bData.gatewayConfig.currency.toUpperCase());
-                setCurrencySymbol(bData.gatewayConfig.currencySymbol || CURRENCY_SYMBOLS[bData.gatewayConfig.currency.toUpperCase()] || '$');
-              }
-            }
-
             if (Array.isArray(bData.transactions)) {
               const normalizedTxList = bData.transactions.map(normalizeTransaction);
               setTransactions(normalizedTxList);
@@ -409,34 +494,48 @@ export default function SubscriptionsPage() {
               }
             }
 
-            if (fetchedPlansList.length === 0 && bData.plans && Array.isArray(bData.plans) && bData.plans.length > 0) {
-              fetchedPlansList = bData.plans;
-            }
-
-            if (bData.tokenIdentity) {
-              setTokenIdentity(bData.tokenIdentity);
+            // Only synchronize tokenIdentity if the endpoint actually retrieved a non-empty symbol
+            if (bData.tokenIdentity && bData.tokenIdentity.tokenSymbol) {
+              setTokenIdentity({
+                tokenName: bData.tokenIdentity.tokenName || 'Tokens',
+                tokenSymbol: bData.tokenIdentity.tokenSymbol
+              });
+              setIsTokenEmojiLoading(false);
             }
           }
         }
       } catch (_) {}
 
-      // 4. Token Settings Ingestion
+      // 4. Ingest Plans strictly from /api/admin/plans (Authoritative source - NO DEFAULT_PLANS)
+      let fetchedPlansList: any[] = [];
       try {
-        const tokRes = await fetch(`/api/token-settings?t=${Date.now()}`, { cache: 'no-store' });
-        if (tokRes.ok) {
-          const tokData = await tokRes.json();
-          if (tokData?.tokenIdentity) {
-            setTokenIdentity(tokData.tokenIdentity);
-          } else if (tokData?.token_name || tokData?.token_symbol) {
-            setTokenIdentity({
-              tokenName: tokData.token_name || 'Tokens',
-              tokenSymbol: tokData.token_symbol || '🪙'
-            });
+        const pRes = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          const list = Array.isArray(pData)
+            ? pData
+            : (pData?.packages || pData?.plans || pData?.configs || pData?.subscriptionPlans || pData?.data);
+          if (Array.isArray(list) && list.length > 0) {
+            fetchedPlansList = [...list];
           }
         }
       } catch (_) {}
 
-      // Finalize Plan Normalization
+      if (fetchedPlansList.length === 0) {
+        try {
+          const pubRes = await fetch(`/api/plans?t=${Date.now()}`, { cache: 'no-store' });
+          if (pubRes.ok) {
+            const pubData = await pubRes.json();
+            const list = Array.isArray(pubData)
+              ? pubData
+              : (pubData?.packages || pubData?.plans || pubData?.configs || pubData?.subscriptionPlans || pubData?.data);
+            if (Array.isArray(list) && list.length > 0) {
+              fetchedPlansList = [...list];
+            }
+          }
+        } catch (_) {}
+      }
+
       if (fetchedPlansList.length > 0) {
         const uniqueMap = new Map<string, SubscriptionPlan>();
         fetchedPlansList.forEach((raw) => {
@@ -445,25 +544,19 @@ export default function SubscriptionsPage() {
             uniqueMap.set(norm.slug, norm);
           }
         });
-
-        let finalList = Array.from(uniqueMap.values());
-        const hasFree = finalList.some(p => p.is_free || cleanSlug(p.slug) === 'taster');
-        if (!hasFree) {
-          finalList.unshift(DEFAULT_PLANS[0]);
-        }
-        setPlans(finalList);
+        setPlans(Array.from(uniqueMap.values()));
       } else {
-        setPlans(DEFAULT_PLANS);
+        setPlans([]);
       }
 
     } catch (err) {
-      console.warn('[SubscriptionsPage] Data ingestion warning:', err);
-      setPlans(DEFAULT_PLANS);
+      console.warn('[SubscriptionsPage] Data ingestion notice:', err);
+      setPlans([]);
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
     }
-  }, [currencyCode]);
+  }, [currencyCode, fetchTokenSetting]);
 
   const fetchRef = useRef(fetchSubscriptionData);
   useEffect(() => {
@@ -492,15 +585,55 @@ export default function SubscriptionsPage() {
           setCurrentUser(active);
           fetchRef.current(active);
         }
-      }, 250);
+      }, 200);
     };
 
+    const handleTokenUpdate = (e: any) => {
+      const sym = e?.detail?.tokenSymbol || e?.detail?.settings?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
+      const nameVal = e?.detail?.tokenName || e?.detail?.settings?.tokenName || localStorage.getItem('zecratary_token_name');
+      if (sym) {
+        setTokenIdentity({
+          tokenName: nameVal || 'Tokens',
+          tokenSymbol: sym
+        });
+        setIsTokenEmojiLoading(false);
+      }
+      fetchTokenSetting();
+    };
+
+    let paymentBc: BroadcastChannel | null = null;
+    let balanceBc: BroadcastChannel | null = null;
+
+    try {
+      paymentBc = new BroadcastChannel('zecratary_payment_sync');
+      paymentBc.onmessage = () => handleDebouncedSync();
+
+      balanceBc = new BroadcastChannel('zecratary_balance_channel');
+      balanceBc.onmessage = (event) => {
+        if (event?.data?.type === 'TOKEN_SETTINGS_UPDATED' || event?.data?.tokenSymbol) {
+          const sym = event.data.tokenSymbol || event.data.settings?.tokenSymbol;
+          const nameVal = event.data.tokenName || event.data.settings?.tokenName;
+          if (sym) {
+            setTokenIdentity({
+              tokenName: nameVal || 'Tokens',
+              tokenSymbol: sym
+            });
+            setIsTokenEmojiLoading(false);
+          }
+          fetchTokenSetting();
+        }
+      };
+    } catch (_) {}
+
     window.addEventListener('storage', handleDebouncedSync);
+    window.addEventListener('zecratary_token_settings_updated', handleTokenUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleTokenUpdate);
+    window.addEventListener('zecratary_token_identity_updated', handleTokenUpdate);
     window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_payment_gateway_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_wallet_settings_updated', handleDebouncedSync);
     window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
     window.addEventListener('zecratary_wallet_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_tokens_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_token_settings_updated', handleDebouncedSync);
     window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
     window.addEventListener('zecratary_users_updated', handleDebouncedSync);
     window.addEventListener('zecratary_user_plan_updated', handleDebouncedSync);
@@ -510,12 +643,17 @@ export default function SubscriptionsPage() {
 
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      if (paymentBc) paymentBc.close();
+      if (balanceBc) balanceBc.close();
       window.removeEventListener('storage', handleDebouncedSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleTokenUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleTokenUpdate);
+      window.removeEventListener('zecratary_token_identity_updated', handleTokenUpdate);
       window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_payment_gateway_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_wallet_settings_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_wallet_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_tokens_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_token_settings_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_user_plan_updated', handleDebouncedSync);
@@ -523,7 +661,7 @@ export default function SubscriptionsPage() {
       window.removeEventListener('zecratary_theme_mode_changed', handleDebouncedSync);
       window.removeEventListener('zecratary_theme_changed', handleDebouncedSync);
     };
-  }, [router]);
+  }, [router, fetchTokenSetting]);
 
   const activeUserSlug = useMemo(() => {
     return cleanSlug(currentUser?.subscription_plan || (currentUser as any)?.subscriptionPlan || activeTransaction?.plan_slug || 'taster');
@@ -585,6 +723,24 @@ export default function SubscriptionsPage() {
       return;
     }
 
+    const ref = `SUB-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    setManualRefCode(ref);
+    setUserTransferSlip('');
+    setCopiedRef(false);
+
+    const price = billingInterval === 'annual' ? Number(plan.annual_price_dollars || 0) : Number(plan.monthly_price_dollars || 0);
+    const isWalletEligible = plan.allowWalletPayment !== false && walletConfig.enabled !== false && walletConfig.allowSubscriptionPayment !== false;
+    
+    if (isWalletEligible && walletBalance >= price) {
+      setModalPaymentMethod('wallet');
+    } else if (plan.allowGatewayPayment !== false && (plan.allowedGateways || []).includes('stripe') && gatewayConfig?.stripe?.enabled !== false) {
+      setModalPaymentMethod('stripe');
+    } else if (plan.allowGatewayPayment !== false && (plan.allowedGateways || []).includes('paypal') && gatewayConfig?.paypal?.enabled !== false) {
+      setModalPaymentMethod('paypal');
+    } else {
+      setModalPaymentMethod('manual');
+    }
+
     setTargetModalPlan(plan);
   };
 
@@ -629,7 +785,6 @@ export default function SubscriptionsPage() {
         })
       });
 
-      // Safe Stream Deserialization Guard
       const responseText = await res.text();
       let data: any = null;
       try {
@@ -742,6 +897,14 @@ export default function SubscriptionsPage() {
     } catch (_) {}
   };
 
+  const copyRefCode = () => {
+    if (typeof window !== 'undefined' && manualRefCode) {
+      navigator.clipboard.writeText(manualRefCode);
+      setCopiedRef(true);
+      setTimeout(() => setCopiedRef(false), 2500);
+    }
+  };
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter(tx => {
       const st = (tx.status || 'succeeded').toLowerCase();
@@ -765,9 +928,8 @@ export default function SubscriptionsPage() {
 
   return (
     <div 
-      className="min-h-screen w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 transition-colors duration-200"
+      className="min-h-screen w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 font-sans transition-colors duration-200 box-border space-y-8"
       style={{
-        boxSizing: 'border-box',
         backgroundColor: 'var(--color-bg, #070b13)',
         color: 'var(--color-text, #f8fafc)'
       }}
@@ -798,7 +960,7 @@ export default function SubscriptionsPage() {
           </div>
         )}
 
-        {/* Header Bar */}
+        {/* 1. Header Bar (Clean bar: token link removed) */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
           <div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-3">
@@ -826,19 +988,6 @@ export default function SubscriptionsPage() {
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-emerald, #10b981)' }} />
               <span>{t('reloadBtn', 'Refresh Status')}</span>
             </button>
-
-            <Link
-              href="/token"
-              className="px-4 py-2.5 rounded-xl text-xs font-bold border transition shadow-xs flex items-center gap-1.5 hover:opacity-80"
-              style={{ 
-                backgroundColor: 'var(--color-card, #0f172a)', 
-                borderColor: 'var(--color-border, #1e293b)', 
-                color: 'var(--color-text, #f8fafc)' 
-              }}
-            >
-              <Coins className="h-4 w-4 text-amber-500" />
-              <span>{tokenBalance.toLocaleString()} {tokenIdentity.tokenSymbol}</span>
-            </Link>
           </div>
         </div>
 
@@ -931,7 +1080,7 @@ export default function SubscriptionsPage() {
                 <span>
                   {expiryInfo.dateStr && !isFreeUser
                     ? `${t('renewalDateLabel', 'Active period ends on')} ${expiryInfo.dateStr}`
-                    : t('freePlanNoExpiry', 'Free Plan — No expiration date')}
+                    : t('freePlanNoExpiry', 'Free Plan — Perpetual Access')}
                 </span>
               </p>
             </div>
@@ -999,6 +1148,7 @@ export default function SubscriptionsPage() {
               </div>
             </div>
 
+            {/* DYNAMIC TOKEN TELEMETRY WITH LOADER ANIMATION */}
             <div 
               className="p-4 rounded-2xl border transition-colors"
               style={{
@@ -1007,12 +1157,16 @@ export default function SubscriptionsPage() {
               }}
             >
               <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                <Coins className="w-3.5 h-3.5 text-amber-400" />
+                <DynamicTokenIcon symbol={tokenIdentity.tokenSymbol} size={15} loading={isTokenEmojiLoading} />
                 <span>{t('availableTokensLabel', 'Available Tokens')}</span>
               </div>
               <div className="font-bold text-base flex items-center gap-1.5" style={{ color: '#f59e0b' }}>
                 <span>{tokenBalance.toLocaleString()}</span>
-                <span className="text-xs font-semibold opacity-75">{tokenIdentity.tokenSymbol}</span>
+                {isTokenEmojiLoading ? (
+                  <TokenEmojiLoader size={13} className="ml-0.5" />
+                ) : (
+                  <span className="text-xs font-semibold opacity-75">{tokenIdentity.tokenSymbol}</span>
+                )}
               </div>
               <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
                 {t('replenishedOnCycle', 'Replenished on every billing cycle')}
@@ -1136,176 +1290,299 @@ export default function SubscriptionsPage() {
             </div>
           </div>
 
-          {/* Pricing Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {plans.map((plan) => {
-              const planBase = cleanSlug(plan.slug);
-              const isPlanFree = Boolean(plan.is_free || planBase === 'taster' || Number(plan.monthly_price_dollars || 0) === 0);
-              const isSameTier = isFreeUser ? isPlanFree : planBase === activeUserSlug;
-              const isExactActive = isFreeUser ? isPlanFree : (isSameTier && billingInterval === activeUserInterval);
-              const isMatchingTierOtherInterval = isSameTier && !isExactActive;
-
-              const price = billingInterval === 'annual' ? plan.annual_price_dollars : plan.monthly_price_dollars;
-              const badge = isPlanFree 
-                ? plan.trialBadge 
-                : (billingInterval === 'annual' ? plan.annualBadge : plan.monthlyBadge);
-              const featuresList = parsePlanFeatures(plan.features);
-
-              return (
+          {/* SKELETON LOADER ANIMATION (Replaces default hardcoded plans) */}
+          {loading && plans.length === 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-pulse">
+              {[1, 2, 3].map((n) => (
                 <div
-                  key={plan.id}
-                  className={`rounded-3xl border p-6 sm:p-8 flex flex-col justify-between transition-all duration-200 relative ${
-                    isExactActive 
-                      ? 'ring-2 ring-emerald-500/90 shadow-2xl shadow-emerald-500/15' 
-                      : (isMatchingTierOtherInterval ? 'ring-1 ring-amber-500/50 shadow-md' : 'hover:shadow-lg')
-                  }`}
+                  key={n}
+                  className="rounded-3xl border p-6 sm:p-8 flex flex-col justify-between space-y-6"
                   style={{
-                    backgroundColor: isExactActive 
-                      ? 'rgba(16, 185, 129, 0.05)' 
-                      : 'var(--color-card, #0f172a)',
-                    borderColor: isExactActive 
-                      ? 'var(--color-emerald, #10b981)' 
-                      : (isMatchingTierOtherInterval ? 'rgba(245, 158, 11, 0.4)' : 'var(--color-border, #1e293b)')
+                    backgroundColor: 'var(--color-card, #0f172a)',
+                    borderColor: 'var(--color-border, #1e293b)'
                   }}
                 >
-                  {/* Badge Ribbon */}
-                  {isExactActive ? (
-                    <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 shadow-lg flex items-center gap-1.5 z-10 animate-in fade-in">
-                      <CheckCircle2 className="w-3.5 h-3.5 fill-slate-950 text-emerald-500" />
-                      <span>{t('currentActivePlanBadge', 'Current Active Plan')}</span>
-                    </div>
-                  ) : isMatchingTierOtherInterval ? (
-                    <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md flex items-center gap-1 z-10">
-                      <Sparkles className="w-3 h-3 fill-slate-950 text-amber-500" />
-                      <span>{(t('subscribedTierBadge', 'Subscribed Tier ({interval})')).replace('{interval}', activeUserInterval === 'annual' ? t('annualBilling', 'Annual') : t('monthlyBilling', 'Monthly'))}</span>
-                    </div>
-                  ) : badge ? (
-                    <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md z-10">
-                      {badge}
-                    </div>
-                  ) : null}
-
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                        {plan.name}
-                      </h4>
-                      {isExactActive ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                          <span>{t('activePlanTag', 'Active Plan')}</span>
-                        </span>
-                      ) : isMatchingTierOtherInterval ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                          <Sparkles className="w-3 h-3 text-amber-400" />
-                          <span>{t('currentTierTag', 'Current Tier')}</span>
-                        </span>
-                      ) : null}
+                      <div className="h-6 w-32 rounded-xl bg-white/10" />
+                      <div className="h-5 w-20 rounded-md bg-white/10" />
                     </div>
+                    <div className="space-y-2">
+                      <div className="h-3.5 w-full rounded-md bg-white/5" />
+                      <div className="h-3.5 w-4/5 rounded-md bg-white/5" />
+                    </div>
+                    <div className="py-3 border-y border-white/5 space-y-2">
+                      <div className="h-9 w-28 rounded-xl bg-white/10" />
+                      <div className="h-5 w-44 rounded-md bg-white/5" />
+                    </div>
+                    <div className="space-y-2.5 pt-2">
+                      <div className="h-3 w-28 rounded bg-white/5" />
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <div className="w-3.5 h-3.5 rounded-full bg-emerald-500/20" />
+                          <div className="h-3 w-3/4 rounded bg-white/5" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="pt-6 border-t border-white/5">
+                    <div className="h-12 w-full rounded-2xl bg-white/10" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : plans.length === 0 ? (
+            <div 
+              className="p-10 rounded-3xl border text-center space-y-3"
+              style={{
+                backgroundColor: 'var(--color-card, #0f172a)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <Layers className="w-10 h-10 mx-auto opacity-40 text-emerald-400" />
+              <h4 className="text-base font-bold" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                {t('noPlansAvailable', 'No Subscription Plans Available')}
+              </h4>
+              <p className="text-xs opacity-60 max-w-md mx-auto" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('noPlansDesc', 'There are currently no active packages configured in the database. Please check back later or refresh.')}
+              </p>
+              <button
+                type="button"
+                onClick={() => fetchRef.current(currentUser)}
+                className="px-4 py-2 rounded-xl text-xs font-bold border transition hover:opacity-80 cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #070b13)',
+                  borderColor: 'var(--color-border, #1e293b)',
+                  color: 'var(--color-emerald, #10b981)'
+                }}
+              >
+                <RefreshCw className="w-3.5 h-3.5 inline mr-1.5" />
+                <span>{t('reloadPlansBtn', 'Reload Packages')}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {plans.map((plan) => {
+                const planBase = cleanSlug(plan.slug);
+                const isPlanFree = Boolean(plan.is_free || planBase === 'taster' || Number(plan.monthly_price_dollars || 0) === 0);
+                const isSameTier = isFreeUser ? isPlanFree : planBase === activeUserSlug;
+                const isExactActive = isFreeUser ? isPlanFree : (isSameTier && billingInterval === activeUserInterval);
+                const isMatchingTierOtherInterval = isSameTier && !isExactActive;
 
-                    <p className="text-xs opacity-70 leading-relaxed min-h-[36px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                      {billingInterval === 'annual' ? (plan.description_annual || plan.description_monthly) : plan.description_monthly}
-                    </p>
+                const price = billingInterval === 'annual' ? plan.annual_price_dollars : plan.monthly_price_dollars;
+                const badge = isPlanFree 
+                  ? plan.trialBadge 
+                  : (billingInterval === 'annual' ? plan.annualBadge : plan.monthlyBadge);
+                const featuresList = parsePlanFeatures(plan.features);
 
-                    {/* Price Tag */}
-                    <div className="py-2 border-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-3xl sm:text-4xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                          {isPlanFree ? '0.00' : `${currencySymbol}${Number(price || 0).toFixed(2)}`}
-                        </span>
-                        {!isPlanFree && (
-                          <span className="text-xs opacity-60 font-semibold" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                            {billingInterval === 'annual' ? t('perYear', '/ year') : t('perMonth', '/ month')}
+                const tokenQuota = billingInterval === 'annual'
+                  ? (plan.tokensAnnual || (plan.tokensMonthly ? plan.tokensMonthly * 12 : 3000000))
+                  : (plan.tokensMonthly || plan.token_limit || (isPlanFree ? 25000 : 250000));
+
+                return (
+                  <div
+                    key={plan.id}
+                    className={`rounded-3xl border p-6 sm:p-8 flex flex-col justify-between transition-all duration-200 relative ${
+                      isExactActive 
+                        ? 'ring-2 ring-emerald-500/90 shadow-2xl shadow-emerald-500/15' 
+                        : (isMatchingTierOtherInterval ? 'ring-1 ring-amber-500/50 shadow-md' : 'hover:shadow-lg')
+                    }`}
+                    style={{
+                      backgroundColor: isExactActive 
+                        ? 'rgba(16, 185, 129, 0.05)' 
+                        : 'var(--color-card, #0f172a)',
+                      borderColor: isExactActive 
+                        ? 'var(--color-emerald, #10b981)' 
+                        : (isMatchingTierOtherInterval ? 'rgba(245, 158, 11, 0.4)' : 'var(--color-border, #1e293b)')
+                    }}
+                  >
+                    {/* Badge Ribbon */}
+                    {isExactActive ? (
+                      <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 shadow-lg flex items-center gap-1.5 z-10 animate-in fade-in">
+                        <CheckCircle2 className="w-3.5 h-3.5 fill-slate-950 text-emerald-500" />
+                        <span>{t('currentActivePlanBadge', 'Current Active Plan')}</span>
+                      </div>
+                    ) : isMatchingTierOtherInterval ? (
+                      <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md flex items-center gap-1 z-10">
+                        <Sparkles className="w-3 h-3 fill-slate-950 text-amber-500" />
+                        <span>{(t('subscribedTierBadge', 'Subscribed Tier ({interval})')).replace('{interval}', activeUserInterval === 'annual' ? t('annualBilling', 'Annual') : t('monthlyBilling', 'Monthly'))}</span>
+                      </div>
+                    ) : badge ? (
+                      <div className="absolute -top-3.5 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md z-10">
+                        {badge}
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                          {plan.name}
+                        </h4>
+                        {isExactActive ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>{t('activePlanTag', 'Active Plan')}</span>
                           </span>
+                        ) : isMatchingTierOtherInterval ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                            <Sparkles className="w-3 h-3 text-amber-400" />
+                            <span>{t('currentTierTag', 'Current Tier')}</span>
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <p className="text-xs opacity-70 leading-relaxed min-h-[36px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                        {billingInterval === 'annual' ? (plan.description_annual || plan.description_monthly) : plan.description_monthly}
+                      </p>
+
+                      {/* Price Tag */}
+                      <div className="py-2 border-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl sm:text-4xl font-black" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                            {isPlanFree ? '0.00' : `${currencySymbol}${Number(price || 0).toFixed(2)}`}
+                          </span>
+                          {!isPlanFree && (
+                            <span className="text-xs opacity-60 font-semibold" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                              {billingInterval === 'annual' ? t('perYear', '/ year') : t('perMonth', '/ month')}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* DYNAMIC TOKEN QUOTA WITH LOADER ANIMATION UNTIL EMOJI RESOLVES */}
+                        <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          <DynamicTokenIcon symbol={tokenIdentity.tokenSymbol} size={14} loading={isTokenEmojiLoading} />
+                          <span className="flex items-center gap-1">
+                            <span>+{tokenQuota.toLocaleString()}</span>
+                            {isTokenEmojiLoading ? (
+                              <TokenEmojiLoader size={12} className="mx-0.5" />
+                            ) : (
+                              <span>{tokenIdentity.tokenName || tokenIdentity.tokenSymbol}</span>
+                            )}
+                            <span>/ {billingInterval === 'annual' && !isPlanFree ? 'year' : 'month'}</span>
+                          </span>
+                        </div>
+
+                        {/* Dynamic Payment Gateways & Wallet Support Badges */}
+                        {!isPlanFree && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            {plan.allowWalletPayment && (
+                              <span 
+                                className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border flex items-center gap-1"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark, #070b13)',
+                                  borderColor: 'var(--color-emerald, #10b981)',
+                                  color: 'var(--color-emerald, #10b981)'
+                                }}
+                              >
+                                <Wallet className="h-2.5 w-2.5" />
+                                <span>Wallet</span>
+                              </span>
+                            )}
+
+                            {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('stripe') && (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-blue-500/30 text-blue-400 bg-blue-500/10 flex items-center gap-1">
+                                <CreditCard className="h-2.5 w-2.5" />
+                                <span>Card</span>
+                              </span>
+                            )}
+
+                            {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('paypal') && (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-sky-500/30 text-sky-400 bg-sky-500/10 flex items-center gap-1">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                <span>PayPal</span>
+                              </span>
+                            )}
+
+                            {plan.allowGatewayPayment && (plan.allowedGateways || []).includes('manual') && (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wide border border-amber-500/30 text-amber-400 bg-amber-500/10 flex items-center gap-1">
+                                <Landmark className="h-2.5 w-2.5" />
+                                <span>Wire</span>
+                              </span>
+                            )}
+                          </div>
                         )}
                       </div>
 
-                      {/* Token Allowance Tag */}
-                      <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        <Coins className="w-3.5 h-3.5" />
-                        <span>+{(plan.token_limit ?? (isPlanFree ? 50 : 500)).toLocaleString()} {tokenIdentity.tokenSymbol} / {billingInterval === 'annual' && !isPlanFree ? 'year' : 'month'}</span>
+                      {/* Features Matrix */}
+                      <div className="space-y-2 pt-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider opacity-50" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                          {t('includedFeaturesLabel', 'Included Features')}:
+                        </span>
+                        <ul className="space-y-2 text-xs">
+                          {featuresList.map((feat, fIdx) => (
+                            <li key={fIdx} className="flex items-start gap-2">
+                              <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                              <span style={{ color: 'var(--color-text, #f8fafc)' }}>{feat}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     </div>
 
-                    {/* Features Matrix */}
-                    <div className="space-y-2 pt-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-50" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                        {t('includedFeaturesLabel', 'Included Features')}:
-                      </span>
-                      <ul className="space-y-2 text-xs">
-                        {featuresList.map((feat, fIdx) => (
-                          <li key={fIdx} className="flex items-start gap-2">
-                            <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                            <span style={{ color: 'var(--color-text, #f8fafc)' }}>{feat}</span>
-                          </li>
-                        ))}
-                      </ul>
+                    {/* CTA Action Button */}
+                    <div className="pt-6 mt-6 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                      {isExactActive ? (
+                        <button
+                          type="button"
+                          disabled={true}
+                          aria-disabled="true"
+                          className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-not-allowed opacity-90 border select-none transition shadow-sm"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark, #070b13)',
+                            borderColor: 'var(--color-emerald, #10b981)',
+                            color: 'var(--color-emerald, #10b981)'
+                          }}
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>{t('currentPlanBtn', 'Current Active Plan')}</span>
+                        </button>
+                      ) : isMatchingTierOtherInterval && !isPlanFree ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPlanAction(plan)}
+                          disabled={submitting}
+                          className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md text-white hover:opacity-90 active:scale-98 disabled:opacity-50"
+                          style={{
+                            backgroundColor: 'var(--color-emerald, #10b981)'
+                          }}
+                        >
+                          <RefreshCw className={`w-4 h-4 ${submitting ? 'animate-spin' : ''}`} />
+                          <span>
+                            {billingInterval === 'annual' 
+                              ? (t('switchIntervalBtn', 'Switch to {interval} Billing')).replace('{interval}', t('annualBilling', 'Annual'))
+                              : (t('switchIntervalBtn', 'Switch to {interval} Billing')).replace('{interval}', t('monthlyBilling', 'Monthly'))}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPlanAction(plan)}
+                          disabled={submitting}
+                          className={`w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md disabled:opacity-50 ${
+                            isPlanFree ? 'border hover:bg-white/5' : 'text-white hover:opacity-90 active:scale-98'
+                          }`}
+                          style={isPlanFree ? {
+                            backgroundColor: 'var(--color-inner-dark, #070b13)',
+                            borderColor: 'var(--color-border, #1e293b)',
+                            color: 'var(--color-text, #f8fafc)'
+                          } : {
+                            backgroundColor: 'var(--color-emerald, #10b981)'
+                          }}
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                          <span>
+                            {isPlanFree 
+                              ? t('downgradeFreeBtn', 'Switch to Free Tier')
+                              : (t('upgradePlanBtn', 'Upgrade to {plan}')).replace('{plan}', plan.name)}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  {/* CTA Action Button */}
-                  <div className="pt-6 mt-6 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                    {isExactActive ? (
-                      <button
-                        type="button"
-                        disabled={true}
-                        aria-disabled="true"
-                        className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 cursor-not-allowed opacity-90 border select-none transition shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark, #070b13)',
-                          borderColor: 'var(--color-emerald, #10b981)',
-                          color: 'var(--color-emerald, #10b981)'
-                        }}
-                      >
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        <span>{t('currentPlanBtn', 'Current Active Plan')}</span>
-                      </button>
-                    ) : isMatchingTierOtherInterval && !isPlanFree ? (
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPlanAction(plan)}
-                        disabled={submitting}
-                        className="w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md text-white hover:opacity-90 active:scale-98 disabled:opacity-50"
-                        style={{
-                          backgroundColor: 'var(--color-emerald, #10b981)'
-                        }}
-                      >
-                        <RefreshCw className={`w-4 h-4 ${submitting ? 'animate-spin' : ''}`} />
-                        <span>
-                          {billingInterval === 'annual' 
-                            ? (t('switchIntervalBtn', 'Switch to {interval} Billing')).replace('{interval}', t('annualBilling', 'Annual'))
-                            : (t('switchIntervalBtn', 'Switch to {interval} Billing')).replace('{interval}', t('monthlyBilling', 'Monthly'))}
-                        </span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPlanAction(plan)}
-                        disabled={submitting}
-                        className={`w-full py-3.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md disabled:opacity-50 ${
-                          isPlanFree ? 'border hover:bg-white/5' : 'text-white hover:opacity-90 active:scale-98'
-                        }`}
-                        style={isPlanFree ? {
-                          backgroundColor: 'var(--color-inner-dark, #070b13)',
-                          borderColor: 'var(--color-border, #1e293b)',
-                          color: 'var(--color-text, #f8fafc)'
-                        } : {
-                          backgroundColor: 'var(--color-emerald, #10b981)'
-                        }}
-                      >
-                        <ArrowRight className="w-4 h-4" />
-                        <span>
-                          {isPlanFree 
-                            ? t('downgradeFreeBtn', 'Switch to Free Tier')
-                            : (t('upgradePlanBtn', 'Upgrade to {plan}')).replace('{plan}', plan.name)}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* SECTION 3: SUBSCRIPTION TRANSACTION HISTORY LEDGER */}
@@ -1543,24 +1820,24 @@ export default function SubscriptionsPage() {
           </div>
         </div>
 
-        {/* PAYMENT METHOD SELECTION MODAL (Zero-Form Accessible Container) */}
+        {/* PAYMENT METHOD SELECTION MODAL */}
         {targetModalPlan && (
           <div 
-            onClick={() => setTargetModalPlan(null)}
+            onClick={() => !submitting && setTargetModalPlan(null)}
             className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
           >
             <div 
               onClick={(e) => e.stopPropagation()}
               role="region"
               data-lpignore="true"
-              className="border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
+              className="border rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
               style={{ backgroundColor: 'var(--color-card, #0f172a)', borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-text, #f8fafc)' }}
             >
               <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
                 <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-emerald, #10b981)' }}>
                   {t('walletDeductionModalTitle', 'Confirm Subscription Payment')}
                 </h3>
-                <button type="button" onClick={() => setTargetModalPlan(null)} className="p-1 rounded-lg">
+                <button type="button" onClick={() => setTargetModalPlan(null)} className="p-1 rounded-lg hover:opacity-80">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -1578,14 +1855,17 @@ export default function SubscriptionsPage() {
                     : Number(targetModalPlan.monthly_price_dollars || 0);
 
                   const hasWalletFunds = walletBalance >= planPrice;
+                  const isWalletPlanAllowed = targetModalPlan.allowWalletPayment !== false && walletConfig.enabled !== false && walletConfig.allowSubscriptionPayment !== false;
+                  const isGatewayPlanAllowed = targetModalPlan.allowGatewayPayment !== false;
+                  const allowedGws = targetModalPlan.allowedGateways || ['stripe', 'paypal', 'manual'];
 
-                  const isStripeAvailable = gatewayConfig?.stripe?.enabled !== false && (
+                  const isStripeAvailable = isGatewayPlanAllowed && allowedGws.includes('stripe') && gatewayConfig?.stripe?.enabled !== false && (
                     !gatewayConfig?.activeGateway || gatewayConfig.activeGateway === 'stripe' || gatewayConfig.activeGateway === 'both'
                   );
-                  const isPaypalAvailable = gatewayConfig?.paypal?.enabled && (
+                  const isPaypalAvailable = isGatewayPlanAllowed && allowedGws.includes('paypal') && gatewayConfig?.paypal?.enabled !== false && (
                     gatewayConfig.activeGateway === 'paypal' || gatewayConfig.activeGateway === 'both'
                   );
-                  const isManualAvailable = Boolean(gatewayConfig?.manual?.enabled);
+                  const isManualAvailable = isGatewayPlanAllowed && allowedGws.includes('manual') && Boolean(gatewayConfig?.manual?.enabled !== false);
 
                   return (
                     <div className="space-y-3">
@@ -1596,35 +1876,41 @@ export default function SubscriptionsPage() {
                             {currencySymbol}{planPrice.toFixed(2)} {currencyCode}
                           </span>
                         </div>
-                        <div className="flex justify-between items-center text-[11px] opacity-75">
-                          <span>{t('storeWalletBalance', 'Your Store Wallet Balance')}:</span>
-                          <span className="font-mono font-bold">{currencySymbol}{walletBalance.toFixed(2)}</span>
-                        </div>
+                        {isWalletPlanAllowed && (
+                          <div className="flex justify-between items-center text-[11px] opacity-75">
+                            <span>{t('storeWalletBalance', 'Your Store Wallet Balance')}:</span>
+                            <span className="font-mono font-bold">{currencySymbol}{walletBalance.toFixed(2)}</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Store Wallet Payment */}
-                      <button
-                        type="button"
-                        disabled={!hasWalletFunds || submitting}
-                        onClick={() => executePlanSwitch(targetModalPlan, 'wallet', planPrice)}
-                        className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition cursor-pointer border shadow-sm ${
-                          hasWalletFunds ? 'hover:border-emerald-500' : 'opacity-40 cursor-not-allowed'
-                        }`}
-                        style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
-                      >
-                        <span className="flex items-center gap-2">
-                          <Wallet className="h-4 w-4 text-emerald-400" />
-                          <span>{t('payWithWalletBtn', 'Pay with Store Wallet')}</span>
-                        </span>
-                        <span className="font-mono font-bold text-emerald-400">{currencySymbol}{planPrice.toFixed(2)}</span>
-                      </button>
+                      {isWalletPlanAllowed && (
+                        <div className="space-y-1.5">
+                          <button
+                            type="button"
+                            disabled={!hasWalletFunds || submitting}
+                            onClick={() => setModalPaymentMethod('wallet')}
+                            className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition cursor-pointer border shadow-sm ${
+                              modalPaymentMethod === 'wallet' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-emerald-500/10' : ''
+                            } ${hasWalletFunds ? 'hover:border-emerald-500' : 'opacity-40 cursor-not-allowed'}`}
+                            style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: modalPaymentMethod === 'wallet' ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #1e293b)' }}
+                          >
+                            <span className="flex items-center gap-2">
+                              <Wallet className="h-4 w-4 text-emerald-400" />
+                              <span>{t('payWithWalletBtn', 'Pay with Store Wallet')}</span>
+                            </span>
+                            <span className="font-mono font-bold text-emerald-400">{currencySymbol}{planPrice.toFixed(2)}</span>
+                          </button>
 
-                      {!hasWalletFunds && (
-                        <div className="p-2.5 rounded-xl border text-[10px] text-amber-500 flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: '#f59e0b' }}>
-                          <span>{t('insufficientWalletBalance', 'Insufficient wallet balance.')}</span>
-                          <Link href={`/wallet?amount=${(planPrice - walletBalance).toFixed(2)}`} className="font-bold underline">
-                            {t('topUpWalletBtn', 'Top Up Wallet')}
-                          </Link>
+                          {!hasWalletFunds && (
+                            <div className="p-2.5 rounded-xl border text-[10px] text-amber-500 flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: '#f59e0b' }}>
+                              <span>{t('insufficientWalletBalance', 'Insufficient wallet balance.')}</span>
+                              <Link href={`/wallet?amount=${(planPrice - walletBalance).toFixed(2)}`} className="font-bold underline">
+                                {t('topUpWalletBtn', 'Top Up Wallet')}
+                              </Link>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1633,12 +1919,19 @@ export default function SubscriptionsPage() {
                         <button
                           type="button"
                           disabled={submitting}
-                          onClick={() => executePlanSwitch(targetModalPlan, 'stripe', planPrice)}
-                          className="w-full py-3 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
-                          style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+                          onClick={() => setModalPaymentMethod('stripe')}
+                          className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition shadow cursor-pointer border ${
+                            modalPaymentMethod === 'stripe' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-blue-500/10' : 'hover:border-blue-400'
+                          }`}
+                          style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
                         >
-                          <CreditCard className="h-4 w-4" />
-                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Credit Card / Stripe')}</span>
+                          <span className="flex items-center gap-2">
+                            <CreditCard className="h-4 w-4 text-blue-400" />
+                            <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Credit Card (Stripe)')}</span>
+                          </span>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            {gatewayConfig?.stripe?.mode === 'live' ? 'Live SSL' : 'Test Sandbox'}
+                          </span>
                         </button>
                       )}
 
@@ -1647,12 +1940,19 @@ export default function SubscriptionsPage() {
                         <button
                           type="button"
                           disabled={submitting}
-                          onClick={() => executePlanSwitch(targetModalPlan, 'paypal', planPrice)}
-                          className="w-full py-3 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
-                          style={{ backgroundColor: '#0284c7' }}
+                          onClick={() => setModalPaymentMethod('paypal')}
+                          className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition shadow cursor-pointer border ${
+                            modalPaymentMethod === 'paypal' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-sky-500/10' : 'hover:border-sky-400'
+                          }`}
+                          style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
                         >
-                          <Zap className="h-4 w-4" />
-                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'PayPal')}</span>
+                          <span className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-sky-400" />
+                            <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'PayPal Express')}</span>
+                          </span>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                            {gatewayConfig?.paypal?.mode === 'live' ? 'Live' : 'Sandbox'}
+                          </span>
                         </button>
                       )}
 
@@ -1661,30 +1961,124 @@ export default function SubscriptionsPage() {
                         <button
                           type="button"
                           disabled={submitting}
-                          onClick={() => executePlanSwitch(targetModalPlan, 'manual', planPrice)}
-                          className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer border hover:opacity-90 disabled:opacity-40"
-                          style={{ 
-                            backgroundColor: 'var(--color-inner-dark, #070b13)', 
-                            borderColor: 'var(--color-border, #1e293b)',
-                            color: 'var(--color-text, #f8fafc)'
-                          }}
+                          onClick={() => setModalPaymentMethod('manual')}
+                          className={`w-full py-3 rounded-xl font-bold flex items-center justify-between px-4 transition shadow cursor-pointer border ${
+                            modalPaymentMethod === 'manual' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-amber-500/10' : 'hover:border-amber-400'
+                          }`}
+                          style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
                         >
-                          <Landmark className="h-4 w-4 text-emerald-400" />
-                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Bank Transfer / Wire')}</span>
+                          <span className="flex items-center gap-2">
+                            <Landmark className="h-4 w-4 text-amber-400" />
+                            <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Bank Transfer / Wire')}</span>
+                          </span>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            Direct Wire
+                          </span>
                         </button>
+                      )}
+
+                      {/* Detailed Manual Bank Wire Information Box */}
+                      {modalPaymentMethod === 'manual' && isManualAvailable && (
+                        <div 
+                          className="p-4 rounded-2xl border space-y-3 animate-in fade-in transition-all text-xs"
+                          style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                        >
+                          <div className="flex items-center justify-between pb-2 border-b border-white/10 font-bold text-amber-400">
+                            <div className="flex items-center gap-2">
+                              <Building className="w-4 h-4" />
+                              <span>{t('bankDetailsHeading', 'Beneficiary Bank Details')}</span>
+                            </div>
+                            <span className="text-[10px] opacity-75 font-mono">Synced</span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                            <div>
+                              <span className="opacity-60 block text-[9px] uppercase font-bold">{t('bankNameLabel', 'Bank Name')}:</span>
+                              <strong className="text-slate-200">{gatewayConfig?.manual?.bankName || 'Standard Chartered Bank'}</strong>
+                            </div>
+                            <div>
+                              <span className="opacity-60 block text-[9px] uppercase font-bold">{t('accountHolderLabel', 'Beneficiary Name')}:</span>
+                              <strong className="text-slate-200">{gatewayConfig?.manual?.accountHolder || 'Zecratary AI Solutions'}</strong>
+                            </div>
+                            <div>
+                              <span className="opacity-60 block text-[9px] uppercase font-bold">{t('accountNumberLabel', 'Account / IBAN Number')}:</span>
+                              <strong className="font-mono font-bold text-emerald-400 text-xs">{gatewayConfig?.manual?.accountNumber || '8492-4910-4491-002'}</strong>
+                            </div>
+                            <div>
+                              <span className="opacity-60 block text-[9px] uppercase font-bold">{t('swiftCodeLabel', 'SWIFT / Branch Code')}:</span>
+                              <strong className="font-mono text-slate-200">{gatewayConfig?.manual?.swiftCode || 'SCBLUS33'}</strong>
+                            </div>
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-3">
+                            <div>
+                              <span className="text-[9px] uppercase font-bold opacity-60 block">{t('transferRefCodeLabel', 'Payment Reference Note')}:</span>
+                              <span className="font-mono font-black text-amber-400 text-xs tracking-wider">{manualRefCode}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={copyRefCode}
+                              className="px-2.5 py-1.5 rounded-lg border border-white/20 hover:bg-white/10 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                            >
+                              {copiedRef ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              <span>{copiedRef ? t('copiedBtn', 'Copied!') : t('copyCodeBtn', 'Copy Note')}</span>
+                            </button>
+                          </div>
+
+                          <div>
+                            <label className="text-[9px] uppercase font-bold opacity-60 block mb-1">
+                              {t('userTransferRefLabel', 'Your Transfer Slip / Transaction ID (Optional):')}
+                            </label>
+                            <input
+                              type="text"
+                              value={userTransferSlip}
+                              onChange={(e) => setUserTransferSlip(e.target.value)}
+                              placeholder="e.g. TXN-94819204 or Bank receipt code"
+                              className="w-full px-3 py-2 rounded-xl text-xs border bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              style={{ borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-text, #f8fafc)' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* No payment modes allowed guard */}
+                      {!isWalletPlanAllowed && !isStripeAvailable && !isPaypalAvailable && !isManualAvailable && (
+                        <div className="p-4 rounded-2xl border text-center space-y-1 border-red-500/40 bg-red-500/10 text-red-400">
+                          <AlertCircle className="w-5 h-5 mx-auto" />
+                          <p className="font-bold text-xs">{t('noPaymentAllowedAlert', 'No payment purchase methods are currently enabled for this plan tier.')}</p>
+                          <p className="text-[10px] opacity-80">{t('contactAdminToEnable', 'Please contact the system administrator to activate payment options in /admin/plans.')}</p>
+                        </div>
                       )}
                     </div>
                   );
                 })()}
 
-                <div className="flex justify-end pt-2 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
                   <button
                     type="button"
                     onClick={() => setTargetModalPlan(null)}
-                    className="px-4 py-2 border rounded-xl font-bold hover:opacity-80 transition cursor-pointer"
+                    disabled={submitting}
+                    className="px-4 py-2.5 border rounded-xl font-bold hover:opacity-80 transition cursor-pointer"
                     style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
                   >
                     {t('cancelBtn', 'Cancel')}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={
+                      submitting || 
+                      (modalPaymentMethod === 'wallet' && walletBalance < (billingInterval === 'annual' ? targetModalPlan.annual_price_dollars : targetModalPlan.monthly_price_dollars))
+                    }
+                    onClick={() => {
+                      const amount = billingInterval === 'annual' ? Number(targetModalPlan.annual_price_dollars || 0) : Number(targetModalPlan.monthly_price_dollars || 0);
+                      executePlanSwitch(targetModalPlan, modalPaymentMethod, amount);
+                    }}
+                    className="px-5 py-2.5 rounded-xl font-black text-white shadow-lg transition hover:opacity-90 flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                    style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+                  >
+                    {submitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    <span>{submitting ? t('processingPlanBtn', 'Processing...') : t('confirmAndPayBtn', 'Confirm & Activate Plan')}</span>
                   </button>
                 </div>
               </div>

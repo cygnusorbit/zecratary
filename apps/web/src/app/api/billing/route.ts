@@ -142,11 +142,24 @@ export async function GET(req: NextRequest) {
       createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
     }));
 
+    // Authoritative token identity from database
+    let tokenIdentity = {
+      tokenName: 'Tokens',
+      tokenSymbol: ''
+    };
+    try {
+      const tsRows = await safeDbExecute(`SELECT token_name, token_symbol FROM token_settings ORDER BY updated_at DESC LIMIT 1`);
+      if (tsRows && tsRows.length > 0) {
+        tokenIdentity.tokenName = tsRows[0].token_name || tsRows[0].tokenName || 'Tokens';
+        tokenIdentity.tokenSymbol = tsRows[0].token_symbol || tsRows[0].tokenSymbol || '';
+      }
+    } catch (_) {}
+
     return NextResponse.json({
       success: true,
       user,
       transactions,
-      tokenIdentity: { tokenName: 'Tokens', tokenSymbol: '🪙' }
+      tokenIdentity
     }, {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
     });
