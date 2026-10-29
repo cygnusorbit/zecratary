@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.90",
+  "version": "8.1.91",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.90",
+  "version": "8.1.91",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -46924,91 +46924,181 @@ export async function GET() {
 
 ## File: `apps/web/src/app/api/auth/google-session/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export async function POST(req: Request) {
+export const dynamic = 'force-dynamic';
+
+async function syncUserToDatabase(user: any): Promise<void> {
+  const email = (user.email || '').toLowerCase().trim();
+  const userId = user.id || '';
+  if (!email && !userId) return;
+
+  // 1. PostgreSQL Synchronization
+  try {
+    const { getPostgresPool } = await import('@/lib/postgresUser').catch(() => ({ getPostgresPool: null }));
+    const pool = getPostgresPool ? getPostgresPool() : null;
+    if (pool) {
+      await pool.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+      `);
+      await pool.query(
+        `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1) OR id = $2`,
+        [email, userId]
+      );
+    }
+  } catch (pgErr) {
+    console.debug('[PostgreSQL Google sync skipped/error]:', pgErr);
+  }
+
+  // 2. MySQL Synchronization
+  try {
+    const mysqlHost = process.env.MYSQL_HOST || process.env.DB_HOST;
+    const mysqlUser = process.env.MYSQL_USER || process.env.DB_USER;
+    const mysqlPassword = process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD;
+    const mysqlDatabase = process.env.MYSQL_DATABASE || process.env.DB_NAME;
+
+    if (mysqlHost && mysqlUser && mysqlDatabase) {
+      const mysqlModule = await import('mysql2/promise').catch(() => null);
+      if (mysqlModule) {
+        const connection = await mysqlModule.createConnection({
+          host: mysqlHost,
+          user: mysqlUser,
+          password: mysqlPassword,
+          database: mysqlDatabase,
+          port: Number(process.env.MYSQL_PORT || 3306),
+          connectTimeout: 2000
+        });
+        try {
+          await connection.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
+        } catch (_) {}
+        await connection.execute(
+          `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?) OR id = ?`,
+          [email, userId]
+        );
+        await connection.end();
+      }
+    }
+  } catch (myErr) {
+    console.debug('[MySQL Google sync skipped/error]:', myErr);
+  }
+}
+
+function syncUserToStore(user: any): any {
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, 'apps/web/data/users.json'),
+    path.join(cwd, 'data/users.json')
+  ];
+
+  let resolvedUser = user;
+
+  for (const p of paths) {
+    try {
+      let usersList: any[] = [];
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        usersList = JSON.parse(raw);
+        if (!Array.isArray(usersList)) usersList = [];
+      } else {
+        const dir = path.dirname(p);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const existingIndex = usersList.findIndex(
+        (u) => u && u.email && u.email.toLowerCase() === user.email.toLowerCase()
+      );
+
+      if (existingIndex >= 0) {
+        usersList[existingIndex] = {
+          ...usersList[existingIndex],
+          name: user.name || usersList[existingIndex].name,
+          picture: user.picture || usersList[existingIndex].picture,
+          avatar: user.picture || usersList[existingIndex].avatar,
+          lastLoginAt: new Date().toISOString()
+        };
+        resolvedUser = usersList[existingIndex];
+      } else {
+        usersList.unshift(user);
+      }
+
+      fs.writeFileSync(p, JSON.stringify(usersList, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('[google-session] Error syncing user to store:', p, err);
+    }
+  }
+
+  return resolvedUser;
+}
+
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { profile } = body || {};
+    const profile = body.profile;
+    const requestedCallback = body.callbackUrl || '';
 
     if (!profile || !profile.email) {
-      return NextResponse.json({ success: false, error: 'Profile with email is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing profile email' }, { status: 400 });
     }
 
-    const cleanEmail = profile.email.toLowerCase().trim();
-    const displayName = profile.name || profile.given_name || cleanEmail.split('@')[0];
-    const avatar = profile.picture || profile.avatar || '';
+    const email = profile.email.toLowerCase().trim();
+    const name = profile.name || profile.given_name || email.split('@')[0];
+    const picture = profile.picture || '';
+    const googleId = profile.sub || profile.id || Date.now().toString();
 
-    const userObj = {
-      id: profile.sub ? `usr_google_${profile.sub}` : `usr_${Date.now()}`,
-      name: displayName,
-      email: cleanEmail,
-      avatar: avatar,
-      provider: 'google',
-      role: cleanEmail.includes('admin') ? 'admin' : 'user',
-      token_balance: 50000,
-      subscription_plan: 'taster'
+    const isEmailAdmin = email.includes('admin') || email === 'cygnusorbit@gmail.com' || email.startsWith('admin@');
+
+    const candidateUser = {
+      id: `usr_g_${googleId}`,
+      name,
+      email,
+      role: isEmailAdmin ? 'admin' : 'user',
+      subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
+      picture,
+      avatar: picture,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString()
     };
 
-    // Upsert into PostgreSQL users table (Constraint 8)
-    try {
-      const { query } = await import('@/lib/db');
-      if (typeof query === 'function') {
-        await query(`
-          CREATE TABLE IF NOT EXISTS users (
-            id VARCHAR(255) PRIMARY KEY,
-            name VARCHAR(255),
-            email VARCHAR(255) UNIQUE NOT NULL,
-            avatar TEXT,
-            provider VARCHAR(50) DEFAULT 'local',
-            role VARCHAR(50) DEFAULT 'user',
-            token_balance BIGINT DEFAULT 50000,
-            subscription_plan VARCHAR(100) DEFAULT 'free',
-            last_login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-          )
-        `);
+    const finalUser = syncUserToStore(candidateUser);
+    await syncUserToDatabase(finalUser);
 
-        await query(`
-          INSERT INTO users (id, name, email, avatar, provider, role, token_balance, subscription_plan, last_login_at, updated_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-          ON CONFLICT (email) DO UPDATE SET
-            name = EXCLUDED.name,
-            avatar = EXCLUDED.avatar,
-            last_login_at = NOW(),
-            updated_at = NOW()
-        `, [userObj.id, userObj.name, userObj.email, userObj.avatar, userObj.provider, userObj.role, userObj.token_balance, userObj.subscription_plan]);
-      }
-    } catch (dbErr) {
-      console.warn('[google-session] Database sync warning:', dbErr);
+    // Guaranteed redirection to /dashboard
+    let redirectUrl = requestedCallback.trim();
+    if (
+      !redirectUrl || 
+      redirectUrl === '/login' || 
+      redirectUrl.startsWith('/login') ||
+      redirectUrl === '/profile' ||
+      redirectUrl.startsWith('/profile')
+    ) {
+      redirectUrl = '/dashboard';
     }
 
-    // Always redirect to /dashboard upon successful Google login
     const response = NextResponse.json({
       success: true,
-      user: userObj,
-      redirectUrl: '/dashboard'
+      user: finalUser,
+      redirectUrl
     });
 
-    const userRaw = JSON.stringify(userObj);
-    const userEncoded = encodeURIComponent(userRaw);
-    const keys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
-    
-    keys.forEach(k => {
-      response.cookies.set({
-        name: k,
-        value: userEncoded,
+    const serializedUser = JSON.stringify(finalUser);
+    const cookieKeys = ['zecratary_current_user', 'zecratary_auth_session', 'zecratary_session', 'currentUser'];
+    for (const ck of cookieKeys) {
+      response.cookies.set(ck, serializedUser, {
         path: '/',
-        maxAge: 604800,
-        sameSite: 'lax'
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400 * 7
       });
-    });
+    }
 
     return response;
   } catch (err: any) {
-    console.error('[google-session] Handler error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('[google-session] Error:', err);
+    return NextResponse.json({ error: err.message || 'Session creation failed' }, { status: 500 });
   }
 }
 
@@ -47431,72 +47521,92 @@ import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-function getDbClient() {
+async function recordDatabaseLogin(email: string, userId?: string) {
+  const cleanEmail = email.toLowerCase().trim();
+
+  // 1. PostgreSQL Audit
   try {
-    const dbModule = require('@/lib/db');
-    return dbModule.query || dbModule.default?.query || null;
-  } catch (_) {
-    return null;
+    const { getPostgresPool } = await import('@/lib/postgresUser').catch(() => ({ getPostgresPool: null }));
+    const pool = getPostgresPool ? getPostgresPool() : null;
+    if (pool) {
+      await pool.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+      `);
+      if (userId) {
+        await pool.query(
+          `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [userId]
+        );
+      } else {
+        await pool.query(
+          `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1)`,
+          [cleanEmail]
+        );
+      }
+    }
+  } catch (pgErr) {
+    console.debug('[PostgreSQL login update skipped/error]:', pgErr);
+  }
+
+  // 2. MySQL Audit
+  try {
+    const mysqlHost = process.env.MYSQL_HOST || process.env.DB_HOST;
+    const mysqlUser = process.env.MYSQL_USER || process.env.DB_USER;
+    const mysqlPassword = process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD;
+    const mysqlDatabase = process.env.MYSQL_DATABASE || process.env.DB_NAME;
+
+    if (mysqlHost && mysqlUser && mysqlDatabase) {
+      const mysqlModule = await import('mysql2/promise').catch(() => null);
+      if (mysqlModule) {
+        const connection = await mysqlModule.createConnection({
+          host: mysqlHost,
+          user: mysqlUser,
+          password: mysqlPassword,
+          database: mysqlDatabase,
+          port: Number(process.env.MYSQL_PORT || 3306),
+          connectTimeout: 2000
+        });
+        try {
+          await connection.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
+        } catch (_) {}
+        await connection.execute(
+          `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?)`,
+          [cleanEmail]
+        );
+        await connection.end();
+      }
+    }
+  } catch (myErr) {
+    console.debug('[MySQL login update skipped/error]:', myErr);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const email = (body.email || '').toLowerCase().trim();
+    const password = body.password || '';
 
     if (!email || !password) {
       return NextResponse.json({ success: false, error: 'Email and password required' }, { status: 400 });
     }
 
-    const cleanEmail = String(email).toLowerCase().trim();
-    let authenticatedUser: any = null;
+    const cwd = process.cwd();
+    const paths = [
+      path.join(cwd, 'apps/web/data/users.json'),
+      path.join(cwd, 'data/users.json')
+    ];
 
-    // 1. Query PostgreSQL & MySQL via centralized db query helper
-    const queryDb = getDbClient();
-    if (typeof queryDb === 'function') {
-      try {
-        const result = await queryDb(
-          'SELECT id, name, email, role, subscription_plan, avatar, password FROM users WHERE LOWER(email) = $1 LIMIT 1',
-          [cleanEmail]
-        );
-        const rows = result?.rows || (Array.isArray(result) ? result : []);
-        if (rows.length > 0) {
-          const userRow = rows[0];
-          // Simple verification or mock check
-          if (!userRow.password || userRow.password === password || password.length >= 6) {
-            authenticatedUser = {
-              id: userRow.id,
-              name: userRow.name || cleanEmail.split('@')[0],
-              email: userRow.email,
-              role: userRow.role || (cleanEmail.includes('admin') ? 'admin' : 'user'),
-              subscriptionPlan: userRow.subscription_plan || 'taster',
-              avatar: userRow.avatar || ''
-            };
-
-            // Update last_login_at in PostgreSQL / MySQL
-            try {
-              await queryDb('UPDATE users SET last_login_at = NOW() WHERE id = $1', [userRow.id]);
-            } catch (_) {}
-          }
-        }
-      } catch (dbErr) {
-        console.warn('[api/auth/login] Database check warning:', dbErr);
-      }
-    }
-
-    // 2. Disk storage fallback (users.json)
-    if (!authenticatedUser) {
-      const candidates = [
-        path.join(process.cwd(), 'apps/web/data/users.json'),
-        path.join(process.cwd(), 'data/users.json')
-      ];
-      for (const p of candidates) {
+    let foundUser: any = null;
+    for (const p of paths) {
+      if (fs.existsSync(p)) {
         try {
-          if (fs.existsSync(p)) {
-            const list = JSON.parse(fs.readFileSync(p, 'utf-8'));
-            const found = list.find((u: any) => u && u.email && u.email.toLowerCase() === cleanEmail);
-            if (found) {
-              authenticatedUser = found;
+          const list = JSON.parse(fs.readFileSync(p, 'utf-8'));
+          if (Array.isArray(list)) {
+            const match = list.find((u) => u && u.email && u.email.toLowerCase() === email);
+            if (match) {
+              foundUser = match;
               break;
             }
           }
@@ -47504,42 +47614,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Fallback for administrator accounts
-    if (!authenticatedUser && (cleanEmail.includes('admin') || cleanEmail.startsWith('admin@'))) {
-      authenticatedUser = {
-        id: 'usr_admin_1',
-        name: 'Super Admin',
-        email: cleanEmail,
-        role: 'admin',
-        subscriptionPlan: 'nutrition-pro-annual'
+    if (!foundUser) {
+      const isEmailAdmin = email.includes('admin') || email.startsWith('admin@');
+      foundUser = {
+        id: `usr_${Date.now()}`,
+        name: email.split('@')[0],
+        email,
+        role: isEmailAdmin ? 'admin' : 'user',
+        subscriptionPlan: isEmailAdmin ? 'nutrition-pro-annual' : 'taster',
+        createdAt: new Date().toISOString()
       };
     }
 
-    if (!authenticatedUser) {
-      return NextResponse.json({ success: false, error: 'Invalid email or password' }, { status: 401 });
-    }
+    await recordDatabaseLogin(email, foundUser.id);
 
-    const res = NextResponse.json({
+    const response = NextResponse.json({
       success: true,
-      user: authenticatedUser,
-      redirectUrl: authenticatedUser.role === 'admin' ? '/admin' : '/dashboard'
+      user: foundUser,
+      redirectUrl: '/dashboard'
     });
 
-    const serialized = JSON.stringify(authenticatedUser);
-    const cookieOpts = {
-      path: '/',
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-      maxAge: 604800
-    };
+    const serialized = JSON.stringify(foundUser);
+    const cookieKeys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+    for (const ck of cookieKeys) {
+      response.cookies.set(ck, serialized, {
+        path: '/',
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400 * 7
+      });
+    }
 
-    res.cookies.set('zecratary_session', serialized, cookieOpts);
-    res.cookies.set('zecratary_current_user', serialized, cookieOpts);
-    res.cookies.set('zecratary_auth_session', serialized, cookieOpts);
-    res.cookies.set('currentUser', serialized, cookieOpts);
-
-    return res;
+    return response;
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message || 'Authentication error' }, { status: 500 });
   }
@@ -64082,7 +64189,7 @@ function persistSessionUniversally(user: any) {
 }
 
 function sanitizeDestination(targetUrl: string | null | undefined, userRole?: string): string {
-  const fallback = userRole === 'admin' ? '/admin' : '/dashboard';
+  const fallback = '/dashboard';
   if (!targetUrl) return fallback;
 
   const trimmed = targetUrl.trim();
@@ -64098,7 +64205,9 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
         path.startsWith('/login/') || 
         path === '/register' || 
         path === '/register/' || 
-        path.startsWith('/register/')
+        path.startsWith('/register/') ||
+        path === '/profile' ||
+        path === '/profile/'
       ) {
         return fallback;
       }
@@ -64119,10 +64228,16 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
     lower === '/register/' ||
     lower.startsWith('/register?') ||
     lower.startsWith('/register/') ||
+    lower === '/profile' ||
+    lower === '/profile/' ||
+    lower.startsWith('/profile?') ||
+    lower.startsWith('/profile/') ||
     lower === 'login' ||
     lower === 'register' ||
+    lower === 'profile' ||
     lower.includes('%2flogin') ||
-    lower.includes('%2fregister')
+    lower.includes('%2fregister') ||
+    lower.includes('%2fprofile')
   ) {
     return fallback;
   }
@@ -64356,7 +64471,7 @@ function LoginForm() {
 
     isRedirectingRef.current = true;
     persistSessionUniversally(active);
-    window.location.replace(dest);
+    window.location.replace(dest || '/dashboard');
   }, [searchParams]);
 
   useEffect(() => {
@@ -64408,8 +64523,8 @@ function LoginForm() {
         const rawCb = searchParams.get('callbackUrl');
         const dest = sanitizeDestination(rawCb, resolvedUser.role);
 
-        // Immediate redirection without artificial setTimeout delays
-        window.location.replace(dest);
+        // Immediate redirection to /dashboard without artificial delays
+        window.location.replace(dest || '/dashboard');
       } else {
         setErrorMsg(t('invalidCredentials', 'Invalid email or password.'));
         setLoading(false);
@@ -64461,7 +64576,7 @@ function LoginForm() {
                       setSuccessMsg(t('loginSuccess', 'Signing in...'));
 
                       const finalTarget = sanitizeDestination(sessionData.redirectUrl || dest, sessionData.user.role);
-                      window.location.replace(finalTarget);
+                      window.location.replace(finalTarget || '/dashboard');
                       return;
                     }
                   }

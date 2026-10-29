@@ -3,6 +3,21 @@ import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_SUPPORTED_LANGUAGES = [
@@ -94,7 +109,7 @@ export async function GET(request: Request) {
       `SELECT * FROM admin_settings WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1' ORDER BY updated_at DESC LIMIT 1`
     ).catch(() => null);
 
-    const rows = Array.isArray(adminRes) ? adminRes : (adminRes?.rows || []);
+    const rows = parseDbRows(adminRes);
     if (rows && rows.length > 0) {
       const row = rows[0];
       const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
@@ -130,7 +145,7 @@ export async function GET(request: Request) {
   // Query dedicated app_translations table
   try {
     const transRes = await query(`SELECT lang_code, dictionary FROM app_translations`).catch(() => null);
-    const transRows = Array.isArray(transRes) ? transRes : (transRes?.rows || []);
+    const transRows = parseDbRows(transRes);
     if (transRows && transRows.length > 0) {
       transRows.forEach((r: any) => {
         if (r.lang_code && r.dictionary) {

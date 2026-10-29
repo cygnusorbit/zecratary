@@ -2,6 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 export const dynamic = 'force-dynamic';
 
 async function syncUserToDatabase(user: any): Promise<void> {
@@ -9,50 +24,81 @@ async function syncUserToDatabase(user: any): Promise<void> {
   const userId = user.id || '';
   if (!email && !userId) return;
 
-  // 1. PostgreSQL Synchronization
+  // 1. PostgreSQL Synchronization (Constraint 8)
   try {
-    const { getPostgresPool } = await import('@/lib/postgresUser').catch(() => ({ getPostgresPool: null }));
-    const pool = getPostgresPool ? getPostgresPool() : null;
-    if (pool) {
-      await pool.query(`
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
-      `);
-      await pool.query(
+    const dbLib = await import('@/lib/db').catch(() => null);
+    if (dbLib && typeof dbLib.query === 'function') {
+      try {
+        await dbLib.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+        `);
+      } catch (_) {}
+      await dbLib.query(
         `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1) OR id = $2`,
         [email, userId]
       );
+    } else {
+      const pgUserLib = await import('@/lib/postgresUser').catch(() => null);
+      const pool = pgUserLib && typeof (pgUserLib as any).getPostgresPool === 'function' ? (pgUserLib as any).getPostgresPool() : null;
+      if (pool) {
+        await pool.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+        `);
+        await pool.query(
+          `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1) OR id = $2`,
+          [email, userId]
+        );
+      }
     }
   } catch (pgErr) {
     console.debug('[PostgreSQL Google sync skipped/error]:', pgErr);
   }
 
-  // 2. MySQL Synchronization
+  // 2. MySQL Synchronization (Constraint 8)
   try {
-    const mysqlHost = process.env.MYSQL_HOST || process.env.DB_HOST;
-    const mysqlUser = process.env.MYSQL_USER || process.env.DB_USER;
-    const mysqlPassword = process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD;
-    const mysqlDatabase = process.env.MYSQL_DATABASE || process.env.DB_NAME;
+    const mysqlLib = await import('@/lib/mysql').catch(() => null);
+    if (mysqlLib && typeof mysqlLib.queryMysql === 'function') {
+      try {
+        await mysqlLib.queryMysql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
+      } catch (_) {}
+      await mysqlLib.queryMysql(
+        `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?) OR id = ?`,
+        [email, userId]
+      );
+    } else {
+      const mysqlHost = process.env.MYSQL_HOST || process.env.DB_HOST;
+      const mysqlUser = process.env.MYSQL_USER || process.env.DB_USER;
+      const mysqlPassword = process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD || '';
+      const mysqlDatabase = process.env.MYSQL_DATABASE || process.env.DB_NAME;
+      const mysqlPort = Number(process.env.MYSQL_PORT || 3306);
+      const rawMysqlUrl = process.env.MYSQL_URL || process.env.DATABASE_URL;
 
-    if (mysqlHost && mysqlUser && mysqlDatabase) {
-      const mysqlModule = await import('mysql2/promise').catch(() => null);
-      if (mysqlModule) {
-        const connection = await mysqlModule.createConnection({
-          host: mysqlHost,
-          user: mysqlUser,
-          password: mysqlPassword,
-          database: mysqlDatabase,
-          port: Number(process.env.MYSQL_PORT || 3306),
-          connectTimeout: 2000
-        });
-        try {
-          await connection.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
-        } catch (_) {}
-        await connection.execute(
-          `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?) OR id = ?`,
-          [email, userId]
-        );
-        await connection.end();
+      const connUrl: string = (rawMysqlUrl && rawMysqlUrl.startsWith('mysql://'))
+        ? rawMysqlUrl
+        : (mysqlHost && mysqlUser && mysqlDatabase)
+          ? `mysql://${encodeURIComponent(mysqlUser)}:${encodeURIComponent(mysqlPassword)}@${mysqlHost}:${mysqlPort}/${mysqlDatabase}`
+          : '';
+
+      if (connUrl) {
+        const loader = typeof (globalThis as any).__non_webpack_require__ === 'function'
+          ? (globalThis as any).__non_webpack_require__
+          : null;
+        if (loader) {
+          const mysqlModule = loader('mysql2/promise');
+          if (mysqlModule) {
+            const connection = await (mysqlModule as any).createConnection(connUrl);
+            try {
+              await connection.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
+            } catch (_) {}
+            await connection.execute(
+              `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?) OR id = ?`,
+              [email, userId]
+            );
+            await connection.end();
+          }
+        }
       }
     }
   } catch (myErr) {
@@ -109,7 +155,7 @@ function syncUserToStore(user: any): any {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const profile = body.profile;
     const requestedCallback = body.callbackUrl || '';
 
@@ -139,7 +185,6 @@ export async function POST(req: NextRequest) {
     const finalUser = syncUserToStore(candidateUser);
     await syncUserToDatabase(finalUser);
 
-    // Guaranteed redirection to /dashboard
     let redirectUrl = requestedCallback.trim();
     if (
       !redirectUrl || 

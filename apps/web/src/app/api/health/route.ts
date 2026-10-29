@@ -1,6 +1,21 @@
 import { NextResponse } from 'next/server';
 import { query, getDatabaseDialect, getConnectionString } from '@/lib/db';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -22,7 +37,7 @@ export async function GET() {
         : 'SELECT NOW() AS server_time, DATABASE() AS db_name;';
 
       const rows: any = await query(sql);
-      const row = Array.isArray(rows) ? rows[0] : (rows?.rows?.[0] || null);
+      const row = parseDbRow(rows);
 
       if (row) {
         dbStatus = 'connected';
@@ -34,7 +49,7 @@ export async function GET() {
         : "SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema = DATABASE();";
 
       const tableRows: any = await query(tableSql).catch(() => []);
-      const tRow = Array.isArray(tableRows) ? tableRows[0] : (tableRows?.rows?.[0] || null);
+      const tRow = parseDbRow(tableRows);
       tableCount = tRow?.total ? Number(tRow.total) : 0;
     }
   } catch (err: any) {

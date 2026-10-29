@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -105,7 +120,7 @@ export async function GET(req: NextRequest) {
         WHERE id::text = 'current' OR id::text = '1'
         LIMIT 1;
       `);
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRow = parseDbRow(sRes);
       if (sRow) {
         settings = {
           is_enabled: sRow.is_enabled !== false,
@@ -133,7 +148,7 @@ export async function GET(req: NextRequest) {
              OR (email IS NOT NULL AND LOWER(email) = LOWER($2::text) AND $2::text != '')
           LIMIT 1;
         `, [userId, email]);
-        userRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
+        userRow = parseDbRow(uRes);
         if (userRow) {
           walletBalance = parseFloat(userRow.wallet_balance || 0);
         }
@@ -185,7 +200,7 @@ export async function GET(req: NextRequest) {
     let totalCount = 0;
     try {
       const countRes: any = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, values);
-      const cRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
+      const cRow = parseDbRow(countRes);
       totalCount = parseInt(cRow?.count || '0', 10);
     } catch (_) {}
 
@@ -198,7 +213,7 @@ export async function GET(req: NextRequest) {
         ORDER BY created_at DESC 
         LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}
       `, pageValues);
-      transactions = Array.isArray(rowsRes) ? rowsRes : (rowsRes?.rows || []);
+      transactions = parseDbRows(rowsRes);
     } catch (_) {}
 
     let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
@@ -211,7 +226,7 @@ export async function GET(req: NextRequest) {
         FROM wallet_transactions 
         WHERE ${whereSql} AND status IN ('succeeded', 'successful', 'completed', 'paid')
       `, values);
-      const stRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+      const stRow = parseDbRow(statsRes);
       if (stRow) {
         stats = {
           totalDeposited: parseFloat(stRow.total_deposited || 0),
@@ -272,7 +287,7 @@ export async function POST(req: NextRequest) {
       RETURNING id, email, wallet_balance;
     `, [totalToAdd, targetUserId, targetEmail]);
 
-    const userRow = Array.isArray(updateRes) ? updateRes[0] : updateRes?.rows?.[0];
+    const userRow = parseDbRow(updateRes);
     const newBalance = userRow ? parseFloat(userRow.wallet_balance) : totalToAdd;
 
     // 2. Record transaction in ledger

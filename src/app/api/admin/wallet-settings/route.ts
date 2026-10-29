@@ -3,6 +3,21 @@ import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -37,7 +52,7 @@ export async function GET() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
-    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    const sRow = parseDbRow(sRes);
     if (sRow) {
       settings = {
         currency: sRow.currency || 'USD',
@@ -144,7 +159,7 @@ export async function POST(req: Request) {
         [delta, email]
       );
 
-      const userRow = Array.isArray(userRes) ? userRes[0] : userRes?.rows?.[0];
+      const userRow = parseDbRow(userRes);
       const newBalance = userRow ? Number(userRow.wallet_balance) : 0;
       const txId = 'wtx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 

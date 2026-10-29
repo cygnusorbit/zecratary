@@ -2,62 +2,116 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 export const dynamic = 'force-dynamic';
 
-async function recordDatabaseLogin(email: string, userId?: string) {
+async function recordDatabaseLogin(email: string, userId?: string): Promise<void> {
   const cleanEmail = email.toLowerCase().trim();
+  const cleanUserId = userId || '';
 
-  // 1. PostgreSQL Audit
+  // 1. PostgreSQL Audit (Constraint 8)
   try {
-    const { getPostgresPool } = await import('@/lib/postgresUser').catch(() => ({ getPostgresPool: null }));
-    const pool = getPostgresPool ? getPostgresPool() : null;
-    if (pool) {
-      await pool.query(`
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
-      `);
-      if (userId) {
-        await pool.query(
+    const dbLib = await import('@/lib/db').catch(() => null);
+    if (dbLib && typeof dbLib.query === 'function') {
+      try {
+        await dbLib.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+        `);
+      } catch (_) {}
+      if (cleanUserId) {
+        await dbLib.query(
           `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [userId]
+          [cleanUserId]
         );
       } else {
-        await pool.query(
+        await dbLib.query(
           `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1)`,
           [cleanEmail]
         );
+      }
+    } else {
+      const pgUserLib = await import('@/lib/postgresUser').catch(() => null);
+      const pool = pgUserLib && typeof (pgUserLib as any).getPostgresPool === 'function' ? (pgUserLib as any).getPostgresPool() : null;
+      if (pool) {
+        await pool.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+        `);
+        if (cleanUserId) {
+          await pool.query(
+            `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [cleanUserId]
+          );
+        } else {
+          await pool.query(
+            `UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1)`,
+            [cleanEmail]
+          );
+        }
       }
     }
   } catch (pgErr) {
     console.debug('[PostgreSQL login update skipped/error]:', pgErr);
   }
 
-  // 2. MySQL Audit
+  // 2. MySQL Audit (Constraint 8)
   try {
-    const mysqlHost = process.env.MYSQL_HOST || process.env.DB_HOST;
-    const mysqlUser = process.env.MYSQL_USER || process.env.DB_USER;
-    const mysqlPassword = process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD;
-    const mysqlDatabase = process.env.MYSQL_DATABASE || process.env.DB_NAME;
+    const mysqlLib = await import('@/lib/mysql').catch(() => null);
+    if (mysqlLib && typeof mysqlLib.queryMysql === 'function') {
+      try {
+        await mysqlLib.queryMysql(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
+      } catch (_) {}
+      await mysqlLib.queryMysql(
+        `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?) OR id = ?`,
+        [cleanEmail, cleanUserId]
+      );
+    } else {
+      const mysqlHost = process.env.MYSQL_HOST || process.env.DB_HOST;
+      const mysqlUser = process.env.MYSQL_USER || process.env.DB_USER;
+      const mysqlPassword = process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD || '';
+      const mysqlDatabase = process.env.MYSQL_DATABASE || process.env.DB_NAME;
+      const mysqlPort = Number(process.env.MYSQL_PORT || 3306);
+      const rawMysqlUrl = process.env.MYSQL_URL || process.env.DATABASE_URL;
 
-    if (mysqlHost && mysqlUser && mysqlDatabase) {
-      const mysqlModule = await import('mysql2/promise').catch(() => null);
-      if (mysqlModule) {
-        const connection = await mysqlModule.createConnection({
-          host: mysqlHost,
-          user: mysqlUser,
-          password: mysqlPassword,
-          database: mysqlDatabase,
-          port: Number(process.env.MYSQL_PORT || 3306),
-          connectTimeout: 2000
-        });
-        try {
-          await connection.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
-        } catch (_) {}
-        await connection.execute(
-          `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?)`,
-          [cleanEmail]
-        );
-        await connection.end();
+      const connUrl: string = (rawMysqlUrl && rawMysqlUrl.startsWith('mysql://'))
+        ? rawMysqlUrl
+        : (mysqlHost && mysqlUser && mysqlDatabase)
+          ? `mysql://${encodeURIComponent(mysqlUser)}:${encodeURIComponent(mysqlPassword)}@${mysqlHost}:${mysqlPort}/${mysqlDatabase}`
+          : '';
+
+      if (connUrl) {
+        const loader = typeof (globalThis as any).__non_webpack_require__ === 'function'
+          ? (globalThis as any).__non_webpack_require__
+          : null;
+        if (loader) {
+          const mysqlModule = loader('mysql2/promise');
+          if (mysqlModule) {
+            const connection = await (mysqlModule as any).createConnection(connUrl);
+            try {
+              await connection.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME;`);
+            } catch (_) {}
+            await connection.execute(
+              `UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE LOWER(email) = LOWER(?) OR id = ?`,
+              [cleanEmail, cleanUserId]
+            );
+            await connection.end();
+          }
+        }
       }
     }
   } catch (myErr) {
@@ -95,6 +149,19 @@ export async function POST(req: NextRequest) {
           }
         } catch (_) {}
       }
+    }
+
+    if (!foundUser) {
+      try {
+        const dbLib = await import('@/lib/db').catch(() => null);
+        if (dbLib && typeof dbLib.query === 'function') {
+          const dbRows = await dbLib.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+          const userRow = Array.isArray(dbRows) ? dbRows[0] : (dbRows as any)?.rows?.[0];
+          if (userRow) {
+            foundUser = userRow;
+          }
+        }
+      } catch (_) {}
     }
 
     if (!foundUser) {

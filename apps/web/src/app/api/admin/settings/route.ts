@@ -3,6 +3,21 @@ import path from 'path';
 import fs from 'fs';
 import { query } from '@/lib/db';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 function getJsonStorePath() {
   const p1 = path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json');
   if (fs.existsSync(path.dirname(p1))) return p1;

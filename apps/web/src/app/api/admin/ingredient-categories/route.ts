@@ -3,6 +3,21 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 const DEFAULT_CATEGORIES = [
   { id: 'cat_produce', name: 'Produce', slug: 'produce', icon: '🥬', description: 'Fresh vegetables, fruits, and culinary herbs', isActive: true, order: 1 },
   { id: 'cat_meat', name: 'Meat & Poultry', slug: 'meat-poultry', icon: '🥩', description: 'Fresh meats, cuts, beef, poultry, and bacon', isActive: true, order: 2 },

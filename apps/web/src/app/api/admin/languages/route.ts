@@ -4,6 +4,21 @@ import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+
+// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -113,7 +128,7 @@ export async function GET() {
       ORDER BY updated_at DESC LIMIT 1
     `);
 
-    const rows = Array.isArray(adminRes) ? adminRes : (adminRes?.rows || []);
+    const rows = parseDbRows(adminRes);
     if (rows && rows.length > 0) {
       const row = rows[0];
       const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
@@ -145,7 +160,7 @@ export async function GET() {
   // Load from app_translations if available
   try {
     const transRes: any = await query(`SELECT lang_code, dictionary FROM app_translations`);
-    const transRows = Array.isArray(transRes) ? transRes : (transRes?.rows || []);
+    const transRows = parseDbRows(transRes);
     if (transRows && transRows.length > 0) {
       transRows.forEach((r: any) => {
         if (r.lang_code && r.dictionary) {
