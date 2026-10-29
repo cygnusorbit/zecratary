@@ -8,7 +8,7 @@ import {
   Layers, CheckCircle2, AlertCircle, ShieldCheck, ArrowRight, 
   Coins, Wallet, RefreshCw, Sparkles, Zap, Lock, Calendar, 
   HelpCircle, ChevronDown, Check, X, Search, ChevronLeft, ChevronRight,
-  ExternalLink, CreditCard, Shield, AlertTriangle, Clock, Ban
+  ExternalLink, CreditCard, Shield, AlertTriangle, Clock, Ban, Landmark
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -73,7 +73,7 @@ interface PaymentTransaction {
 
 const DEFAULT_PLANS: SubscriptionPlan[] = [
   {
-    id: 'plan_taster',
+    id: 'preset_taster',
     name: 'Taster',
     slug: 'taster',
     is_free: true,
@@ -86,7 +86,7 @@ const DEFAULT_PLANS: SubscriptionPlan[] = [
     features: ['50 Foodie AI Tokens / month', 'Basic Recipe Generator', 'Standard Ingredient Conversion', 'Community Support']
   },
   {
-    id: 'plan_pro',
+    id: 'preset_foodie_pro',
     name: 'Foodie Pro',
     slug: 'foodie-pro',
     is_free: false,
@@ -101,7 +101,7 @@ const DEFAULT_PLANS: SubscriptionPlan[] = [
     features: ['600 Foodie AI Tokens / month', 'Unlimited Recipe Storage', 'Advanced Nutritional Macros Tracking', 'Live Culinary Web & Scraping Engine', 'Priority AI Model Access']
   },
   {
-    id: 'plan_chef',
+    id: 'preset_master_chef',
     name: 'Master Kitchen',
     slug: 'master-chef',
     is_free: false,
@@ -117,7 +117,7 @@ const DEFAULT_PLANS: SubscriptionPlan[] = [
 ];
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', THB: '฿'
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', THB: '฿', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$'
 };
 
 function parsePlanFeatures(raw: any): string[] {
@@ -138,8 +138,10 @@ function cleanSlug(slug?: string): string {
   return String(slug)
     .toLowerCase()
     .trim()
-    .replace(/^(preset_|plan_)/, '')
-    .replace(/-(monthly|annual|year)$/, '');
+    .replace(/^(preset_|plan_|group_)/i, '')
+    .replace(/-(monthly|annual|year)$/i, '')
+    .replace(/[_\s-]+/g, '_')
+    .trim();
 }
 
 export default function SubscriptionsPage() {
@@ -154,11 +156,20 @@ export default function SubscriptionsPage() {
   // Billing Interval: 'monthly' | 'annual'
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
 
-  // Balances & Currency
+  // Balances, Currency & Gateway Settings
   const [tokenBalance, setTokenBalance] = useState<number>(50);
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
+  const [currencyCode, setCurrencyCode] = useState<string>('USD');
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
   const [tokenIdentity, setTokenIdentity] = useState<{ tokenName: string; tokenSymbol: string }>({ tokenName: 'Tokens', tokenSymbol: '🪙' });
+  const [gatewayConfig, setGatewayConfig] = useState<any>({
+    activeGateway: 'both',
+    currency: 'USD',
+    currencySymbol: '$',
+    stripe: { enabled: true },
+    paypal: { enabled: true },
+    manual: { enabled: true }
+  });
 
   // Transaction Ledger Filters & Pagination
   const [historySearch, setHistorySearch] = useState<string>('');
@@ -193,7 +204,7 @@ export default function SubscriptionsPage() {
     plan_name: tx.plan_name || tx.planName || 'Subscription Tier',
     plan_slug: tx.plan_slug || tx.planSlug || '',
     amount: typeof tx.amount === 'number' ? tx.amount : parseFloat(tx.amount || 0),
-    currency: (tx.currency || 'USD').toUpperCase(),
+    currency: (tx.currency || currencyCode).toUpperCase(),
     gateway: tx.gateway || tx.payment_method || 'stripe',
     status: (tx.status || 'succeeded').toLowerCase(),
     is_recurring: Boolean(tx.is_recurring ?? tx.isRecurring ?? true),
@@ -204,22 +215,66 @@ export default function SubscriptionsPage() {
   });
 
   // Normalization helper for incoming plans
-  const normalizePlan = (plan: any): SubscriptionPlan => ({
-    id: plan.id || plan.slug,
-    name: plan.name || 'Tier',
-    slug: plan.slug || plan.id,
-    is_free: Boolean(plan.is_free ?? plan.isFree ?? (plan.monthlyPrice === 0 || plan.monthly_price_dollars === 0)),
-    monthly_price_dollars: Number(plan.monthly_price_dollars ?? plan.monthlyPrice ?? plan.monthlyPriceDollars ?? 0),
-    annual_price_dollars: Number(plan.annual_price_dollars ?? plan.annualPrice ?? plan.annualPriceDollars ?? 0),
-    token_limit: Number(plan.token_limit ?? plan.tokenLimit ?? 500),
-    trialBadge: plan.trialBadge || (plan.is_free ? 'Free Tier' : undefined),
-    monthlyBadge: plan.monthlyBadge || (plan.popular ? 'Popular' : undefined),
-    annualBadge: plan.annualBadge || 'Save ~20%',
-    description_monthly: plan.description_monthly || plan.descriptionMonthly || plan.description || '',
-    description_annual: plan.description_annual || plan.descriptionAnnual || plan.description || '',
-    features: parsePlanFeatures(plan.features),
-    popular: Boolean(plan.popular)
-  });
+  const normalizePlan = (plan: any): SubscriptionPlan => {
+    const rawSlug = String(plan.slug || plan.id || 'plan').toLowerCase().trim();
+    const baseSlug = cleanSlug(rawSlug);
+
+    const isFree = Boolean(
+      plan.is_free === true ||
+      plan.isFree === true ||
+      baseSlug === 'taster' ||
+      baseSlug === 'free' ||
+      plan.id === 'preset_taster' ||
+      (Number(plan.monthly_price_dollars ?? plan.monthlyPriceDollars ?? plan.monthlyPrice ?? plan.price ?? 0) === 0 &&
+       Number(plan.annual_price_dollars ?? plan.annualPriceDollars ?? plan.annualPrice ?? 0) === 0)
+    );
+
+    const monthlyPrice = isFree ? 0 : Number(
+      plan.monthly_price_dollars ??
+      plan.monthlyPriceDollars ??
+      plan.monthlyPrice ??
+      plan.price_monthly ??
+      plan.price ??
+      0
+    );
+
+    let annualPrice = isFree ? 0 : Number(
+      plan.annual_price_dollars ??
+      plan.annualPriceDollars ??
+      plan.annualPrice ??
+      plan.price_annual ??
+      0
+    );
+
+    if (!isFree && annualPrice === 0 && monthlyPrice > 0) {
+      annualPrice = Number((monthlyPrice * 10).toFixed(2));
+    }
+
+    const tokenLimit = Number(
+      plan.token_limit ??
+      plan.tokenLimit ??
+      plan.monthly_tokens ??
+      plan.tokenQuota ??
+      (isFree ? 50 : 500)
+    );
+
+    return {
+      id: plan.id || baseSlug,
+      name: plan.name || baseSlug.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+      slug: baseSlug,
+      is_free: isFree,
+      monthly_price_dollars: monthlyPrice,
+      annual_price_dollars: annualPrice,
+      token_limit: tokenLimit,
+      trialBadge: plan.trialBadge || plan.trial_badge || (isFree ? 'Free Forever' : undefined),
+      monthlyBadge: plan.monthlyBadge || plan.monthly_badge || (plan.popular ? 'Popular' : undefined),
+      annualBadge: plan.annualBadge || plan.annual_badge || 'Save ~20%',
+      description_monthly: plan.description_monthly || plan.descriptionMonthly || plan.description || '',
+      description_annual: plan.description_annual || plan.descriptionAnnual || plan.description || plan.description_monthly || '',
+      features: parsePlanFeatures(plan.featuresText || plan.features),
+      popular: Boolean(plan.popular)
+    };
+  };
 
   // Fetch plans, user billing info, and balances
   const fetchSubscriptionData = useCallback(async (activeUser: User | null) => {
@@ -231,29 +286,107 @@ export default function SubscriptionsPage() {
     const targetEmail = activeUser?.email || 'admin@zecratary.com';
 
     try {
+      // 1. Ingest Settings & Currency
+      let activeCur = 'USD';
       if (typeof window !== 'undefined') {
-        const cur = localStorage.getItem('zecratary_currency') || 'USD';
-        setCurrencySymbol(CURRENCY_SYMBOLS[cur] || '$');
+        activeCur = localStorage.getItem('zecratary_currency') || 'USD';
       }
 
-      // 1. Fetch Plans
+      try {
+        const sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          if (sData?.settings?.currency) activeCur = sData.settings.currency;
+          if (sData?.settings?.payment_settings) setGatewayConfig(sData.settings.payment_settings);
+        }
+      } catch (_) {}
+
+      try {
+        const gwRes = await fetch(`/api/admin/payment-gateway?t=${Date.now()}`, { cache: 'no-store' });
+        if (gwRes.ok) {
+          const gwData = await gwRes.json();
+          if (gwData?.gatewayConfig) setGatewayConfig(gwData.gatewayConfig);
+          if (gwData?.currency) activeCur = gwData.currency;
+        }
+      } catch (_) {}
+
+      setCurrencyCode(activeCur.toUpperCase());
+      setCurrencySymbol(CURRENCY_SYMBOLS[activeCur.toUpperCase()] || '$');
+
+      // 2. Authoritative Subscription Plans Ingestion
+      let fetchedPlansList: any[] = [];
+
       try {
         const pRes = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
         if (pRes.ok) {
           const pData = await pRes.json();
-          const rawPlans = Array.isArray(pData?.plans) ? pData.plans : (Array.isArray(pData) ? pData : []);
-          if (rawPlans.length > 0) {
-            setPlans(rawPlans.map(normalizePlan));
+          const list = Array.isArray(pData)
+            ? pData
+            : (pData?.packages || pData?.plans || pData?.configs || pData?.subscriptionPlans || pData?.data);
+          if (Array.isArray(list) && list.length > 0) {
+            fetchedPlansList = [...list];
           }
         }
       } catch (_) {}
 
-      // 2. Fetch User Billing & Transactions
+      if (fetchedPlansList.length === 0) {
+        try {
+          const pubRes = await fetch(`/api/plans?t=${Date.now()}`, { cache: 'no-store' });
+          if (pubRes.ok) {
+            const pubData = await pubRes.json();
+            const list = Array.isArray(pubData)
+              ? pubData
+              : (pubData?.packages || pubData?.plans || pubData?.configs || pubData?.subscriptionPlans || pubData?.data);
+            if (Array.isArray(list) && list.length > 0) {
+              fetchedPlansList = [...list];
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 3. User Billing Details & Transactions Ingestion
       try {
         const bRes = await fetch(`/api/billing?email=${encodeURIComponent(targetEmail)}&userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
         if (bRes.ok) {
           const bData = await bRes.json();
           if (bData.success) {
+            // Reconcile and synchronize authoritative user state from database
+            if (bData.user) {
+              const u = bData.user;
+              const reconciledUser: User = {
+                ...(activeUser || {}),
+                id: u.id || activeUser?.id,
+                name: u.name || activeUser?.name,
+                email: u.email || activeUser?.email,
+                role: u.role || activeUser?.role,
+                subscriptionPlan: u.subscription_plan || u.subscriptionPlan || (activeUser as any)?.subscriptionPlan || 'taster',
+                subscription_plan: u.subscription_plan || u.subscriptionPlan || (activeUser as any)?.subscription_plan || 'taster',
+                planInterval: u.plan_interval || u.planInterval || (activeUser as any)?.planInterval || 'MONTH',
+                plan_interval: u.plan_interval || u.planInterval || (activeUser as any)?.plan_interval || 'MONTH',
+                planExpiryDate: u.plan_expiry_date || u.planExpiryDate || u.expiry_date || u.expiryDate,
+                plan_expiry_date: u.plan_expiry_date || u.planExpiryDate || u.expiry_date || u.expiryDate,
+                wallet_balance: Number(u.wallet_balance ?? u.walletBalance ?? 0),
+                token_balance: Number(u.token_balance ?? u.tokenBalance ?? 0)
+              };
+
+              setCurrentUser(reconciledUser);
+              setWalletBalance(Number(reconciledUser.wallet_balance || 0));
+              setTokenBalance(Number(reconciledUser.token_balance || 0));
+
+              try {
+                localStorage.setItem('zecratary_user', JSON.stringify(reconciledUser));
+                localStorage.setItem('zecratary_current_user', JSON.stringify(reconciledUser));
+              } catch (_) {}
+            }
+
+            if (bData.gatewayConfig) {
+              setGatewayConfig(bData.gatewayConfig);
+              if (bData.gatewayConfig.currency) {
+                setCurrencyCode(bData.gatewayConfig.currency.toUpperCase());
+                setCurrencySymbol(bData.gatewayConfig.currencySymbol || CURRENCY_SYMBOLS[bData.gatewayConfig.currency.toUpperCase()] || '$');
+              }
+            }
+
             if (Array.isArray(bData.transactions)) {
               const normalizedTxList = bData.transactions.map(normalizeTransaction);
               setTransactions(normalizedTxList);
@@ -275,48 +408,61 @@ export default function SubscriptionsPage() {
               }
             }
 
-            if (bData.plans && Array.isArray(bData.plans) && bData.plans.length > 0) {
-              setPlans(bData.plans.map(normalizePlan));
+            if (fetchedPlansList.length === 0 && bData.plans && Array.isArray(bData.plans) && bData.plans.length > 0) {
+              fetchedPlansList = bData.plans;
             }
 
             if (bData.tokenIdentity) {
               setTokenIdentity(bData.tokenIdentity);
             }
-
-            if (bData.user) {
-              if (bData.user.wallet_balance !== undefined) setWalletBalance(Number(bData.user.wallet_balance));
-              if (bData.user.token_balance !== undefined) setTokenBalance(Number(bData.user.token_balance));
-              if (bData.user.subscription_plan) {
-                const uPlan = String(bData.user.subscription_plan).toLowerCase();
-                if (uPlan.includes('annual') || uPlan.includes('year')) {
-                  setBillingInterval('annual');
-                }
-              }
-            }
           }
         }
       } catch (_) {}
 
-      // 3. Fallback Wallet Balance Check
+      // 4. Token Settings Ingestion
       try {
-        const wRes = await fetch(`/api/wallet?email=${encodeURIComponent(targetEmail)}&userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
-        if (wRes.ok) {
-          const wData = await wRes.json();
-          const wBal = typeof wData.wallet_balance === 'number' 
-            ? wData.wallet_balance 
-            : (typeof wData.balance === 'number' ? wData.balance : Number(wData.user?.wallet_balance || 0));
-          setWalletBalance(wBal);
-          if (wData.settings?.currency) setCurrencySymbol(CURRENCY_SYMBOLS[wData.settings.currency] || '$');
+        const tokRes = await fetch(`/api/token-settings?t=${Date.now()}`, { cache: 'no-store' });
+        if (tokRes.ok) {
+          const tokData = await tokRes.json();
+          if (tokData?.tokenIdentity) {
+            setTokenIdentity(tokData.tokenIdentity);
+          } else if (tokData?.token_name || tokData?.token_symbol) {
+            setTokenIdentity({
+              tokenName: tokData.token_name || 'Tokens',
+              tokenSymbol: tokData.token_symbol || '🪙'
+            });
+          }
         }
       } catch (_) {}
 
+      // Finalize Plan Normalization
+      if (fetchedPlansList.length > 0) {
+        const uniqueMap = new Map<string, SubscriptionPlan>();
+        fetchedPlansList.forEach((raw) => {
+          const norm = normalizePlan(raw);
+          if (!uniqueMap.has(norm.slug)) {
+            uniqueMap.set(norm.slug, norm);
+          }
+        });
+
+        let finalList = Array.from(uniqueMap.values());
+        const hasFree = finalList.some(p => p.is_free || cleanSlug(p.slug) === 'taster');
+        if (!hasFree) {
+          finalList.unshift(DEFAULT_PLANS[0]);
+        }
+        setPlans(finalList);
+      } else {
+        setPlans(DEFAULT_PLANS);
+      }
+
     } catch (err) {
-      console.warn('[SubscriptionsPage] Ingestion error:', err);
+      console.warn('[SubscriptionsPage] Data ingestion warning:', err);
+      setPlans(DEFAULT_PLANS);
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
     }
-  }, []);
+  }, [currencyCode]);
 
   const fetchRef = useRef(fetchSubscriptionData);
   useEffect(() => {
@@ -345,7 +491,7 @@ export default function SubscriptionsPage() {
           setCurrentUser(active);
           fetchRef.current(active);
         }
-      }, 300);
+      }, 250);
     };
 
     window.addEventListener('storage', handleDebouncedSync);
@@ -353,9 +499,11 @@ export default function SubscriptionsPage() {
     window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
     window.addEventListener('zecratary_wallet_updated', handleDebouncedSync);
     window.addEventListener('zecratary_tokens_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_languages_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_dictionary_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_locale_changed', handleDebouncedSync);
+    window.addEventListener('zecratary_token_settings_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_users_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_user_plan_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_subscriptions_updated', handleDebouncedSync);
     window.addEventListener('zecratary_theme_mode_changed', handleDebouncedSync);
     window.addEventListener('zecratary_theme_changed', handleDebouncedSync);
 
@@ -366,17 +514,40 @@ export default function SubscriptionsPage() {
       window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_wallet_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_tokens_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_languages_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_locale_changed', handleDebouncedSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_user_plan_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_subscriptions_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleDebouncedSync);
       window.removeEventListener('zecratary_theme_changed', handleDebouncedSync);
     };
-  }, []);
+  }, [router]);
+
+  const activeUserSlug = useMemo(() => {
+    return cleanSlug(currentUser?.subscription_plan || (currentUser as any)?.subscriptionPlan || activeTransaction?.plan_slug || 'taster');
+  }, [currentUser, activeTransaction]);
+
+  const activeUserInterval = useMemo<'monthly' | 'annual'>(() => {
+    if (activeTransaction?.recurring_interval) {
+      const intv = activeTransaction.recurring_interval.toUpperCase();
+      if (intv === 'YEAR' || intv === 'ANNUAL') return 'annual';
+      if (intv === 'MONTH' || intv === 'MONTHLY') return 'monthly';
+    }
+    const uIntv = String(currentUser?.plan_interval || (currentUser as any)?.planInterval || '').toUpperCase();
+    if (uIntv === 'YEAR' || uIntv === 'ANNUAL') return 'annual';
+    const raw = String(currentUser?.subscription_plan || (currentUser as any)?.subscriptionPlan || activeTransaction?.plan_slug || '').toLowerCase();
+    if (raw.includes('annual') || raw.includes('year')) return 'annual';
+    return 'monthly';
+  }, [currentUser, activeTransaction]);
+
+  const isFreeUser = useMemo(() => {
+    return !activeUserSlug || activeUserSlug === 'taster' || activeUserSlug === 'free';
+  }, [activeUserSlug]);
 
   const expiryInfo = useMemo(() => {
-    const rawDate = activeTransaction?.expiry_date;
-    if (!rawDate) return { isExpired: false, isExpiringSoon: false, daysLeft: null, dateStr: null };
+    const rawDate = activeTransaction?.expiry_date || currentUser?.plan_expiry_date || (currentUser as any)?.planExpiryDate || (currentUser as any)?.expiry_date;
+    if (!rawDate || isFreeUser) return { isExpired: false, isExpiringSoon: false, daysLeft: null, dateStr: null };
 
     const expDate = new Date(rawDate);
     const today = new Date();
@@ -389,37 +560,27 @@ export default function SubscriptionsPage() {
       daysLeft: Math.max(0, diffDays),
       dateStr: expDate.toLocaleDateString()
     };
-  }, [activeTransaction]);
+  }, [activeTransaction, currentUser, isFreeUser]);
 
-  const activeUserSlug = useMemo(() => {
-    return cleanSlug(currentUser?.subscription_plan || activeTransaction?.plan_slug || 'taster');
-  }, [currentUser, activeTransaction]);
-
-  const activeUserInterval = useMemo<'monthly' | 'annual'>(() => {
-    if (activeTransaction?.recurring_interval) {
-      const intv = activeTransaction.recurring_interval.toUpperCase();
-      if (intv === 'YEAR' || intv === 'ANNUAL') return 'annual';
-      if (intv === 'MONTH' || intv === 'MONTHLY') return 'monthly';
-    }
-    const raw = String(currentUser?.subscription_plan || activeTransaction?.plan_slug || '').toLowerCase();
-    if (raw.includes('annual') || raw.includes('year')) return 'annual';
-    return 'monthly';
-  }, [currentUser, activeTransaction]);
-
-  const isFreeUser = useMemo(() => {
-    return !activeUserSlug || activeUserSlug === 'taster' || activeUserSlug === 'free';
-  }, [activeUserSlug]);
+  const displayActivePlanName = useMemo(() => {
+    if (isFreeUser) return `${t('tasterPlanName', 'Taster')} (${t('freePlanTag', 'Free')})`;
+    const matched = plans.find(p => cleanSlug(p.slug) === cleanSlug(activeUserSlug) || cleanSlug(p.id) === cleanSlug(activeUserSlug));
+    const baseName = matched ? matched.name : activeUserSlug.replace(/[_-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    return `${baseName} (${activeUserInterval === 'annual' ? (t('annualBilling', 'Annual')) : (t('monthlyBilling', 'Monthly'))})`;
+  }, [isFreeUser, plans, activeUserSlug, activeUserInterval, t]);
 
   const handleSelectPlanAction = (plan: SubscriptionPlan) => {
     const planBase = cleanSlug(plan.slug);
-    const isPlanFree = Boolean(plan.is_free || planBase === 'taster' || plan.monthly_price_dollars === 0);
+    const isPlanFree = Boolean(plan.is_free || planBase === 'taster' || Number(plan.monthly_price_dollars || 0) === 0);
     const isSameTier = isFreeUser ? isPlanFree : planBase === activeUserSlug;
     const isExactActive = isFreeUser ? isPlanFree : (isSameTier && billingInterval === activeUserInterval);
 
     if (isExactActive) return;
 
     if (isPlanFree) {
-      executePlanSwitch(plan, 'free', 0);
+      if (confirm(t('confirmSwitchFreePrompt', 'Are you sure you want to switch to the Free Taster tier? Your previous subscription will be cancelled.'))) {
+        executePlanSwitch(plan, 'free', 0);
+      }
       return;
     }
 
@@ -431,8 +592,12 @@ export default function SubscriptionsPage() {
     setSubmitting(true);
 
     const targetUserId = currentUser.id || 'usr_admin_1';
-    const planFullSlug = `${cleanSlug(plan.slug)}-${billingInterval}`;
-    const planDisplayName = `${plan.name} (${billingInterval === 'annual' ? t('annualBilling', 'Annual') : t('monthlyBilling', 'Monthly')})`;
+    const isTargetFree = Boolean(plan.is_free || cleanSlug(plan.slug) === 'taster' || amountToPay === 0);
+    const planFullSlug = isTargetFree ? 'taster' : `${cleanSlug(plan.slug)}-${billingInterval}`;
+    const planDisplayName = isTargetFree 
+      ? `${plan.name} (Free)`
+      : `${plan.name} (${billingInterval === 'annual' ? (t('annualBilling', 'Annual')) : (t('monthlyBilling', 'Monthly'))})`;
+    const tokensCredited = plan.token_limit ?? (isTargetFree ? 50 : 500);
 
     try {
       const res = await fetch('/api/billing', {
@@ -444,14 +609,14 @@ export default function SubscriptionsPage() {
           planSlug: planFullSlug,
           interval: billingInterval === 'annual' ? 'YEAR' : 'MONTH',
           amount: amountToPay,
-          currency: 'USD',
+          currency: currencyCode,
           paymentMethod: paymentMethod,
           gateway: paymentMethod,
           email: currentUser.email,
           userEmail: currentUser.email,
           userName: currentUser.name,
           userId: targetUserId,
-          tokenLimit: plan.token_limit ?? 500
+          tokenLimit: tokensCredited
         })
       });
 
@@ -465,20 +630,34 @@ export default function SubscriptionsPage() {
         return;
       }
 
+      const newExpiry = isTargetFree ? null : new Date(Date.now() + (billingInterval === 'annual' ? 365 : 30) * 86400000).toISOString();
+
       const updatedUser = {
         ...currentUser,
-        subscription_plan: planFullSlug
+        subscription_plan: planFullSlug,
+        subscriptionPlan: planFullSlug,
+        plan_interval: billingInterval === 'annual' ? 'YEAR' : 'MONTH',
+        planInterval: billingInterval === 'annual' ? 'YEAR' : 'MONTH',
+        plan_expiry_date: newExpiry,
+        planExpiryDate: newExpiry,
+        token_balance: (currentUser.token_balance || 0) + (tokensCredited > 0 && !isTargetFree ? tokensCredited : 0)
       };
-      setCurrentUser(updatedUser);
 
       if (paymentMethod === 'wallet' && typeof data.wallet_balance === 'number') {
+        updatedUser.wallet_balance = data.wallet_balance;
         setWalletBalance(data.wallet_balance);
       }
 
+      setCurrentUser(updatedUser);
+
       if (typeof window !== 'undefined') {
         localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
+        localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_user_plan_updated'));
+        window.dispatchEvent(new Event('zecratary_subscriptions_updated'));
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
         window.dispatchEvent(new Event('zecratary_wallet_updated'));
         window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('storage'));
@@ -534,6 +713,7 @@ export default function SubscriptionsPage() {
         );
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_users_updated'));
+        window.dispatchEvent(new Event('zecratary_subscriptions_updated'));
       }
     } catch (_) {}
   };
@@ -719,7 +899,7 @@ export default function SubscriptionsPage() {
               </div>
 
               <h2 className="text-2xl sm:text-3xl font-black capitalize" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                {isFreeUser ? 'Taster (Free)' : `${activeUserSlug.replace(/-/g, ' ')} (${activeUserInterval === 'annual' ? t('annualBilling', 'Annual') : t('monthlyBilling', 'Monthly')})`}
+                {displayActivePlanName}
               </h2>
 
               <p className="text-xs opacity-75 flex items-center gap-2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -936,7 +1116,7 @@ export default function SubscriptionsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {plans.map((plan) => {
               const planBase = cleanSlug(plan.slug);
-              const isPlanFree = Boolean(plan.is_free || planBase === 'taster' || plan.monthly_price_dollars === 0);
+              const isPlanFree = Boolean(plan.is_free || planBase === 'taster' || Number(plan.monthly_price_dollars || 0) === 0);
               const isSameTier = isFreeUser ? isPlanFree : planBase === activeUserSlug;
               const isExactActive = isFreeUser ? isPlanFree : (isSameTier && billingInterval === activeUserInterval);
               const isMatchingTierOtherInterval = isSameTier && !isExactActive;
@@ -1375,13 +1555,21 @@ export default function SubscriptionsPage() {
 
                   const hasWalletFunds = walletBalance >= planPrice;
 
+                  const isStripeAvailable = gatewayConfig?.stripe?.enabled !== false && (
+                    !gatewayConfig?.activeGateway || gatewayConfig.activeGateway === 'stripe' || gatewayConfig.activeGateway === 'both'
+                  );
+                  const isPaypalAvailable = gatewayConfig?.paypal?.enabled && (
+                    gatewayConfig.activeGateway === 'paypal' || gatewayConfig.activeGateway === 'both'
+                  );
+                  const isManualAvailable = Boolean(gatewayConfig?.manual?.enabled);
+
                   return (
                     <div className="space-y-3">
                       <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
                         <div className="flex justify-between items-center font-bold">
                           <span>{t('totalDue', 'Total Due')}:</span>
                           <span className="text-base font-black font-mono text-emerald-400">
-                            {currencySymbol}{planPrice.toFixed(2)}
+                            {currencySymbol}{planPrice.toFixed(2)} {currencyCode}
                           </span>
                         </div>
                         <div className="flex justify-between items-center text-[11px] opacity-75">
@@ -1409,24 +1597,58 @@ export default function SubscriptionsPage() {
 
                       {!hasWalletFunds && (
                         <div className="p-2.5 rounded-xl border text-[10px] text-amber-500 flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: '#f59e0b' }}>
-                          <span>Insufficient wallet balance.</span>
+                          <span>{t('insufficientWalletBalance', 'Insufficient wallet balance.')}</span>
                           <Link href={`/wallet?amount=${(planPrice - walletBalance).toFixed(2)}`} className="font-bold underline">
                             {t('topUpWalletBtn', 'Top Up Wallet')}
                           </Link>
                         </div>
                       )}
 
-                      {/* External Gateway / Stripe */}
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        onClick={() => executePlanSwitch(targetModalPlan, 'stripe', planPrice)}
-                        className="w-full py-3 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
-                        style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
-                      >
-                        <CreditCard className="h-4 w-4" />
-                        <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Credit Card / Stripe')}</span>
-                      </button>
+                      {/* Dynamic Stripe Gateway */}
+                      {isStripeAvailable && (
+                        <button
+                          type="button"
+                          disabled={submitting}
+                          onClick={() => executePlanSwitch(targetModalPlan, 'stripe', planPrice)}
+                          className="w-full py-3 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
+                          style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
+                        >
+                          <CreditCard className="h-4 w-4" />
+                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Credit Card / Stripe')}</span>
+                        </button>
+                      )}
+
+                      {/* Dynamic PayPal Gateway */}
+                      {isPaypalAvailable && (
+                        <button
+                          type="button"
+                          disabled={submitting}
+                          onClick={() => executePlanSwitch(targetModalPlan, 'paypal', planPrice)}
+                          className="w-full py-3 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
+                          style={{ backgroundColor: '#0284c7' }}
+                        >
+                          <Zap className="h-4 w-4" />
+                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'PayPal')}</span>
+                        </button>
+                      )}
+
+                      {/* Dynamic Manual / Bank Transfer Gateway */}
+                      {isManualAvailable && (
+                        <button
+                          type="button"
+                          disabled={submitting}
+                          onClick={() => executePlanSwitch(targetModalPlan, 'manual', planPrice)}
+                          className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition shadow cursor-pointer border hover:opacity-90 disabled:opacity-40"
+                          style={{ 
+                            backgroundColor: 'var(--color-inner-dark, #070b13)', 
+                            borderColor: 'var(--color-border, #1e293b)',
+                            color: 'var(--color-text, #f8fafc)'
+                          }}
+                        >
+                          <Landmark className="h-4 w-4 text-emerald-400" />
+                          <span>{(t('payWithGatewayBtn', 'Pay with {gateway}')).replace('{gateway}', 'Bank Transfer / Wire')}</span>
+                        </button>
+                      )}
                     </div>
                   );
                 })()}

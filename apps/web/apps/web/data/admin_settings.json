@@ -58,7 +58,7 @@
       "isDefault": true
     },
     {
-      "id": "plan_culinary-pro_mvs29nne",
+      "id": "plan_culinary-pro_mvtnspc3",
       "name": "Culinary Pro",
       "slug": "culinary-pro",
       "badge": "Most Popular",
@@ -66,9 +66,9 @@
       "annualPriceDollars": 79.99,
       "descriptionMonthly": "Ideal for passionate home cooks.",
       "descriptionAnnual": "Maximum savings with yearly billing.",
-      "tokensMonthly": 250000,
-      "tokensAnnual": 3000000,
-      "tokenLimit": 250000,
+      "tokensMonthly": 2500,
+      "tokensAnnual": 3000,
+      "tokenLimit": 2500,
       "maxSavedRecipes": 200,
       "allowedModels": [
         "gemini-2.5-flash",

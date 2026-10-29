@@ -579,10 +579,10 @@ export default function ChefChatPage() {
         }
       } catch (_) {}
 
-      // 3. Admin AI settings from /api/admin/settings
+      // 3. Admin AI settings from /api/admin/ettings
       let adminSettingsData: any = null;
       try {
-        const sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
+        const sRes = await fetch(`/api/admin/ettings?t=${Date.now()}`, { cache: 'no-store' });
         if (sRes.ok) {
           adminSettingsData = await safeJsonParse(sRes);
         }
@@ -1015,7 +1015,7 @@ export default function ChefChatPage() {
       };
 
       try {
-        await fetch('/api/saved-recipes', {
+        await fetch('/api/aved-recipes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newRec)
