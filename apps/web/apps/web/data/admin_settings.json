@@ -24,7 +24,8 @@
     "facebookClientSecret": "",
     "allowSocialRegistration": true,
     "requireEmailVerification": true,
-    "updatedAt": "2026-09-18T12:28:40.488Z"
+    "updatedAt": "2026-09-18T12:28:40.488Z",
+    "applePrivateKey": ""
   },
   "subscriptionPlans": [
     {

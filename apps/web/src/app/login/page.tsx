@@ -512,10 +512,10 @@ function LoginForm() {
             <AlertCircle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
             <div className="flex-1">
               <span>{errorMsg}</span>
-              {errorMsg.includes('/admin/social-login-setting') && (
+              {(errorMsg.includes('/admin/social-login-setting') || errorMsg.includes('/social-login-setting') || errorMsg.includes('missing_google_client_id')) && (
                 <div className="mt-1.5">
                   <Link 
-                    href="/admin/social-login-setting"
+                    href="/social-login-setting"
                     className="inline-flex items-center gap-1 font-bold underline hover:opacity-80"
                     style={{ color: 'var(--color-primary)' }}
                   >

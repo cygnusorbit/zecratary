@@ -1,53 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
-
-
-// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
-
+import { getSafeOrigin } from '@/lib/originHelper';
+import { getPersistedSocialSettings } from '@/lib/databaseSettings';
 
 export const dynamic = 'force-dynamic';
 
-function getAdminSettings(): any {
-  const cwd = process.cwd();
-  const paths = [
-    path.join(cwd, 'apps/web/data/admin_settings.json'),
-    path.join(cwd, 'data/admin_settings.json')
-  ];
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      try {
-        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        if (parsed && typeof parsed === 'object') return parsed;
-      } catch (_) {}
-    }
-  }
-  return {};
-}
-
-function getRedirectUri(req: NextRequest): string {
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || new URL(req.url).host;
-  const proto = req.headers.get('x-forwarded-proto') || (req.url.startsWith('https') ? 'https' : 'http');
-  return `${proto}://${host}/api/auth/callback/google`;
-}
-
 export async function GET(req: NextRequest) {
+  const safeOrigin = getSafeOrigin(req);
   const url = new URL(req.url);
   const callbackUrl = url.searchParams.get('callbackUrl') || '/profile';
-  const settings = getAdminSettings();
-  const social = settings?.socialLogin || {};
-
+  
+  const social = await getPersistedSocialSettings();
   const clientId = (
     social.googleClientId || 
     process.env.GOOGLE_CLIENT_ID || 
@@ -55,13 +17,14 @@ export async function GET(req: NextRequest) {
     ''
   ).trim();
 
+  // If Client ID is not configured, redirect back to /login safely (without 0.0.0.0)
   if (!clientId) {
-    const errorUrl = new URL('/login', req.url);
+    const errorUrl = new URL('/login', safeOrigin);
     errorUrl.searchParams.set('error', 'missing_google_client_id');
-    return NextResponse.redirect(errorUrl);
+    return NextResponse.redirect(errorUrl.toString(), 307);
   }
 
-  const redirectUri = getRedirectUri(req);
+  const redirectUri = `${safeOrigin}/api/auth/callback/google`;
 
   const statePayload = JSON.stringify({
     callbackUrl,
