@@ -817,7 +817,7 @@ export default function ChefAISettingsPage() {
                   <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('googleGeminiTitle', 'Google Gemini')}</span>
-                    <span className="text-[11px] opacity-75">{t('googleGeminiSubtitle', 'Gemini 2.5 Pro / Flash / 1.5')}</span>
+                    <span className="text-[11px] opacity-75">{t('googleGeminiSubtitle', 'Gemini 3.5 Flash Lite / 3.6 Flash')}</span>
                   </div>
                 </button>
 

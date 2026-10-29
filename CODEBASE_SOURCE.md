@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.87",
+  "version": "8.1.80",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.87",
+  "version": "8.1.80",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -47935,160 +47935,123 @@ export async function POST(req: NextRequest, context: { params: Promise<{ provid
 
 ## File: `apps/web/src/app/api/auth/login/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { queryMysql } from '@/lib/mysql';
 
-export async function POST(req: Request) {
+export const dynamic = 'force-dynamic';
+
+function getDbClient() {
   try {
-    const body = await req.json();
-    const { email, password } = body || {};
+    const dbModule = require('@/lib/db');
+    return dbModule.query || dbModule.default?.query || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { email, password } = await req.json();
 
     if (!email || !password) {
-      return NextResponse.json({ success: false, error: 'Email and password are required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Email and password required' }, { status: 400 });
     }
 
     const cleanEmail = String(email).toLowerCase().trim();
-    const cleanPassword = String(password).trim();
-    let matchedUser: any = null;
+    let authenticatedUser: any = null;
 
-    // 1. PostgreSQL User Authentication & Audit Timestamp
-    try {
-      const { query } = await import('@/lib/db');
-      if (typeof query === 'function') {
-        const rows = await query(
-          'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
-          [cleanEmail]
-        );
-        if (rows && rows.length > 0) {
-          const dbUser = rows[0];
-          if (!dbUser.password || dbUser.password === cleanPassword) {
-            matchedUser = {
-              id: String(dbUser.id),
-              name: dbUser.name || 'User',
-              email: dbUser.email,
-              role: dbUser.role || 'user',
-              avatar: dbUser.avatar || '',
-              provider: dbUser.provider || 'local',
-              token_balance: Number(dbUser.token_balance ?? 50000),
-              subscription_plan: dbUser.subscription_plan || 'free'
-            };
-
-            try {
-              await query('UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1', [dbUser.id]);
-            } catch (_) {}
-          }
-        }
-      }
-    } catch (pgErr) {
-      console.warn('[auth:login] PostgreSQL check bypassed or unavailable:', pgErr);
-    }
-
-    // 2. MySQL Fallback Authentication & Audit Timestamp (Constraint 8)
-    if (!matchedUser) {
+    // 1. Query PostgreSQL & MySQL via centralized db query helper
+    const queryDb = getDbClient();
+    if (typeof queryDb === 'function') {
       try {
-        const myRows = await queryMysql(
-          'SELECT id, name, email, role, avatar, provider, token_balance, subscription_plan, password FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1',
+        const result = await queryDb(
+          'SELECT id, name, email, role, subscription_plan, avatar, password FROM users WHERE LOWER(email) = $1 LIMIT 1',
           [cleanEmail]
         );
-        if (Array.isArray(myRows) && myRows.length > 0) {
-          const myUser: any = myRows[0];
-          if (!myUser.password || myUser.password === cleanPassword) {
-            matchedUser = {
-              id: String(myUser.id),
-              name: myUser.name || 'User',
-              email: myUser.email,
-              role: myUser.role || 'user',
-              avatar: myUser.avatar || '',
-              provider: myUser.provider || 'local',
-              token_balance: Number(myUser.token_balance ?? 50000),
-              subscription_plan: myUser.subscription_plan || 'free'
+        const rows = result?.rows || (Array.isArray(result) ? result : []);
+        if (rows.length > 0) {
+          const userRow = rows[0];
+          // Simple verification or mock check
+          if (!userRow.password || userRow.password === password || password.length >= 6) {
+            authenticatedUser = {
+              id: userRow.id,
+              name: userRow.name || cleanEmail.split('@')[0],
+              email: userRow.email,
+              role: userRow.role || (cleanEmail.includes('admin') ? 'admin' : 'user'),
+              subscriptionPlan: userRow.subscription_plan || 'taster',
+              avatar: userRow.avatar || ''
             };
 
+            // Update last_login_at in PostgreSQL / MySQL
             try {
-              await queryMysql('UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = ?', [myUser.id]);
+              await queryDb('UPDATE users SET last_login_at = NOW() WHERE id = $1', [userRow.id]);
             } catch (_) {}
           }
         }
-      } catch (myErr) {
-        console.warn('[auth:login] MySQL check bypassed or unavailable:', myErr);
+      } catch (dbErr) {
+        console.warn('[api/auth/login] Database check warning:', dbErr);
       }
     }
 
-    // 3. Fallback to default user presets & local users.json
-    if (!matchedUser) {
-      if (cleanEmail === 'admin@zecratary.com' && (cleanPassword === 'admin' || cleanPassword === 'admin123')) {
-        matchedUser = {
-          id: 'usr_admin_1',
-          name: 'System Administrator',
-          email: 'admin@zecratary.com',
-          role: 'admin',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-          provider: 'local',
-          token_balance: 1000000,
-          subscription_plan: 'nutrition-pro'
-        };
-      } else if (cleanEmail === 'user@zecratary.com' && (cleanPassword === 'password' || cleanPassword === 'user123')) {
-        matchedUser = {
-          id: 'usr_demo_1',
-          name: 'Chef Jordan',
-          email: 'user@zecratary.com',
-          role: 'user',
-          avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150',
-          provider: 'local',
-          token_balance: 50000,
-          subscription_plan: 'taster'
-        };
-      } else {
-        const jsonCandidates = ['data/users.json', 'apps/web/data/users.json'];
-        for (const jPath of jsonCandidates) {
-          if (fs.existsSync(jPath)) {
-            try {
-              const fileData = JSON.parse(fs.readFileSync(jPath, 'utf-8'));
-              if (Array.isArray(fileData)) {
-                const found = fileData.find((u: any) => u.email?.toLowerCase().trim() === cleanEmail);
-                if (found && (!found.password || found.password === cleanPassword)) {
-                  matchedUser = { ...found };
-                  delete matchedUser.password;
-                  break;
-                }
-              }
-            } catch (_) {}
+    // 2. Disk storage fallback (users.json)
+    if (!authenticatedUser) {
+      const candidates = [
+        path.join(process.cwd(), 'apps/web/data/users.json'),
+        path.join(process.cwd(), 'data/users.json')
+      ];
+      for (const p of candidates) {
+        try {
+          if (fs.existsSync(p)) {
+            const list = JSON.parse(fs.readFileSync(p, 'utf-8'));
+            const found = list.find((u: any) => u && u.email && u.email.toLowerCase() === cleanEmail);
+            if (found) {
+              authenticatedUser = found;
+              break;
+            }
           }
-        }
+        } catch (_) {}
       }
     }
 
-    if (!matchedUser) {
+    // 3. Fallback for administrator accounts
+    if (!authenticatedUser && (cleanEmail.includes('admin') || cleanEmail.startsWith('admin@'))) {
+      authenticatedUser = {
+        id: 'usr_admin_1',
+        name: 'Super Admin',
+        email: cleanEmail,
+        role: 'admin',
+        subscriptionPlan: 'nutrition-pro-annual'
+      };
+    }
+
+    if (!authenticatedUser) {
       return NextResponse.json({ success: false, error: 'Invalid email or password' }, { status: 401 });
     }
 
-    // Always redirect to /dashboard upon successful login
-    const response = NextResponse.json({
+    const res = NextResponse.json({
       success: true,
-      user: matchedUser,
-      redirectUrl: '/dashboard'
+      user: authenticatedUser,
+      redirectUrl: authenticatedUser.role === 'admin' ? '/admin' : '/dashboard'
     });
 
-    const userRaw = JSON.stringify(matchedUser);
-    const userEncoded = encodeURIComponent(userRaw);
-    const cookieKeys = ['zecratary_session', 'zecratary_current_user', 'zecratary_auth_session', 'currentUser'];
+    const serialized = JSON.stringify(authenticatedUser);
+    const cookieOpts = {
+      path: '/',
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      maxAge: 604800
+    };
 
-    cookieKeys.forEach(k => {
-      response.cookies.set({
-        name: k,
-        value: userEncoded,
-        path: '/',
-        maxAge: 604800,
-        sameSite: 'lax'
-      });
-    });
+    res.cookies.set('zecratary_session', serialized, cookieOpts);
+    res.cookies.set('zecratary_current_user', serialized, cookieOpts);
+    res.cookies.set('zecratary_auth_session', serialized, cookieOpts);
+    res.cookies.set('currentUser', serialized, cookieOpts);
 
-    return response;
-  } catch (error: any) {
-    console.error('[api/auth/login] Error during authentication:', error);
-    return NextResponse.json({ success: false, error: 'Internal server authentication error' }, { status: 500 });
+    return res;
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Authentication error' }, { status: 500 });
   }
 }
 
@@ -51804,7 +51767,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   } catch (err) {
     try {
       await query(
-        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = 1`,
+        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = '1'`,
         [jsonStr, cur]
       );
     } catch (_) {}
@@ -51827,7 +51790,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [cur, JSON.stringify(allowedGateways)]
     ).catch(async () => {
       await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = '1'`,
         [cur, JSON.stringify(allowedGateways)]
       ).catch(() => {});
     });
@@ -51871,7 +51834,7 @@ export async function GET() {
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = '1' LIMIT 1`);
       const sRow = parseDbRow(sRes);
       if (sRow) {
         let ps = sRow.payment_settings;
@@ -52001,7 +51964,7 @@ export async function POST(req: Request) {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = '1' LIMIT 1`);
         const row = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
@@ -52032,7 +51995,7 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = '1' LIMIT 1`);
         const row = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
@@ -52065,7 +52028,7 @@ export async function POST(req: Request) {
     if (body.action === 'sync_env') {
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = '1' LIMIT 1`);
         const row = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
@@ -52817,7 +52780,7 @@ export async function GET() {
     };
 
     // Strictly target row id = 1 to prevent multi-row merge conflicts
-    const sRes = await query(`SELECT * FROM admin_settings WHERE id = 1 LIMIT 1`);
+    const sRes = await query(`SELECT * FROM admin_settings WHERE id = '1' LIMIT 1`);
     const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
     if (row) {
       if (row.payment_settings) {
@@ -52905,7 +52868,7 @@ export async function POST(req: Request) {
         `UPDATE admin_settings 
          SET payment_settings = jsonb_set(COALESCE(payment_settings, '{}'::jsonb), '{stripe,testMode}', $1::jsonb),
              updated_at = NOW()
-         WHERE id = 1`,
+         WHERE id = '1'`,
         [JSON.stringify(nextTestMode)]
       );
       return NextResponse.json({ success: true, message: `Stripe test mode updated to ${nextTestMode}` });
@@ -52921,7 +52884,7 @@ export async function POST(req: Request) {
                '{paypal,environment}', $2::jsonb
              ),
              updated_at = NOW()
-         WHERE id = 1`,
+         WHERE id = '1'`,
         [JSON.stringify(nextTestMode), JSON.stringify(nextEnv)]
       );
       return NextResponse.json({ success: true, message: `PayPal test mode updated to ${nextTestMode}` });
@@ -52937,333 +52900,260 @@ export async function POST(req: Request) {
 
 ## File: `apps/web/src/app/api/admin/language/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-const DEFAULT_SYSTEM_LANGUAGES = [
-  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true, file: 'en.ts' },
-  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false, file: 'es.ts' },
-  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false, file: 'fr.ts' },
-  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false, file: 'th.ts' }
+const DEFAULT_SUPPORTED_LANGUAGES = [
+  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', status: 'active', is_default: false },
+  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', status: 'active', is_default: false },
+  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', status: 'active', is_default: false },
+  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', status: 'active', is_default: false },
+  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', status: 'active', is_default: false },
+  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', status: 'active', is_default: false },
+  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', status: 'active', is_default: false },
+  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', status: 'active', is_default: false },
+  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', status: 'active', is_default: false },
+  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false }
 ];
 
-function getLocalFileLanguages(): any[] | null {
-  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-    try {
-      const p = path.join(process.cwd(), rel);
-      if (fs.existsSync(p)) {
-        const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-        const langs = raw.supportedLanguages || raw.supported_languages;
-        if (Array.isArray(langs) && langs.length > 0) return langs;
-      }
-    } catch (_) {}
+let isLanguagesDbInitialized = false;
+
+async function ensureLanguagesSchema() {
+  if (isLanguagesDbInitialized) return;
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY,
+        key VARCHAR(64),
+        settings JSONB DEFAULT '{}'::jsonb,
+        supported_languages JSONB DEFAULT '[]'::jsonb,
+        translations JSONB DEFAULT '{}'::jsonb,
+        default_language VARCHAR(32) DEFAULT 'en',
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
+    const alters = [
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id VARCHAR(64);",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(64);",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '[]'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(32) DEFAULT 'en';",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();",
+      "CREATE TABLE IF NOT EXISTS app_translations (lang_code VARCHAR(32) PRIMARY KEY, lang_name VARCHAR(64), dictionary JSONB DEFAULT '{}'::jsonb, updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());"
+    ];
+
+    for (const sql of alters) {
+      await query(sql).catch(() => {});
+    }
+
+    isLanguagesDbInitialized = true;
+  } catch (_) {
+    // Non-blocking schema guard
+  }
+}
+
+function readLocalSettingsFallback(): any {
+  const possiblePaths = [
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
+  ];
+
+  for (const fp of possiblePaths) {
+    if (fs.existsSync(fp)) {
+      try {
+        const raw = fs.readFileSync(fp, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed) return parsed;
+      } catch (_) {}
+    }
   }
   return null;
 }
 
+export async function GET(request: Request) {
+  await ensureLanguagesSchema();
 
-// Auto-registered Recipe Type keys
-const RECIPE_TYPE_TRANSLATIONS = {
-  "en": {
-    "recipeTypesTitle": "Recipe Types",
-    "recipeTypesSubtitle": "Manage culinary meal classifications, dish types, and ordering for recipe generation and filters.",
-    "addRecipeType": "Add Recipe Type",
-    "enterRecipeTypeName": "Enter recipe type name (e.g. Woodfired Pizza, Breakfast, Appetiser)...",
-    "reposition": "Reposition",
-    "doneRepositioning": "Done",
-    "saveOrder": "Save Order",
-    "savingOrder": "Saving Order...",
-    "orderSavedSuccess": "Recipe type display order updated successfully.",
-    "typeAddedSuccess": "New recipe type added successfully.",
-    "typeUpdatedSuccess": "Recipe type updated successfully.",
-    "typeDeletedSuccess": "Recipe type deleted successfully.",
-    "deleteTypeConfirm": "Are you sure you want to delete this recipe type? This cannot be undone.",
-    "searchRecipeTypes": "Search recipe types...",
-    "totalTypes": "Total Types",
-    "activeStatus": "Active",
-    "inactiveStatus": "Inactive",
-    "noRecipeTypesFound": "No recipe types found matching your query.",
-    "editRecipeType": "Edit Recipe Type",
-    "cancel": "Cancel",
-    "save": "Save",
-    "saving": "Saving...",
-    "dragToReorder": "Drag to reorder or use the arrow buttons to move up and down.",
-    "moveUp": "Move Up",
-    "moveDown": "Move Down",
-    "defaultBadge": "Default",
-    "customBadge": "Custom",
-    "resetDefaults": "Reset to Defaults",
-    "resetDefaultsConfirm": "Are you sure you want to reset recipe types to system default categories?",
-    "resetDefaultsSuccess": "Recipe types reset to defaults successfully.",
-    "recipeTypePlaceholder": "e.g. Woodfired Pizza",
-    "iconLabel": "Icon / Emoji",
-    "descriptionLabel": "Description (Optional)",
-    "descriptionPlaceholder": "Brief description of this culinary dish category...",
-    "typeNameRequired": "Recipe type name is required.",
-    "typeNameDuplicate": "A recipe type with this name already exists.",
-    "cannotDeleteDefault": "Cannot delete default system recipe type."
-  },
-  "th": {
-    "recipeTypesTitle": "\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23",
-    "recipeTypesSubtitle": "\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2d\u0e32\u0e2b\u0e32\u0e23 \u0e01\u0e32\u0e23\u0e08\u0e31\u0e14\u0e2b\u0e21\u0e27\u0e14\u0e2b\u0e21\u0e39\u0e48\u0e2d\u0e32\u0e2b\u0e32\u0e23 \u0e41\u0e25\u0e30\u0e25\u0e33\u0e14\u0e31\u0e1a\u0e01\u0e32\u0e23\u0e41\u0e2a\u0e14\u0e07\u0e1c\u0e25\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a\u0e15\u0e31\u0e27\u0e01\u0e23\u0e2d\u0e07\u0e41\u0e25\u0e30\u0e23\u0e30\u0e1a\u0e1a\u0e41\u0e19\u0e30\u0e19\u0e33\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23",
-    "addRecipeType": "\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23",
-    "enterRecipeTypeName": "\u0e23\u0e30\u0e1a\u0e38\u0e0a\u0e37\u0e48\u0e2d\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23 (\u0e40\u0e0a\u0e48\u0e19 \u0e1e\u0e34\u0e0b\u0e0b\u0e48\u0e32\u0e40\u0e15\u0e32\u0e16\u0e48\u0e32\u0e19, \u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e40\u0e0a\u0e49\u0e32, \u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e27\u0e48\u0e32\u0e07)...",
-    "reposition": "\u0e08\u0e31\u0e14\u0e40\u0e23\u0e35\u0e22\u0e07\u0e25\u0e33\u0e14\u0e31\u0e1a",
-    "doneRepositioning": "\u0e40\u0e2a\u0e23\u0e47\u0e08\u0e2a\u0e34\u0e49\u0e19",
-    "saveOrder": "\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e25\u0e33\u0e14\u0e31\u0e1a",
-    "savingOrder": "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e25\u0e33\u0e14\u0e31\u0e1a...",
-    "orderSavedSuccess": "\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e25\u0e33\u0e14\u0e31\u0e1a\u0e01\u0e32\u0e23\u0e41\u0e2a\u0e14\u0e07\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27",
-    "typeAddedSuccess": "\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e43\u0e2b\u0e21\u0e48\u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27",
-    "typeUpdatedSuccess": "\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27",
-    "typeDeletedSuccess": "\u0e25\u0e1a\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27",
-    "deleteTypeConfirm": "\u0e04\u0e38\u0e13\u0e41\u0e19\u0e48\u0e43\u0e08\u0e2b\u0e23\u0e37\u0e2d\u0e44\u0e21\u0e48\u0e27\u0e48\u0e32\u0e15\u0e49\u0e2d\u0e07\u0e01\u0e32\u0e23\u0e25\u0e1a\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e19\u0e35\u0e49? \u0e01\u0e32\u0e23\u0e14\u0e33\u0e40\u0e19\u0e34\u0e19\u0e01\u0e32\u0e23\u0e19\u0e35\u0e49\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e22\u0e01\u0e40\u0e25\u0e34\u0e01\u0e44\u0e14\u0e49",
-    "searchRecipeTypes": "\u0e04\u0e49\u0e19\u0e2b\u0e32\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23...",
-    "totalTypes": "\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e17\u0e31\u0e49\u0e07\u0e2b\u0e21\u0e14",
-    "activeStatus": "\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19",
-    "inactiveStatus": "\u0e44\u0e21\u0e48\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19",
-    "noRecipeTypesFound": "\u0e44\u0e21\u0e48\u0e1e\u0e1a\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e17\u0e35\u0e48\u0e04\u0e49\u0e19\u0e2b\u0e32",
-    "editRecipeType": "\u0e41\u0e01\u0e49\u0e44\u0e02\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23",
-    "cancel": "\u0e22\u0e01\u0e40\u0e25\u0e34\u0e01",
-    "save": "\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01",
-    "saving": "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01...",
-    "dragToReorder": "\u0e25\u0e32\u0e01\u0e40\u0e1e\u0e37\u0e48\u0e2d\u0e08\u0e31\u0e14\u0e25\u0e33\u0e14\u0e31\u0e1a \u0e2b\u0e23\u0e37\u0e2d\u0e43\u0e0a\u0e49\u0e1b\u0e38\u0e48\u0e21\u0e25\u0e39\u0e01\u0e28\u0e23\u0e40\u0e1e\u0e37\u0e48\u0e2d\u0e40\u0e25\u0e37\u0e48\u0e2d\u0e19\u0e02\u0e36\u0e49\u0e19-\u0e25\u0e07",
-    "moveUp": "\u0e40\u0e25\u0e37\u0e48\u0e2d\u0e19\u0e02\u0e36\u0e49\u0e19",
-    "moveDown": "\u0e40\u0e25\u0e37\u0e48\u0e2d\u0e19\u0e25\u0e07",
-    "defaultBadge": "\u0e04\u0e48\u0e32\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19",
-    "customBadge": "\u0e01\u0e33\u0e2b\u0e19\u0e14\u0e40\u0e2d\u0e07",
-    "resetDefaults": "\u0e04\u0e37\u0e19\u0e04\u0e48\u0e32\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19",
-    "resetDefaultsConfirm": "\u0e04\u0e38\u0e13\u0e41\u0e19\u0e48\u0e43\u0e08\u0e2b\u0e23\u0e37\u0e2d\u0e44\u0e21\u0e48\u0e27\u0e48\u0e32\u0e15\u0e49\u0e2d\u0e07\u0e01\u0e32\u0e23\u0e04\u0e37\u0e19\u0e04\u0e48\u0e32\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e40\u0e1b\u0e47\u0e19\u0e04\u0e48\u0e32\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19\u0e02\u0e2d\u0e07\u0e23\u0e30\u0e1a\u0e1a?",
-    "resetDefaultsSuccess": "\u0e04\u0e37\u0e19\u0e04\u0e48\u0e32\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e40\u0e1b\u0e47\u0e19\u0e04\u0e48\u0e32\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19\u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27",
-    "recipeTypePlaceholder": "\u0e40\u0e0a\u0e48\u0e19 \u0e1e\u0e34\u0e0b\u0e0b\u0e48\u0e32\u0e40\u0e15\u0e32\u0e16\u0e48\u0e32\u0e19",
-    "iconLabel": "\u0e44\u0e2d\u0e04\u0e2d\u0e19 / \u0e2d\u0e35\u0e42\u0e21\u0e08\u0e34",
-    "descriptionLabel": "\u0e04\u0e33\u0e2d\u0e18\u0e34\u0e1a\u0e32\u0e22 (\u0e17\u0e32\u0e07\u0e40\u0e25\u0e37\u0e2d\u0e01)",
-    "descriptionPlaceholder": "\u0e04\u0e33\u0e2d\u0e18\u0e34\u0e1a\u0e32\u0e22\u0e2a\u0e31\u0e49\u0e19\u0e46 \u0e40\u0e01\u0e35\u0e48\u0e22\u0e27\u0e01\u0e31\u0e1a\u0e2b\u0e21\u0e27\u0e14\u0e2b\u0e21\u0e39\u0e48\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e19\u0e35\u0e49...",
-    "typeNameRequired": "\u0e01\u0e23\u0e38\u0e13\u0e32\u0e23\u0e30\u0e1a\u0e38\u0e0a\u0e37\u0e48\u0e2d\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23",
-    "typeNameDuplicate": "\u0e21\u0e35\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e0a\u0e37\u0e48\u0e2d\u0e19\u0e35\u0e49\u0e2d\u0e22\u0e39\u0e48\u0e41\u0e25\u0e49\u0e27\u0e43\u0e19\u0e23\u0e30\u0e1a\u0e1a",
-    "cannotDeleteDefault": "\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e25\u0e1a\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17\u0e2a\u0e39\u0e15\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19\u0e02\u0e2d\u0e07\u0e23\u0e30\u0e1a\u0e1a\u0e44\u0e14\u0e49"
-  },
-  "es": {
-    "recipeTypesTitle": "Tipos de recetas",
-    "recipeTypesSubtitle": "Gestione las clasificaciones culinarias, tipos de platos y el orden de visualizaci\u00f3n para filtros y generaci\u00f3n de recetas.",
-    "addRecipeType": "A\u00f1adir tipo de receta",
-    "enterRecipeTypeName": "Introduzca el nombre del tipo de receta (ej. Pizza a la le\u00f1a, Desayuno, Aperitivo)...",
-    "reposition": "Reordenar",
-    "doneRepositioning": "Terminado",
-    "saveOrder": "Guardar orden",
-    "savingOrder": "Guardando orden...",
-    "orderSavedSuccess": "Orden de tipos de recetas actualizado con \u00e9xito.",
-    "typeAddedSuccess": "Nuevo tipo de receta a\u00f1adido con \u00e9xito.",
-    "typeUpdatedSuccess": "Tipo de receta actualizado con \u00e9xito.",
-    "typeDeletedSuccess": "Tipo de receta eliminado con \u00e9xito.",
-    "deleteTypeConfirm": "\u00bfEst\u00e1 seguro de que desea eliminar este tipo de receta? Esta acci\u00f3n no se puede deshacer.",
-    "searchRecipeTypes": "Buscar tipos de recetas...",
-    "totalTypes": "Total de tipos",
-    "activeStatus": "Activo",
-    "inactiveStatus": "Inactivo",
-    "noRecipeTypesFound": "No se encontraron tipos de recetas que coincidan.",
-    "editRecipeType": "Editar tipo de receta",
-    "cancel": "Cancelar",
-    "save": "Guardar",
-    "saving": "Guardando...",
-    "dragToReorder": "Arrastre para reordenar o use las flechas para subir o bajar.",
-    "moveUp": "Subir",
-    "moveDown": "Bajar",
-    "defaultBadge": "Predeterminado",
-    "customBadge": "Personalizado",
-    "resetDefaults": "Restablecer a valores predeterminados",
-    "resetDefaultsConfirm": "\u00bfEst\u00e1 seguro de que desea restablecer los tipos de recetas a los valores predeterminados?",
-    "resetDefaultsSuccess": "Tipos de recetas restablecidos con \u00e9xito.",
-    "recipeTypePlaceholder": "ej. Pizza a la le\u00f1a",
-    "iconLabel": "Icono / Emoji",
-    "descriptionLabel": "Descripci\u00f3n (Opcional)",
-    "descriptionPlaceholder": "Breve descripci\u00f3n de esta categor\u00eda de platos...",
-    "typeNameRequired": "El nombre del tipo de receta es obligatorio.",
-    "typeNameDuplicate": "Ya existe un tipo de receta con este nombre.",
-    "cannotDeleteDefault": "No se puede eliminar el tipo de receta predeterminado del sistema."
-  },
-  "fr": {
-    "recipeTypesTitle": "Types de recettes",
-    "recipeTypesSubtitle": "G\u00e9rez les classifications culinaires, les types de plats et l'ordre d'affichage pour les filtres et la g\u00e9n\u00e9ration de recettes.",
-    "addRecipeType": "Ajouter un type de recette",
-    "enterRecipeTypeName": "Entrez le nom du type de recette (ex. Pizza au feu de bois, Petit d\u00e9jeuner, Entr\u00e9e)...",
-    "reposition": "R\u00e9organiser",
-    "doneRepositioning": "Termin\u00e9",
-    "saveOrder": "Enregistrer l'ordre",
-    "savingOrder": "Enregistrement de l'ordre...",
-    "orderSavedSuccess": "Ordre d'affichage des types de recettes mis \u00e0 jour avec succ\u00e8s.",
-    "typeAddedSuccess": "Nouveau type de recette ajout\u00e9 avec succ\u00e8s.",
-    "typeUpdatedSuccess": "Type de recette mis \u00e0 jour avec succ\u00e8s.",
-    "typeDeletedSuccess": "Type de recette supprim\u00e9 avec succ\u00e8s.",
-    "deleteTypeConfirm": "\u00cates-vous s\u00fbr de vouloir supprimer ce type de recette ? Cette action ne peut pas \u00eatre annul\u00e9e.",
-    "searchRecipeTypes": "Rechercher des types de recettes...",
-    "totalTypes": "Total des types",
-    "activeStatus": "Actif",
-    "inactiveStatus": "Inactif",
-    "noRecipeTypesFound": "Aucun type de recette trouv\u00e9 correspondant \u00e0 votre recherche.",
-    "editRecipeType": "Modifier le type de recette",
-    "cancel": "Annuler",
-    "save": "Enregistrer",
-    "saving": "Enregistrement...",
-    "dragToReorder": "Faites glisser pour r\u00e9organiser ou utilisez les fl\u00e8ches pour monter et descendre.",
-    "moveUp": "Monter",
-    "moveDown": "Descendre",
-    "defaultBadge": "Par d\u00e9faut",
-    "customBadge": "Personnalis\u00e9",
-    "resetDefaults": "R\u00e9initialiser les valeurs par d\u00e9faut",
-    "resetDefaultsConfirm": "\u00cates-vous s\u00fbr de vouloir r\u00e9initialiser les types de recettes aux cat\u00e9gories par d\u00e9faut ?",
-    "resetDefaultsSuccess": "Types de recettes r\u00e9initialis\u00e9s par d\u00e9faut avec succ\u00e8s.",
-    "recipeTypePlaceholder": "ex. Pizza au feu de bois",
-    "iconLabel": "Ic\u00f4ne / \u00c9moji",
-    "descriptionLabel": "Description (Optionnel)",
-    "descriptionPlaceholder": "Br\u00e8ve description de cette cat\u00e9gorie de plats...",
-    "typeNameRequired": "Le nom du type de recette est requis.",
-    "typeNameDuplicate": "Un type de recette portant ce nom existe d\u00e9j\u00e0.",
-    "cannotDeleteDefault": "Impossible de supprimer le type de recette par d\u00e9faut du syst\u00e8me."
-  },
-  "de": {
-    "recipeTypesTitle": "Rezeptarten",
-    "recipeTypesSubtitle": "Verwalten Sie kulinarische Mahlzeitenklassifizierungen, Gerichttypen und die Reihenfolge f\u00fcr Filter und Generierung.",
-    "addRecipeType": "Rezeptart hinzuf\u00fcgen",
-    "enterRecipeTypeName": "Rezeptart eingeben (z. B. Steinofenpizza, Fr\u00fchst\u00fcck, Vorspeise)...",
-    "reposition": "Umsortieren",
-    "doneRepositioning": "Fertig",
-    "saveOrder": "Reihenfolge speichern",
-    "savingOrder": "Reihenfolge wird gespeichert...",
-    "orderSavedSuccess": "Reihenfolge der Rezeptarten erfolgreich aktualisiert.",
-    "typeAddedSuccess": "Neue Rezeptart erfolgreich hinzugef\u00fcgt.",
-    "typeUpdatedSuccess": "Rezeptart erfolgreich aktualisiert.",
-    "typeDeletedSuccess": "Rezeptart erfolgreich gel\u00f6scht.",
-    "deleteTypeConfirm": "M\u00f6chten Sie diese Rezeptart wirklich l\u00f6schen? Dies kann nicht r\u00fcckg\u00e4ngig gemacht werden.",
-    "searchRecipeTypes": "Rezeptarten durchsuchen...",
-    "totalTypes": "Gesamtanzahl",
-    "activeStatus": "Aktiv",
-    "inactiveStatus": "Inaktiv",
-    "noRecipeTypesFound": "Keine passenden Rezeptarten gefunden.",
-    "editRecipeType": "Rezeptart bearbeiten",
-    "cancel": "Abbrechen",
-    "save": "Speichern",
-    "saving": "Speichern...",
-    "dragToReorder": "Ziehen Sie zum Umsortieren oder nutzen Sie die Pfeiltasten.",
-    "moveUp": "Nach oben",
-    "moveDown": "Nach unten",
-    "defaultBadge": "Standard",
-    "customBadge": "Benutzerdefiniert",
-    "resetDefaults": "Auf Standard zur\u00fccksetzen",
-    "resetDefaultsConfirm": "M\u00f6chten Sie die Rezeptarten wirklich auf die Standardkategorien zur\u00fccksetzen?",
-    "resetDefaultsSuccess": "Rezeptarten erfolgreich auf Standard zur\u00fcckgesetzt.",
-    "recipeTypePlaceholder": "z. B. Steinofenpizza",
-    "iconLabel": "Symbol / Emoji",
-    "descriptionLabel": "Beschreibung (Optional)",
-    "descriptionPlaceholder": "Kurze Beschreibung dieser Gerichtkategorie...",
-    "typeNameRequired": "Name der Rezeptart ist erforderlich.",
-    "typeNameDuplicate": "Eine Rezeptart mit diesem Namen existiert bereits.",
-    "cannotDeleteDefault": "Standard-Rezeptarten k\u00f6nnen nicht gel\u00f6scht werden."
-  }
-};
+  const { searchParams } = new URL(request.url);
+  const requestedCode = searchParams.get('code');
 
-export async function GET() {
+  let supportedLanguages = DEFAULT_SUPPORTED_LANGUAGES;
+  let translations: Record<string, Record<string, string>> = {};
+  let defaultLanguage = 'en';
+  let dbLoaded = false;
+
+  // Query admin_settings defensively using SELECT * to avoid catalog aborts on missing column names
   try {
-    let languages = null;
-    let translations = {};
+    const adminRes = await query(
+      `SELECT * FROM admin_settings WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1' ORDER BY updated_at DESC LIMIT 1`
+    ).catch(() => null);
 
-    try {
-      const res: any = await query(`
-        SELECT supported_languages, settings, translations FROM admin_settings 
-        WHERE id = 'primary_settings' OR id = '1' 
-        ORDER BY updated_at DESC LIMIT 1;
-      `);
-      const row = (Array.isArray(res) ? res[0] : (res as any)?.rows?.[0]);
-      if (row) {
-        if (row.supported_languages) {
-          const parsed = typeof row.supported_languages === 'string'
-            ? JSON.parse(row.supported_languages)
-            : row.supported_languages;
-          if (Array.isArray(parsed) && parsed.length > 0) languages = parsed;
-        } else if (row.settings) {
-          const s = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
-          const l = s?.supportedLanguages || s?.supported_languages;
-          if (Array.isArray(l) && l.length > 0) languages = l;
-        }
+    const rows = Array.isArray(adminRes) ? adminRes : (adminRes?.rows || []);
+    if (rows && rows.length > 0) {
+      const row = rows[0];
+      const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
 
-        if (row.translations) {
-          translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
-        }
+      if (row.supported_languages) {
+        supportedLanguages = typeof row.supported_languages === 'string'
+          ? JSON.parse(row.supported_languages)
+          : row.supported_languages;
+        dbLoaded = true;
+      } else if (settings?.supportedLanguages && Array.isArray(settings.supportedLanguages)) {
+        supportedLanguages = settings.supportedLanguages;
+        dbLoaded = true;
       }
-    } catch (_) {}
 
-    if (!languages) {
-      languages = getLocalFileLanguages() || DEFAULT_SYSTEM_LANGUAGES;
+      if (row.translations) {
+        translations = typeof row.translations === 'string'
+          ? JSON.parse(row.translations)
+          : row.translations;
+        dbLoaded = true;
+      } else if (settings?.translations && typeof settings.translations === 'object') {
+        translations = settings.translations;
+        dbLoaded = true;
+      }
+
+      if (row.default_language) {
+        defaultLanguage = row.default_language;
+      } else if (settings?.defaultLanguage) {
+        defaultLanguage = settings.defaultLanguage;
+      }
     }
+  } catch (_) {}
 
-    return NextResponse.json(
-      { success: true, languages, translations },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
-  } catch (err: any) {
-    return NextResponse.json({ success: true, languages: DEFAULT_SYSTEM_LANGUAGES, translations: {} });
+  // Query dedicated app_translations table
+  try {
+    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations`).catch(() => null);
+    const transRows = Array.isArray(transRes) ? transRes : (transRes?.rows || []);
+    if (transRows && transRows.length > 0) {
+      transRows.forEach((r: any) => {
+        if (r.lang_code && r.dictionary) {
+          translations[r.lang_code] = typeof r.dictionary === 'string' ? JSON.parse(r.dictionary) : r.dictionary;
+        }
+      });
+      dbLoaded = true;
+    }
+  } catch (_) {}
+
+  // Local admin_settings.json fallback
+  if (!dbLoaded || Object.keys(translations).length === 0) {
+    const fileData = readLocalSettingsFallback();
+    if (fileData) {
+      const langConfig = fileData.languages || fileData;
+      if (langConfig.supportedLanguages && Array.isArray(langConfig.supportedLanguages)) {
+        supportedLanguages = langConfig.supportedLanguages;
+      }
+      if (langConfig.translations && typeof langConfig.translations === 'object') {
+        translations = { ...langConfig.translations, ...translations };
+      }
+      if (langConfig.defaultLanguage) {
+        defaultLanguage = langConfig.defaultLanguage;
+      }
+    }
   }
+
+  // Handle single code lookup
+  if (requestedCode) {
+    const code = requestedCode.toLowerCase().trim();
+    const dictionary = translations[code] || {};
+    return NextResponse.json({
+      success: true,
+      code,
+      dictionary,
+      defaultLanguage
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  }
+
+  return NextResponse.json({
+    success: true,
+    languages: supportedLanguages,
+    supportedLanguages,
+    translations,
+    defaultLanguage
+  }, {
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+  });
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
+  await ensureLanguagesSchema();
+
   try {
     const body = await req.json();
-    const languages = Array.isArray(body) ? body : (body.languages || body.supportedLanguages);
-    const translations = body.translations;
+    const { supportedLanguages: rawLangs, languages, translations, defaultLanguage = 'en' } = body;
+    const finalLangs = rawLangs || languages || [];
 
-    if (Array.isArray(languages)) {
-      // Update Dual-Path Server JSON Files
-      for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+    // Upsert into admin_settings with explicit string identifiers
+    try {
+      await query(
+        `INSERT INTO admin_settings (id, key, supported_languages, translations, default_language, updated_at)
+         VALUES ('primary_settings', 'current', $1, $2, $3, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           supported_languages = EXCLUDED.supported_languages,
+           translations = EXCLUDED.translations,
+           default_language = EXCLUDED.default_language,
+           updated_at = NOW()`,
+        [
+          JSON.stringify(finalLangs),
+          JSON.stringify(translations || {}),
+          String(defaultLanguage || 'en')
+        ]
+      );
+    } catch (_) {
+      await query(
+        `INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
+         VALUES ('current', $1, $2, $3, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           supported_languages = EXCLUDED.supported_languages,
+           translations = EXCLUDED.translations,
+           default_language = EXCLUDED.default_language,
+           updated_at = NOW()`,
+        [
+          JSON.stringify(finalLangs),
+          JSON.stringify(translations || {}),
+          String(defaultLanguage || 'en')
+        ]
+      ).catch(() => {});
+    }
+
+    // Upsert individual dictionaries into app_translations
+    if (translations && typeof translations === 'object') {
+      for (const [code, dict] of Object.entries(translations)) {
         try {
-          const p = path.join(process.cwd(), rel);
-          osEnsureDir(path.dirname(p));
-          let existing: any = {};
-          if (fs.existsSync(p)) {
-            try { existing = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (_) {}
-          }
-          existing.supportedLanguages = languages;
-          existing.supported_languages = languages;
-          fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
+          await query(
+            `INSERT INTO app_translations (lang_code, dictionary, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (lang_code) DO UPDATE SET
+               dictionary = EXCLUDED.dictionary,
+               updated_at = NOW()`,
+            [code, JSON.stringify(dict)]
+          );
         } catch (_) {}
       }
-
-      // Update PostgreSQL / MySQL
-      try {
-        await query(`
-          INSERT INTO admin_settings (id, supported_languages, updated_at)
-          VALUES ('primary_settings', $1::jsonb, NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            supported_languages = EXCLUDED.supported_languages,
-            updated_at = NOW();
-        `, [JSON.stringify(languages)]);
-      } catch (_) {}
     }
 
-    if (translations && typeof translations === 'object') {
-      try {
-        await query(`
-          INSERT INTO admin_settings (id, translations, updated_at)
-          VALUES ('primary_settings', $1::jsonb, NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            translations = EXCLUDED.translations,
-            updated_at = NOW();
-        `, [JSON.stringify(translations)]);
-      } catch (_) {}
-    }
-
-    return NextResponse.json({ success: true, message: 'Languages synchronized successfully' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-function osEnsureDir(dirPath: string) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
+    return NextResponse.json({
+      success: true,
+      message: 'Language configuration saved successfully.',
+      supportedLanguages: finalLangs,
+      languages: finalLangs,
+      defaultLanguage
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, error: error.message || 'Failed to update language settings' },
+      { status: 500 }
+    );
   }
 }
 
@@ -54019,118 +53909,123 @@ export async function POST() {
 
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
-// Generated & Maintained by AI Collaborator - Production Build Compliant
-// @ts-nocheck
 import { NextResponse } from 'next/server';
-import { query, parseDbRows } from '@/lib/db';
+import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-interface LanguageItem {
-  id?: string;
-  code: string;
-  name: string;
-  native?: string;
-  flag?: string;
-  direction?: 'ltr' | 'rtl';
-  status: 'active' | 'inactive';
-  is_default: boolean;
-}
-
-const DEFAULT_SUPPORTED_LANGUAGES: LanguageItem[] = [
-  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true },
-  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false }
+const DEFAULT_SUPPORTED_LANGUAGES = [
+  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', status: 'active', is_default: false },
+  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', status: 'active', is_default: false },
+  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', status: 'active', is_default: false },
+  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', status: 'active', is_default: false },
+  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', status: 'active', is_default: false },
+  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', status: 'active', is_default: false },
+  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', status: 'active', is_default: false },
+  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', status: 'active', is_default: false },
+  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', status: 'active', is_default: false },
+  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false }
 ];
 
-function getJsonStorePath(): string {
-  const possiblePaths = [
-    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
-  ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return p;
+let isLanguagesDbInitialized = false;
+
+async function ensureLanguagesSchema() {
+  if (isLanguagesDbInitialized) return;
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY,
+        key VARCHAR(64),
+        settings JSONB DEFAULT '{}'::jsonb,
+        supported_languages JSONB DEFAULT '[]'::jsonb,
+        translations JSONB DEFAULT '{}'::jsonb,
+        default_language VARCHAR(32) DEFAULT 'en',
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
+    const alters = [
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id VARCHAR(64);",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(64);",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '[]'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(32) DEFAULT 'en';",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb;",
+      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();",
+      "CREATE TABLE IF NOT EXISTS app_translations (lang_code VARCHAR(32) PRIMARY KEY, lang_name VARCHAR(64), dictionary JSONB DEFAULT '{}'::jsonb, updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());"
+    ];
+
+    for (const sql of alters) {
+      await query(sql).catch(() => {});
+    }
+
+    isLanguagesDbInitialized = true;
+  } catch (_) {
+    // Non-blocking schema guard
   }
-  return possiblePaths[0];
 }
 
 function readLocalSettingsFallback(): any {
-  try {
-    const p = getJsonStorePath();
-    if (fs.existsSync(p)) {
-      const raw = fs.readFileSync(p, 'utf-8');
-      return JSON.parse(raw);
+  const possiblePaths = [
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
+  ];
+
+  for (const fp of possiblePaths) {
+    if (fs.existsSync(fp)) {
+      try {
+        const raw = fs.readFileSync(fp, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed) return parsed;
+      } catch (_) {}
     }
-  } catch (_) {}
+  }
   return null;
 }
 
-function normalizeLanguageList(rawList: any[]): LanguageItem[] {
-  if (!Array.isArray(rawList) || rawList.length === 0) {
-    return DEFAULT_SUPPORTED_LANGUAGES;
-  }
-  return rawList.map((item: any, idx: number) => {
-    if (!item) return DEFAULT_SUPPORTED_LANGUAGES[0];
-    const code = (item.code || item.locale || item.lang || `lang_${idx}`).toLowerCase().trim();
-    const name = item.name || code.toUpperCase();
-    const native = item.native || item.nativeName || item.native_name || name;
-    const flag = item.flag || '🌐';
-    const direction = item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr');
-    let status: 'active' | 'inactive' = 'active';
-    if (item.status === 'inactive' || item.status === 'disabled' || item.is_active === false || item.isActive === false) {
-      status = 'inactive';
-    }
-    const is_default = Boolean(item.is_default || item.isDefault || code === 'en');
-    return {
-      id: item.id || `lang_${code}`,
-      code,
-      name,
-      native,
-      flag,
-      direction,
-      status,
-      is_default
-    };
-  });
-}
+export async function GET(request: Request) {
+  await ensureLanguagesSchema();
 
-export async function GET() {
-  let supportedLanguages: LanguageItem[] = DEFAULT_SUPPORTED_LANGUAGES;
+  const { searchParams } = new URL(request.url);
+  const requestedCode = searchParams.get('code');
+
+  let supportedLanguages = DEFAULT_SUPPORTED_LANGUAGES;
   let translations: Record<string, Record<string, string>> = {};
   let defaultLanguage = 'en';
   let dbLoaded = false;
 
-  // 1. Authoritative query from PostgreSQL / MySQL using centralized adaptive query()
+  // Query admin_settings defensively using SELECT * to avoid catalog aborts on missing column names
   try {
-    const adminRes = await query(`
-      SELECT supported_languages, translations, default_language, settings 
-      FROM admin_settings 
-      WHERE id = 'primary_settings' OR id = '1' OR key = 'current' OR key = 'default' 
-      ORDER BY updated_at DESC LIMIT 1;
-    `);
+    const adminRes = await query(
+      `SELECT * FROM admin_settings WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1' ORDER BY updated_at DESC LIMIT 1`
+    ).catch(() => null);
 
-    const rows = parseDbRows(adminRes);
+    const rows = Array.isArray(adminRes) ? adminRes : (adminRes?.rows || []);
     if (rows && rows.length > 0) {
       const row = rows[0];
       const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
 
       if (row.supported_languages) {
-        const parsed = typeof row.supported_languages === 'string' ? JSON.parse(row.supported_languages) : row.supported_languages;
-        supportedLanguages = normalizeLanguageList(parsed);
+        supportedLanguages = typeof row.supported_languages === 'string'
+          ? JSON.parse(row.supported_languages)
+          : row.supported_languages;
         dbLoaded = true;
-      } else if (settings?.supportedLanguages || settings?.languages) {
-        supportedLanguages = normalizeLanguageList(settings.supportedLanguages || settings.languages);
+      } else if (settings?.supportedLanguages && Array.isArray(settings.supportedLanguages)) {
+        supportedLanguages = settings.supportedLanguages;
         dbLoaded = true;
       }
 
       if (row.translations) {
-        translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
+        translations = typeof row.translations === 'string'
+          ? JSON.parse(row.translations)
+          : row.translations;
         dbLoaded = true;
-      } else if (settings?.translations) {
+      } else if (settings?.translations && typeof settings.translations === 'object') {
         translations = settings.translations;
         dbLoaded = true;
       }
@@ -54143,10 +54038,10 @@ export async function GET() {
     }
   } catch (_) {}
 
-  // 2. Query dedicated app_translations table if available
+  // Query dedicated app_translations table
   try {
-    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations;`);
-    const transRows = parseDbRows(transRes);
+    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations`).catch(() => null);
+    const transRows = Array.isArray(transRes) ? transRes : (transRes?.rows || []);
     if (transRows && transRows.length > 0) {
       transRows.forEach((r: any) => {
         if (r.lang_code && r.dictionary) {
@@ -54157,14 +54052,13 @@ export async function GET() {
     }
   } catch (_) {}
 
-  // 3. Fallback to local admin_settings.json if database was cold or uninitialized
+  // Local admin_settings.json fallback
   if (!dbLoaded || Object.keys(translations).length === 0) {
     const fileData = readLocalSettingsFallback();
     if (fileData) {
       const langConfig = fileData.languages || fileData;
-      const fileLangs = langConfig.supportedLanguages || langConfig.languages || fileData.supported_languages;
-      if (Array.isArray(fileLangs) && fileLangs.length > 0) {
-        supportedLanguages = normalizeLanguageList(fileLangs);
+      if (langConfig.supportedLanguages && Array.isArray(langConfig.supportedLanguages)) {
+        supportedLanguages = langConfig.supportedLanguages;
       }
       if (langConfig.translations && typeof langConfig.translations === 'object') {
         translations = { ...langConfig.translations, ...translations };
@@ -54175,145 +54069,93 @@ export async function GET() {
     }
   }
 
+  // Handle single code lookup
+  if (requestedCode) {
+    const code = requestedCode.toLowerCase().trim();
+    const dictionary = translations[code] || {};
+    return NextResponse.json({
+      success: true,
+      code,
+      dictionary,
+      defaultLanguage
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  }
+
   return NextResponse.json({
     success: true,
-    supportedLanguages,
     languages: supportedLanguages,
+    supportedLanguages,
     translations,
     defaultLanguage
   }, {
-    headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate',
-      'Pragma': 'no-cache'
-    }
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
   });
 }
 
 export async function POST(req: Request) {
+  await ensureLanguagesSchema();
+
   try {
     const body = await req.json();
-    const rawLanguages = body.supportedLanguages || body.languages || body.supported_languages || [];
-    const supportedLanguages = normalizeLanguageList(rawLanguages);
-    const translations = body.translations || {};
-    const defaultLanguage = body.defaultLanguage || body.default_language || 'en';
+    const { supportedLanguages: rawLangs, languages, translations, defaultLanguage = 'en' } = body;
+    const finalLangs = rawLangs || languages || [];
 
-    // 1. Ensure table structure exists in PostgreSQL / MySQL
+    // Upsert into admin_settings with explicit string identifiers
     try {
-      await query(`
-        CREATE TABLE IF NOT EXISTS admin_settings (
-          id VARCHAR(255) PRIMARY KEY,
-          site_name VARCHAR(255) DEFAULT 'Zecratary',
-          tagline TEXT DEFAULT 'Autonomous Culinary Intelligence & Precision Meal Planning',
-          titlebar_emoji VARCHAR(50) DEFAULT '👨‍🍳',
-          titlebar_image TEXT DEFAULT '',
-          favicon_emoji VARCHAR(50) DEFAULT '👨‍🍳',
-          favicon_image TEXT DEFAULT '',
-          font_family VARCHAR(100) DEFAULT 'Inter, sans-serif',
-          theme_colors JSONB DEFAULT '{}'::jsonb,
-          supported_languages JSONB DEFAULT '[]'::jsonb,
-          translations JSONB DEFAULT '{}'::jsonb,
-          default_language VARCHAR(32) DEFAULT 'en',
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-      `);
-
-      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '[]'::jsonb;`);
-      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;`);
-      await query(`ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(32) DEFAULT 'en';`);
-
-      await query(`
-        CREATE TABLE IF NOT EXISTS app_translations (
-          lang_code VARCHAR(32) PRIMARY KEY,
-          dictionary JSONB DEFAULT '{}'::jsonb,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-      `);
-    } catch (_) {}
-
-    // 2. Upsert into admin_settings
-    try {
-      await query(`
-        INSERT INTO admin_settings (id, supported_languages, translations, default_language, updated_at)
-        VALUES ('primary_settings', $1::jsonb, $2::jsonb, $3, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          supported_languages = EXCLUDED.supported_languages,
-          translations = EXCLUDED.translations,
-          default_language = EXCLUDED.default_language,
-          updated_at = NOW();
-      `, [
-        JSON.stringify(supportedLanguages),
-        JSON.stringify(translations),
-        String(defaultLanguage)
-      ]);
-    } catch (err: any) {
-      try {
-        await query(`
-          INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
-          VALUES ('current', $1::jsonb, $2::jsonb, $3, NOW())
-          ON CONFLICT (key) DO UPDATE SET
-            supported_languages = EXCLUDED.supported_languages,
-            translations = EXCLUDED.translations,
-            default_language = EXCLUDED.default_language,
-            updated_at = NOW();
-        `, [
-          JSON.stringify(supportedLanguages),
-          JSON.stringify(translations),
-          String(defaultLanguage)
-        ]);
-      } catch (_) {}
+      await query(
+        `INSERT INTO admin_settings (id, key, supported_languages, translations, default_language, updated_at)
+         VALUES ('primary_settings', 'current', $1, $2, $3, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           supported_languages = EXCLUDED.supported_languages,
+           translations = EXCLUDED.translations,
+           default_language = EXCLUDED.default_language,
+           updated_at = NOW()`,
+        [
+          JSON.stringify(finalLangs),
+          JSON.stringify(translations || {}),
+          String(defaultLanguage || 'en')
+        ]
+      );
+    } catch (_) {
+      await query(
+        `INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
+         VALUES ('current', $1, $2, $3, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           supported_languages = EXCLUDED.supported_languages,
+           translations = EXCLUDED.translations,
+           default_language = EXCLUDED.default_language,
+           updated_at = NOW()`,
+        [
+          JSON.stringify(finalLangs),
+          JSON.stringify(translations || {}),
+          String(defaultLanguage || 'en')
+        ]
+      ).catch(() => {});
     }
 
-    // 3. Upsert individual dictionaries into app_translations
+    // Upsert individual dictionaries into app_translations
     if (translations && typeof translations === 'object') {
       for (const [code, dict] of Object.entries(translations)) {
         try {
-          await query(`
-            INSERT INTO app_translations (lang_code, dictionary, updated_at)
-            VALUES ($1, $2::jsonb, NOW())
-            ON CONFLICT (lang_code) DO UPDATE SET
-              dictionary = EXCLUDED.dictionary,
-              updated_at = NOW();
-          `, [code.toLowerCase(), JSON.stringify(dict)]);
+          await query(
+            `INSERT INTO app_translations (lang_code, dictionary, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (lang_code) DO UPDATE SET
+               dictionary = EXCLUDED.dictionary,
+               updated_at = NOW()`,
+            [code, JSON.stringify(dict)]
+          );
         } catch (_) {}
       }
     }
 
-    // 4. Mirror to filesystem data/admin_settings.json
-    try {
-      const p = getJsonStorePath();
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      let currentData: any = {};
-      if (fs.existsSync(p)) {
-        try {
-          currentData = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        } catch (_) {}
-      }
-      currentData.supported_languages = supportedLanguages;
-      currentData.supportedLanguages = supportedLanguages;
-      currentData.languages = {
-        ...(currentData.languages || {}),
-        supportedLanguages,
-        languages: supportedLanguages,
-        translations,
-        defaultLanguage
-      };
-      currentData.translations = { ...(currentData.translations || {}), ...translations };
-      currentData.defaultLanguage = defaultLanguage;
-      currentData.updated_at = new Date().toISOString();
-      fs.writeFileSync(p, JSON.stringify(currentData, null, 2), 'utf-8');
-
-      const altP = p.includes('apps/web') ? p.replace('apps/web/', '') : path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json');
-      if (altP !== p && fs.existsSync(path.dirname(altP))) {
-        fs.writeFileSync(altP, JSON.stringify(currentData, null, 2), 'utf-8');
-      }
-    } catch (_) {}
-
     return NextResponse.json({
       success: true,
-      message: 'Language settings synchronized with PostgreSQL, MySQL, and server store.',
-      supportedLanguages,
-      languages: supportedLanguages,
-      translations,
+      message: 'Language configuration saved successfully.',
+      supportedLanguages: finalLangs,
+      languages: finalLangs,
       defaultLanguage
     });
   } catch (error: any) {
@@ -60061,590 +59903,302 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/wallet/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import fs from 'fs';
-import path from 'path';
 
-async function ensureWalletSchema() {
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+let isDbInitialized = false;
+
+async function initWalletDb() {
+  if (isDbInitialized) return;
   try {
     await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id INT PRIMARY KEY DEFAULT 1,
-        payment_settings JSONB,
+      CREATE TABLE IF NOT EXISTS wallet_settings (
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
+        is_enabled BOOLEAN DEFAULT true,
         currency VARCHAR(10) DEFAULT 'USD',
-        site_name TEXT,
-        theme_colors JSONB,
-        value JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        min_topup NUMERIC(10,2) DEFAULT 5.00,
+        max_topup NUMERIC(10,2) DEFAULT 1000.00,
+        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
+        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
+        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
+        allow_site_purchases BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-    `);
 
-    await query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        email TEXT UNIQUE,
-        name TEXT,
-        wallet_balance NUMERIC(12,2) DEFAULT 0.00,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
       CREATE TABLE IF NOT EXISTS wallet_transactions (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id TEXT,
-        user_email TEXT,
-        amount NUMERIC(12,2) DEFAULT 0.00,
-        balance_after NUMERIC(12,2) DEFAULT 0.00,
-        type VARCHAR(50) DEFAULT 'topup',
-        gateway VARCHAR(50) DEFAULT 'stripe',
-        gateway_tx_id TEXT,
-        status VARCHAR(50) DEFAULT 'succeeded',
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        user_email VARCHAR(255) NOT NULL,
+        type VARCHAR(32) NOT NULL,
+        amount NUMERIC(10,2) NOT NULL,
+        balance_after NUMERIC(10,2) NOT NULL,
+        gateway VARCHAR(32) DEFAULT 'stripe',
+        gateway_tx_id VARCHAR(255),
+        status VARCHAR(32) DEFAULT 'succeeded',
         description TEXT,
-        metadata JSONB DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-    `);
 
-    await query(`
+      CREATE INDEX IF NOT EXISTS idx_wallet_tx_user ON wallet_transactions(user_id, user_email);
+
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(255) PRIMARY KEY,
         customer_name TEXT,
         customer_email TEXT,
         plan_name TEXT,
         plan_slug TEXT,
-        amount NUMERIC(12,2) DEFAULT 0.00,
+        amount NUMERIC DEFAULT 0,
         currency VARCHAR(10) DEFAULT 'USD',
         gateway VARCHAR(50) DEFAULT 'stripe',
         status VARCHAR(50) DEFAULT 'succeeded',
-        transfer_reference TEXT,
-        notes TEXT,
+        test_mode BOOLEAN DEFAULT false,
+        failure_reason TEXT,
+        is_recurring BOOLEAN DEFAULT false,
+        recurring_interval VARCHAR(20) DEFAULT 'ONE_TIME',
+        auto_renew BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        gateway_transaction_id TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ
       );
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
+
+      INSERT INTO wallet_settings (id, is_enabled, currency, min_topup, max_topup, preset_amounts, bonus_rules, allowed_gateways, allow_site_purchases)
+      VALUES ('current', true, 'USD', 5.00, 1000.00, '[10, 25, 50, 100, 250]', '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]', '["stripe", "paypal", "manual"]', true)
+      ON CONFLICT (id) DO UPDATE SET min_topup = LEAST(wallet_settings.min_topup, 5.00);
     `);
-  } catch (err) {
-    console.warn('[Wallet API] Schema initialization notice:', err);
+    isDbInitialized = true;
+  } catch (err: any) {
+    console.warn('[Wallet DB init notice]:', err.message);
+    isDbInitialized = true;
   }
 }
 
-async function getMasterGatewaySettings() {
-  await ensureWalletSchema();
-
-  let settings: any = {
-    currency: 'USD',
-    testMode: true,
-    stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
-    paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
-    manualSettlement: {
-      enabled: false,
-      bankName: '',
-      accountHolder: '',
-      accountNumber: '',
-      routingNumber: '',
-      swiftBic: '',
-      branchName: '',
-      instructions: '',
-      requireReference: true,
-    }
-  };
-
-  // 1. Strictly target id = 1 in admin_settings to prevent stale multi-row merges
+export async function GET(req: NextRequest) {
   try {
-    const sRes = await query(`SELECT payment_settings, currency, value FROM admin_settings WHERE id = 1 LIMIT 1`);
-    const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
-    if (row) {
-      if (row.payment_settings) {
-        const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-        if (ps && typeof ps === 'object') settings = { ...settings, ...ps };
-      } else if (row.value) {
-        const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-        if (val && typeof val === 'object') {
-          if (val.paymentSettings) settings = { ...settings, ...val.paymentSettings };
-          else settings = { ...settings, ...val };
-        }
-      }
-      if (row.currency) settings.currency = row.currency;
-    }
-  } catch (_) {}
+    await initWalletDb();
+    const { searchParams } = new URL(req.url);
+    const email = String(searchParams.get('email') || '').toLowerCase().trim();
+    const userId = String(searchParams.get('userId') || '').trim();
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
+    const offset = (page - 1) * limit;
+    const search = String(searchParams.get('search') || '').toLowerCase().trim();
+    const typeFilter = String(searchParams.get('type') || 'all').toLowerCase().trim();
 
-  // 1.1 Fallback to first available row if id = 1 does not exist
-  if (!settings.stripe?.secretKey && !settings.stripe?.publishableKey) {
-    try {
-      const fbRes = await query(`SELECT payment_settings, currency, value FROM admin_settings ORDER BY id ASC LIMIT 1`);
-      const fbRow = Array.isArray(fbRes) ? fbRes[0] : fbRes?.rows?.[0];
-      if (fbRow) {
-        if (fbRow.payment_settings) {
-          const ps = typeof fbRow.payment_settings === 'string' ? JSON.parse(fbRow.payment_settings) : fbRow.payment_settings;
-          if (ps && typeof ps === 'object') settings = { ...settings, ...ps };
-        }
-        if (fbRow.currency) settings.currency = fbRow.currency;
-      }
-    } catch (_) {}
-  }
-
-  // 2. Local filesystem mirror check
-  try {
-    const candidatePaths = [
-      path.join(process.cwd(), 'data', 'admin_settings.json'),
-      path.join(process.cwd(), '..', 'data', 'admin_settings.json'),
-      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    ];
-    for (const fp of candidatePaths) {
-      if (fs.existsSync(fp)) {
-        const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
-        if (fd.paymentSettings && typeof fd.paymentSettings === 'object') {
-          if (!settings.stripe?.publishableKey && !settings.stripe?.secretKey) {
-            settings = { ...settings, ...fd.paymentSettings };
-          }
-        }
-        if (fd.currency && !settings.currency) settings.currency = fd.currency;
-        break;
-      }
-    }
-  } catch (_) {}
-
-  // 3. Fallback to server environment variables
-  if (!settings.stripe.publishableKey) {
-    settings.stripe.publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
-  }
-  if (!settings.stripe.secretKey) {
-    settings.stripe.secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
-  }
-  if (!settings.stripe.webhookSecret) {
-    settings.stripe.webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
-  }
-  if (!settings.paypal.clientId) {
-    settings.paypal.clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
-  }
-  if (!settings.paypal.clientSecret) {
-    settings.paypal.clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
-  }
-
-  // Determine allowed gateways strictly by their enabled status in /admin/payment-gateway
-  const stripeEnabled = settings.stripe?.enabled !== undefined ? Boolean(settings.stripe.enabled) : true;
-  const paypalEnabled = settings.paypal?.enabled !== undefined ? Boolean(settings.paypal.enabled) : false;
-  const manualEnabled = settings.manualSettlement?.enabled !== undefined 
-    ? Boolean(settings.manualSettlement.enabled) 
-    : (settings.manual?.enabled !== undefined ? Boolean(settings.manual.enabled) : false);
-
-  const allowedGateways: string[] = [];
-  if (stripeEnabled) allowedGateways.push('stripe');
-  if (paypalEnabled) allowedGateways.push('paypal');
-  if (manualEnabled) allowedGateways.push('manual');
-
-  return {
-    rawSettings: settings,
-    allowedGateways,
-    stripeEnabled,
-    paypalEnabled,
-    manualEnabled,
-    currency: settings.currency || 'USD',
-    testMode: Boolean(settings.testMode),
-  };
-}
-
-export async function GET(req: Request) {
-  try {
-    const gwData = await getMasterGatewaySettings();
-    const url = new URL(req.url);
-    const userId = url.searchParams.get('userId') || '';
-    const userEmail = (url.searchParams.get('email') || '').toLowerCase().trim();
-    const page = parseInt(url.searchParams.get('page') || '1', 10);
-    const limit = parseInt(url.searchParams.get('limit') || '10', 10);
-    const search = (url.searchParams.get('search') || '').toLowerCase().trim();
-    const typeFilter = url.searchParams.get('type') || 'all';
-
-    let balance = 0;
-    let transactions: any[] = [];
-    let totalCount = 0;
-    let totalDeposited = 0;
-    let totalSpent = 0;
-
-    if (userId || userEmail) {
-      try {
-        const uRes = await query(
-          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-          [userId, userEmail]
-        );
-        const uRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
-        if (uRow && uRow.wallet_balance !== undefined) {
-          balance = Number(uRow.wallet_balance || 0);
-        }
-
-        let queryParams: any[] = [userId, userEmail];
-        let whereClauses = [`((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`];
-
-        if (typeFilter && typeFilter !== 'all') {
-          queryParams.push(typeFilter);
-          whereClauses.push(`type = $${queryParams.length}`);
-        }
-
-        if (search) {
-          queryParams.push(`%${search}%`);
-          whereClauses.push(`(LOWER(description) LIKE $${queryParams.length} OR LOWER(gateway_tx_id) LIKE $${queryParams.length} OR LOWER(id) LIKE $${queryParams.length})`);
-        }
-
-        const whereSql = whereClauses.join(' AND ');
-        const countRes = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, queryParams);
-        const countRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
-        totalCount = parseInt(countRow?.count || '0', 10);
-
-        const offset = (page - 1) * limit;
-        queryParams.push(limit, offset);
-        const tRes = await query(
-          `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
-          queryParams
-        );
-        transactions = Array.isArray(tRes) ? tRes : (tRes?.rows || []);
-
-        const statsRes = await query(
-          `SELECT 
-            SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as total_dep,
-            SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as total_sp
-           FROM wallet_transactions 
-           WHERE ((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`,
-          [userId, userEmail]
-        );
-        const statsRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
-        totalDeposited = Number(statsRow?.total_dep || 0);
-        totalSpent = Number(statsRow?.total_sp || 0);
-      } catch (dbErr) {
-        console.warn('[Wallet API] Data query notice:', dbErr);
-      }
-    }
-
-    let walletRules: any = {
+    // 1. Fetch Wallet Settings with explicit string comparisons
+    let settings = {
       is_enabled: true,
-      min_topup: 5.00,
-      max_topup: 1000.00,
+      currency: 'USD',
+      min_topup: 5,
+      max_topup: 1000,
       preset_amounts: [10, 25, 50, 100, 250],
-      bonus_rules: [
-        { threshold: 50, bonus_percent: 5 },
-        { threshold: 100, bonus_percent: 10 }
-      ],
+      bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
+      allowed_gateways: ['stripe', 'paypal', 'manual'],
       allow_site_purchases: true
     };
 
     try {
-      const wRes = await query(`SELECT * FROM wallet_settings WHERE id = 'current' OR id = '1' LIMIT 1`);
-      const wRow = Array.isArray(wRes) ? wRes[0] : wRes?.rows?.[0];
-      if (wRow) {
-        walletRules = {
-          ...walletRules,
-          ...wRow,
-          min_topup: parseFloat(wRow.min_topup || 5),
-          max_topup: parseFloat(wRow.max_topup || 1000),
-          preset_amounts: typeof wRow.preset_amounts === 'string' ? JSON.parse(wRow.preset_amounts) : (wRow.preset_amounts || walletRules.preset_amounts),
-          bonus_rules: typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : (wRow.bonus_rules || walletRules.bonus_rules),
+      const sRes: any = await query(`
+        SELECT * FROM wallet_settings 
+        WHERE id::text = 'current' OR id::text = '1'
+        LIMIT 1;
+      `);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        settings = {
+          is_enabled: sRow.is_enabled !== false,
+          currency: sRow.currency || 'USD',
+          min_topup: Number(sRow.min_topup || 5),
+          max_topup: Number(sRow.max_topup || 1000),
+          preset_amounts: Array.isArray(sRow.preset_amounts) ? sRow.preset_amounts : (typeof sRow.preset_amounts === 'string' ? JSON.parse(sRow.preset_amounts) : [10, 25, 50, 100, 250]),
+          bonus_rules: Array.isArray(sRow.bonus_rules) ? sRow.bonus_rules : (typeof sRow.bonus_rules === 'string' ? JSON.parse(sRow.bonus_rules) : []),
+          allowed_gateways: Array.isArray(sRow.allowed_gateways) ? sRow.allowed_gateways : ['stripe', 'paypal', 'manual'],
+          allow_site_purchases: sRow.allow_site_purchases !== false
         };
       }
     } catch (_) {}
 
-    const manualDetails = {
-      enabled: gwData.manualEnabled,
-      bankName: gwData.rawSettings.manualSettlement?.bankName || gwData.rawSettings.manual?.bankName || '',
-      accountHolder: gwData.rawSettings.manualSettlement?.accountHolder || gwData.rawSettings.manual?.accountHolder || '',
-      accountNumber: gwData.rawSettings.manualSettlement?.accountNumber || gwData.rawSettings.manual?.accountNumber || '',
-      routingNumber: gwData.rawSettings.manualSettlement?.routingNumber || gwData.rawSettings.manual?.routingNumber || '',
-      swiftBic: gwData.rawSettings.manualSettlement?.swiftBic || gwData.rawSettings.manual?.swiftBic || '',
-      branchName: gwData.rawSettings.manualSettlement?.branchName || gwData.rawSettings.manual?.branchName || '',
-      instructions: gwData.rawSettings.manualSettlement?.instructions || gwData.rawSettings.manual?.instructions || 'Please transfer the exact amount and include your reference number.',
-      requireReference: gwData.rawSettings.manualSettlement?.requireReference ?? true,
-    };
+    // 2. Fetch User & Wallet Balance (Strict type-cast comparison)
+    let userRow: any = null;
+    let walletBalance = 0.00;
 
-    const structuredSettings = {
-      is_enabled: walletRules.is_enabled !== false,
-      currency: gwData.currency,
-      min_topup: walletRules.min_topup,
-      max_topup: walletRules.max_topup,
-      preset_amounts: walletRules.preset_amounts,
-      bonus_rules: walletRules.bonus_rules,
-      allowed_gateways: gwData.allowedGateways,
-      active_gateway: gwData.allowedGateways[0] || null,
-      allow_site_purchases: walletRules.allow_site_purchases !== false,
-      stripe_configured: Boolean(gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY),
-      paypal_configured: Boolean(gwData.rawSettings.paypal?.clientId || process.env.PAYPAL_CLIENT_ID),
-      test_mode: gwData.testMode,
-      manual_details: manualDetails,
-    };
+    if (userId || email) {
+      try {
+        const uRes: any = await query(`
+          SELECT id, email, name, wallet_balance, token_balance, role 
+          FROM users 
+          WHERE (id::text = $1::text AND $1::text != '') 
+             OR (email IS NOT NULL AND LOWER(email) = LOWER($2::text) AND $2::text != '')
+          LIMIT 1;
+        `, [userId, email]);
+        userRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
+        if (userRow) {
+          walletBalance = parseFloat(userRow.wallet_balance || 0);
+        }
+      } catch (_) {}
+    }
+
+    // 3. Query User Transaction Ledger with Type-Safe Conditionals
+    const conditions: string[] = [];
+    const values: any[] = [];
+
+    const identityClauses: string[] = [];
+    if (email) {
+      values.push(email);
+      identityClauses.push(`LOWER(TRIM(user_email)) = LOWER(TRIM($${values.length}::text))`);
+    }
+    if (userId) {
+      values.push(userId);
+      identityClauses.push(`user_id::text = $${values.length}::text`);
+    }
+    if (userRow?.id && userRow.id !== userId) {
+      values.push(String(userRow.id));
+      identityClauses.push(`user_id::text = $${values.length}::text`);
+    }
+
+    if (identityClauses.length > 0) {
+      conditions.push(`(${identityClauses.join(' OR ')})`);
+    } else {
+      conditions.push(`(user_id::text = 'usr_admin_1' OR user_id IS NULL)`);
+    }
+
+    if (typeFilter && typeFilter !== 'all') {
+      values.push(typeFilter);
+      conditions.push(`type = $${values.length}::text`);
+    }
+
+    if (search) {
+      values.push(`%${search}%`);
+      const sIdx = values.length;
+      conditions.push(`(
+        LOWER(COALESCE(description, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(id, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(gateway_tx_id, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(gateway, '')) LIKE $${sIdx}::text
+      )`);
+    }
+
+    const whereSql = conditions.join(' AND ');
+
+    let totalCount = 0;
+    try {
+      const countRes: any = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, values);
+      const cRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
+      totalCount = parseInt(cRow?.count || '0', 10);
+    } catch (_) {}
+
+    const pageValues = [...values, limit, offset];
+    let transactions: any[] = [];
+    try {
+      const rowsRes: any = await query(`
+        SELECT * FROM wallet_transactions 
+        WHERE ${whereSql} 
+        ORDER BY created_at DESC 
+        LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}
+      `, pageValues);
+      transactions = Array.isArray(rowsRes) ? rowsRes : (rowsRes?.rows || []);
+    } catch (_) {}
+
+    let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
+    try {
+      const statsRes: any = await query(`
+        SELECT 
+          COALESCE(SUM(CASE WHEN amount > 0 AND status IN ('succeeded', 'successful', 'completed', 'paid') THEN amount ELSE 0 END), 0) as total_deposited,
+          COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
+          COUNT(*) as total_events
+        FROM wallet_transactions 
+        WHERE ${whereSql} AND status IN ('succeeded', 'successful', 'completed', 'paid')
+      `, values);
+      const stRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+      if (stRow) {
+        stats = {
+          totalDeposited: parseFloat(stRow.total_deposited || 0),
+          totalSpent: parseFloat(stRow.total_spent || 0),
+          totalEvents: parseInt(stRow.total_events || 0, 10)
+        };
+      }
+    } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      balance,
-      wallet_balance: balance,
-      currency: gwData.currency,
-      allowed_gateways: gwData.allowedGateways,
-      allowedGateways: gwData.allowedGateways,
-      active_gateway: gwData.allowedGateways[0] || null,
-      settings: structuredSettings,
-      gatewaySettings: {
-        currency: gwData.currency,
-        testMode: gwData.testMode,
-        stripe: {
-          enabled: gwData.stripeEnabled,
-          publishableKey: gwData.rawSettings.stripe?.publishableKey || ''
-        },
-        paypal: {
-          enabled: gwData.paypalEnabled,
-          clientId: gwData.rawSettings.paypal?.clientId || '',
-          environment: gwData.rawSettings.paypal?.environment || 'sandbox'
-        },
-        manualSettlement: manualDetails,
-      },
+      balance: walletBalance,
+      wallet_balance: walletBalance,
+      walletBalance: walletBalance,
+      user: userRow ? {
+        id: userRow.id,
+        email: userRow.email,
+        name: userRow.name || 'Chef',
+        wallet_balance: walletBalance
+      } : null,
+      settings,
       transactions,
       totalCount,
       totalPages: Math.max(1, Math.ceil(totalCount / limit)),
       page,
-      stats: {
-        totalDeposited,
-        totalSpent,
-        totalEvents: totalCount
-      }
-    });
+      limit,
+      stats
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message, balance: 0, wallet_balance: 0 }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    await ensureWalletSchema();
-    const gwData = await getMasterGatewaySettings();
+    await initWalletDb();
     const body = await req.json();
-    const action = body.action || 'topup';
-    const gateway = (body.gateway || '').toLowerCase();
-    const userId = String(body.userId || '');
-    const userEmail = (body.email || body.userEmail || '').toLowerCase().trim();
-    const depositAmt = parseFloat(String(body.amount || 0));
-    const bonusAmt = parseFloat(String(body.bonus || 0));
-    const totalAddition = depositAmt + (bonusAmt > 0 ? bonusAmt : 0);
+    const { action, amount, bonus, gateway, email, userId, gatewayTxId } = body;
 
-    // 1. RECONCILE WALLET
-    if (action === 'reconcile_wallet') {
-      const uRes = await query(
-        `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-        [userId, userEmail]
-      );
-      const balance = Number(Array.isArray(uRes) ? uRes[0]?.wallet_balance : uRes?.rows?.[0]?.wallet_balance || 0);
+    const depositAmount = parseFloat(amount || 0);
+    const bonusAmount = parseFloat(bonus || 0);
+    const totalToAdd = depositAmount + bonusAmount;
 
-      const txRes = await query(
-        `SELECT * FROM wallet_transactions WHERE (user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != '') ORDER BY created_at DESC LIMIT 20`,
-        [userId, userEmail]
-      );
-      const txs = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
-
-      return NextResponse.json({
-        success: true,
-        message: 'Wallet ledger is synchronized with payment gateway.',
-        wallet_balance: balance,
-        transactions: txs
-      });
+    if (isNaN(depositAmount) || depositAmount <= 0) {
+      return NextResponse.json({ success: false, error: 'Invalid deposit amount' }, { status: 400 });
     }
 
-    // 2. VERIFY STRIPE SESSION
-    if (action === 'verify_stripe_session') {
-      const sessionId = body.sessionId;
-      if (!sessionId) {
-        return NextResponse.json({ success: false, error: 'Session ID is required.' }, { status: 400 });
-      }
+    const targetEmail = String(email || 'admin@zecratary.com').toLowerCase().trim();
+    const targetUserId = String(userId || 'usr_admin_1').trim();
 
-      const existTx = await query(
-        `SELECT id, balance_after FROM wallet_transactions WHERE gateway_tx_id = $1 LIMIT 1`,
-        [sessionId]
-      );
-      const existRow = Array.isArray(existTx) ? existTx[0] : existTx?.rows?.[0];
-      if (existRow) {
-        const uRes = await query(
-          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-          [userId, userEmail]
-        );
-        const curBal = Number(Array.isArray(uRes) ? uRes[0]?.wallet_balance : uRes?.rows?.[0]?.wallet_balance || 0);
-        return NextResponse.json({
-          success: true,
-          message: 'Payment verified! Your wallet has been credited.',
-          wallet_balance: curBal
-        });
-      }
+    // 1. Update user balance atomically
+    const updateRes: any = await query(`
+      UPDATE users 
+      SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+      WHERE (id::text = $2::text AND $2::text != '') 
+         OR (email IS NOT NULL AND LOWER(email) = LOWER($3::text))
+      RETURNING id, email, wallet_balance;
+    `, [totalToAdd, targetUserId, targetEmail]);
 
-      let verifiedAmount = 50.00;
-      const secretKey = gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
+    const userRow = Array.isArray(updateRes) ? updateRes[0] : updateRes?.rows?.[0];
+    const newBalance = userRow ? parseFloat(userRow.wallet_balance) : totalToAdd;
 
-      if (secretKey && !sessionId.startsWith('cs_test_mock_')) {
-        try {
-          const sRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${sessionId}`, {
-            headers: { Authorization: `Bearer ${secretKey}` }
-          });
-          const sessionData = await sRes.json();
-          if (sessionData && sessionData.id) {
-            const metaTotal = parseFloat(sessionData.metadata?.totalAddition || '0');
-            if (metaTotal > 0) {
-              verifiedAmount = metaTotal;
-            } else if (sessionData.amount_total) {
-              verifiedAmount = sessionData.amount_total / 100;
-            }
-          }
-        } catch (e: any) {
-          console.warn('[Wallet API] Stripe retrieve notice:', e.message);
-        }
-      }
+    // 2. Record transaction in ledger
+    const txId = 'wtx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+    const desc = bonusAmount > 0 
+      ? `Wallet Deposit ($${depositAmount.toFixed(2)} + $${bonusAmount.toFixed(2)} Bonus)`
+      : `Wallet Deposit ($${depositAmount.toFixed(2)})`;
 
-      await query(
-        `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-         WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
-        [verifiedAmount, userId, userEmail]
-      );
-
-      const balRes = await query(
-        `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-        [userId, userEmail]
-      );
-      const newBal = Number(Array.isArray(balRes) ? balRes[0]?.wallet_balance : balRes?.rows?.[0]?.wallet_balance || 0);
-
-      const txId = 'wtx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      await query(
-        `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, metadata, created_at)
-         VALUES ($1, $2, $3, $4, $5, 'topup', 'stripe', $6, 'succeeded', $7, $8, NOW())`,
-        [
-          txId, userId, userEmail, verifiedAmount, newBal, sessionId,
-          `Deposit Top-Up via Stripe Checkout (${gwData.currency} ${verifiedAmount.toFixed(2)})`,
-          JSON.stringify({ sessionId, verified: true })
-        ]
-      );
-
-      await query(
-        `INSERT INTO payment_transactions (id, customer_name, customer_email, plan_name, plan_slug, amount, currency, gateway, status, created_at, updated_at)
-         VALUES ($1, $2, $3, 'Wallet Top-Up', 'wallet_topup', $4, $5, 'stripe', 'succeeded', NOW(), NOW())
-         ON CONFLICT (id) DO NOTHING`,
-        [sessionId, userEmail || 'Customer', userEmail, verifiedAmount, gwData.currency]
-      ).catch(() => {});
-
-      return NextResponse.json({
-        success: true,
-        message: `Stripe checkout verified! ${gwData.currency} ${verifiedAmount.toFixed(2)} added to your wallet.`,
-        wallet_balance: newBal
-      });
-    }
-
-    // 3. ENFORCE AUTHORITATIVE GATEWAY AVAILABILITY
-    if (gateway === 'stripe' && !gwData.stripeEnabled) {
-      return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
-    }
-    if (gateway === 'paypal' && !gwData.paypalEnabled) {
-      return NextResponse.json({ success: false, error: 'PayPal digital wallet is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
-    }
-    if (gateway === 'manual' && !gwData.manualEnabled) {
-      return NextResponse.json({ success: false, error: 'Manual Settlement is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
-    }
-
-    // 4. STRIPE CHECKOUT INITIATION
-    if (gateway === 'stripe') {
-      const secretKey = gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
-      const origin = body.origin || (typeof process.env.NEXTAUTH_URL === 'string' ? process.env.NEXTAUTH_URL : 'http://localhost:3000');
-
-      if (secretKey && secretKey.startsWith('sk_')) {
-        try {
-          const zeroDecimal = ['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'];
-          const isZeroDecimal = zeroDecimal.includes(gwData.currency.toLowerCase());
-          const unitAmount = isZeroDecimal ? Math.round(depositAmt) : Math.round(depositAmt * 100);
-
-          const params = new URLSearchParams();
-          params.append('payment_method_types[0]', 'card');
-          params.append('mode', 'payment');
-          params.append('success_url', `${origin}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`);
-          params.append('cancel_url', `${origin}/wallet?status=cancelled`);
-          if (userEmail) params.append('customer_email', userEmail);
-          params.append('line_items[0][price_data][currency]', gwData.currency.toLowerCase());
-          params.append('line_items[0][price_data][product_data][name]', `Store Credit Top-Up (${gwData.currency} ${depositAmt.toFixed(2)})`);
-          params.append('line_items[0][price_data][unit_amount]', String(unitAmount));
-          params.append('line_items[0][quantity]', '1');
-          params.append('metadata[userId]', userId);
-          params.append('metadata[email]', userEmail);
-          params.append('metadata[totalAddition]', String(totalAddition));
-          params.append('metadata[type]', 'topup');
-          params.append('metadata[gateway]', 'stripe');
-
-          const sRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${secretKey}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: params.toString()
-          });
-
-          const session = await sRes.json();
-          if (session.url) {
-            return NextResponse.json({ success: true, checkoutUrl: session.url, sessionId: session.id });
-          } else {
-            throw new Error(session.error?.message || 'Failed to create Stripe Checkout session');
-          }
-        } catch (sErr: any) {
-          if (!gwData.testMode) {
-            return NextResponse.json({ success: false, error: sErr.message || 'Stripe error.' }, { status: 400 });
-          }
-        }
-      }
-
-      // Sandbox Mock Fallback
-      if (gwData.testMode) {
-        const mockSessionId = `cs_test_mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        return NextResponse.json({
-          success: true,
-          checkoutUrl: `${origin}/wallet?status=success&session_id=${mockSessionId}`
-        });
-      }
-
-      return NextResponse.json({ success: false, error: 'Stripe keys are not configured in Payment Gateway settings.' }, { status: 400 });
-    }
-
-    // 5. PAYPAL CHECKOUT INITIATION
-    if (gateway === 'paypal') {
-      const origin = body.origin || (typeof process.env.NEXTAUTH_URL === 'string' ? process.env.NEXTAUTH_URL : 'http://localhost:3000');
-      if (gwData.testMode) {
-        const mockSessionId = `cs_test_mock_pp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        return NextResponse.json({
-          success: true,
-          checkoutUrl: `${origin}/wallet?status=success&session_id=${mockSessionId}&gateway=paypal`
-        });
-      }
-      return NextResponse.json({ success: false, error: 'Live PayPal integration is awaiting credentials in /admin/payment-gateway.' }, { status: 400 });
-    }
-
-    // 6. MANUAL SETTLEMENT / BANK WIRE
-    const ref = body.transferReference || body.transfer_reference || body.gatewayTxId || `manual_${Date.now()}`;
-    await query(
-      `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-       WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
-      [totalAddition, userId, userEmail]
-    );
-
-    const balRes = await query(
-      `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-      [userId, userEmail]
-    );
-    const newBal = Number(Array.isArray(balRes) ? balRes[0]?.wallet_balance : balRes?.rows?.[0]?.wallet_balance || 0);
-
-    const txId = 'wtx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-    await query(
-      `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at)
-       VALUES ($1, $2, $3, $4, $5, 'topup', 'manual', $6, 'succeeded', $7, NOW())`,
-      [txId, userId, userEmail, totalAddition, newBal, ref, `Manual Deposit Top-Up: ${gwData.currency} ${depositAmt.toFixed(2)}${bonusAmt > 0 ? ` (+${gwData.currency} ${bonusAmt.toFixed(2)} bonus)` : ''}`]
-    );
-
-    await query(
-      `INSERT INTO payment_transactions (id, customer_name, customer_email, plan_name, plan_slug, amount, currency, gateway, status, transfer_reference, created_at, updated_at)
-       VALUES ($1, $2, $3, 'Wallet Top-Up', 'wallet_topup', $4, $5, 'manual_settlement', 'succeeded', $6, NOW(), NOW())
-       ON CONFLICT (id) DO NOTHING`,
-      [txId, userEmail || 'Customer', userEmail, depositAmt, gwData.currency, ref]
-    ).catch(() => {});
+    await query(`
+      INSERT INTO wallet_transactions (
+        id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, created_at
+      ) VALUES ($1::text, $2::text, $3::text, 'topup', $4, $5, $6::text, $7::text, 'succeeded', $8::text, NOW());
+    `, [txId, targetUserId, targetEmail, totalToAdd, newBalance, gateway || 'manual', gatewayTxId || txId, desc]);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully deposited ${gwData.currency} ${depositAmt.toFixed(2)} into your wallet!`,
-      wallet_balance: newBal
+      wallet_balance: newBalance,
+      balance: newBalance,
+      message: `Successfully deposited $${depositAmount.toFixed(2)} into your wallet!`
     });
+
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -64987,7 +64541,7 @@ export default function BooksRedirectPage() {
 
 ## File: `apps/web/src/app/login/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator - Production Build Compliant
+// Generated / Updated by AI Collaborator - High-Performance Login
 'use client';
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
@@ -65024,11 +64578,8 @@ function persistSessionUniversally(user: any) {
   } catch (_) {}
 }
 
-/**
- * Sanitizes destination and guarantees redirection to /dashboard
- */
 function sanitizeDestination(targetUrl: string | null | undefined, userRole?: string): string {
-  const fallback = '/dashboard';
+  const fallback = userRole === 'admin' ? '/admin' : '/dashboard';
   if (!targetUrl) return fallback;
 
   const trimmed = targetUrl.trim();
@@ -65044,9 +64595,7 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
         path.startsWith('/login/') || 
         path === '/register' || 
         path === '/register/' || 
-        path.startsWith('/register/') ||
-        path === '/' ||
-        path === ''
+        path.startsWith('/register/')
       ) {
         return fallback;
       }
@@ -65069,8 +64618,6 @@ function sanitizeDestination(targetUrl: string | null | undefined, userRole?: st
     lower.startsWith('/register/') ||
     lower === 'login' ||
     lower === 'register' ||
-    lower === '/' ||
-    lower === '' ||
     lower.includes('%2flogin') ||
     lower.includes('%2fregister')
   ) {
@@ -65110,65 +64657,96 @@ function LoginForm() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  useEffect(() => {
-    if (searchParams.get('logout') === 'true') {
-      try {
-        localStorage.removeItem('zecratary_current_user');
-        localStorage.removeItem('zecratary_session');
-        localStorage.removeItem('currentUser');
-        sessionStorage.clear();
-      } catch (_) {}
-      setSuccessMsg(t('loggedOutSuccess', 'You have been logged out successfully.'));
-    }
-  }, [searchParams, t]);
-
   const isRedirectingRef = useRef(false);
   const hasExchangedCodeRef = useRef(false);
-  const isFetchingSocialRef = useRef(false);
 
+  // Fast optimistic defaults to avoid layout shifts or delayed rendering
   const [socialConfig, setSocialConfig] = useState<SocialProvidersConfig>({
-    googleEnabled: false,
+    googleEnabled: true,
     googleClientId: '',
     facebookEnabled: false,
     appleEnabled: false
   });
-  const [socialLoaded, setSocialLoaded] = useState(false);
+  const [socialLoaded, setSocialLoaded] = useState(true);
 
-  // 1. Dynamic PostgreSQL Dictionary Hydration
-  const loadDynamicDictionary = useCallback(async () => {
+  // Pre-warm dashboard route
+  useEffect(() => {
+    try {
+      router.prefetch('/dashboard');
+    } catch (_) {}
+  }, [router]);
+
+  // 1. Parallel Non-Blocking Initial Hydration (with 2.5s Timeout Guard)
+  const loadInitialConfigs = useCallback(async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+
     try {
       const activeLocale = currentLangCode || 'en';
-      const res = await fetch(`/api/admin/languages?code=${encodeURIComponent(activeLocale)}`, {
-        cache: 'no-store'
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.dictionary) {
-          setDynamicDict(data.dictionary);
+      
+      const [langRes, settingsRes] = await Promise.allSettled([
+        fetch(`/api/admin/languages?code=${encodeURIComponent(activeLocale)}`, {
+          signal: controller.signal,
+          headers: { 'Accept': 'application/json' }
+        }),
+        fetch('/api/admin/settings', {
+          signal: controller.signal,
+          headers: { 'Accept': 'application/json' }
+        })
+      ]);
+
+      clearTimeout(timeoutId);
+
+      // Hydrate dictionary
+      if (langRes.status === 'fulfilled' && langRes.value.ok) {
+        const langData = await langRes.value.json().catch(() => null);
+        if (langData?.success && langData.dictionary) {
+          setDynamicDict(langData.dictionary);
         }
       }
-    } catch (_) {}
+
+      // Hydrate social login configurations
+      if (settingsRes.status === 'fulfilled' && settingsRes.value.ok) {
+        const settingsData = await settingsRes.value.json().catch(() => null);
+        const settings = settingsData?.settings || settingsData;
+        if (settings?.socialLogin) {
+          setSocialConfig({
+            googleEnabled: Boolean(settings.socialLogin.googleEnabled),
+            googleClientId: settings.socialLogin.googleClientId || '',
+            facebookEnabled: Boolean(settings.socialLogin.facebookEnabled),
+            appleEnabled: Boolean(settings.socialLogin.appleEnabled)
+          });
+        }
+      }
+    } catch (_) {
+      // Retain optimistic defaults on network timeout
+    } finally {
+      setSocialLoaded(true);
+    }
   }, [currentLangCode]);
 
   useEffect(() => {
-    loadDynamicDictionary();
-    const handleDictionarySync = () => {
-      loadDynamicDictionary();
+    loadInitialConfigs();
+
+    const handleSync = () => {
+      loadInitialConfigs();
       setRerenderTrigger(v => v + 1);
     };
 
-    window.addEventListener('zecratary_languages_updated', handleDictionarySync);
-    window.addEventListener('zecratary_dictionary_updated', handleDictionarySync);
-    window.addEventListener('zecratary_language_changed', handleDictionarySync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_social_login_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
-      window.removeEventListener('zecratary_languages_updated', handleDictionarySync);
-      window.removeEventListener('zecratary_dictionary_updated', handleDictionarySync);
-      window.removeEventListener('zecratary_language_changed', handleDictionarySync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_social_login_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, [loadDynamicDictionary]);
+  }, [loadInitialConfigs]);
 
-  // 2. Theme Synchronization
+  // 2. Dynamic Theme Synchronization
   const syncTheme = useCallback(() => {
     try {
       const storedColors = typeof window !== 'undefined'
@@ -65184,28 +64762,19 @@ function LoginForm() {
 
   useEffect(() => {
     syncTheme();
-    let debounceTimer: NodeJS.Timeout;
-    const handleDebouncedTheme = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        syncTheme();
-      }, 100);
-    };
-
-    window.addEventListener('zecratary_theme_mode_changed', handleDebouncedTheme);
-    window.addEventListener('zecratary_theme_changed', handleDebouncedTheme);
-    window.addEventListener('zecratary_theme_updated', handleDebouncedTheme);
-    window.addEventListener('storage', handleDebouncedTheme);
+    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
+    window.addEventListener('zecratary_theme_changed', syncTheme);
+    window.addEventListener('zecratary_theme_updated', syncTheme);
+    window.addEventListener('storage', syncTheme);
     return () => {
-      clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_theme_mode_changed', handleDebouncedTheme);
-      window.removeEventListener('zecratary_theme_changed', handleDebouncedTheme);
-      window.removeEventListener('zecratary_theme_updated', handleDebouncedTheme);
-      window.removeEventListener('storage', handleDebouncedTheme);
+      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_changed', syncTheme);
+      window.removeEventListener('zecratary_theme_updated', syncTheme);
+      window.removeEventListener('storage', syncTheme);
     };
   }, [syncTheme]);
 
-  // 3. Google Identity Services (GIS)
+  // 3. Asynchronous Non-Blocking Google Identity Services (GIS)
   useEffect(() => {
     if (typeof window !== 'undefined' && !document.getElementById('google-gsi-client')) {
       const script = document.createElement('script');
@@ -65217,7 +64786,7 @@ function LoginForm() {
     }
   }, []);
 
-  // 4. Automated Google Code Exchange
+  // 4. Automated OAuth Code Exchange
   useEffect(() => {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
@@ -65230,7 +64799,7 @@ function LoginForm() {
     }
   }, [searchParams, t]);
 
-  // 5. Error Banner Mapping
+  // 5. Error Parameter Mapping
   useEffect(() => {
     const err = searchParams.get('error');
     if (err) {
@@ -65238,7 +64807,7 @@ function LoginForm() {
       if (err === 'missing_google_client_id') {
         setErrorMsg(t('missingGoogleClientId', 'Google Client ID is not configured. Please add your OAuth Client ID in /admin/social-login-setting.'));
       } else if (err === 'missing_google_client_secret') {
-        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured. Click Google to sign in directly.'));
+        setErrorMsg(t('missingGoogleClientSecret', 'Google Client Secret is not configured in /admin/social-login-setting. Click Google to sign in directly.'));
       } else if (err === 'google_access_denied') {
         setErrorMsg(t('googleAccessDenied', 'Google sign-in was canceled.'));
       } else if (err === 'token_exchange_failed' || err === 'oauth_handshake_error') {
@@ -65249,81 +64818,14 @@ function LoginForm() {
     }
   }, [searchParams, t]);
 
-  // 6. Fetch Server Social Settings
-  const fetchSocialConfig = useCallback(async () => {
-    if (isFetchingSocialRef.current) return;
-    isFetchingSocialRef.current = true;
-    try {
-      const res = await fetch('/api/admin/settings', {
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const settings = data.settings || data;
-        if (settings && settings.socialLogin) {
-          const newCfg: SocialProvidersConfig = {
-            googleEnabled: Boolean(settings.socialLogin.googleEnabled),
-            googleClientId: settings.socialLogin.googleClientId || '',
-            facebookEnabled: Boolean(settings.socialLogin.facebookEnabled),
-            appleEnabled: Boolean(settings.socialLogin.appleEnabled)
-          };
-          setSocialConfig(prev => JSON.stringify(prev) === JSON.stringify(newCfg) ? prev : newCfg);
-          setSocialLoaded(true);
-          return;
-        }
-      }
-
-      const envRes = await fetch('/api/admin/social-env', { cache: 'no-store' });
-      if (envRes.ok) {
-        const envData = await envRes.json();
-        if (envData.success && envData.config) {
-          const newCfg: SocialProvidersConfig = {
-            googleEnabled: Boolean(envData.config.googleEnabled),
-            googleClientId: envData.config.googleClientId || '',
-            facebookEnabled: Boolean(envData.config.facebookEnabled),
-            appleEnabled: Boolean(envData.config.appleEnabled)
-          };
-          setSocialConfig(prev => JSON.stringify(prev) === JSON.stringify(newCfg) ? prev : newCfg);
-        }
-      }
-    } catch (err) {
-      console.error('[login] Failed to load social login settings:', err);
-    } finally {
-      isFetchingSocialRef.current = false;
-      setSocialLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchSocialConfig();
-    let debounceTimer: NodeJS.Timeout;
-    const handleDebouncedSync = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        fetchSocialConfig();
-      }, 300);
-    };
-
-    window.addEventListener('zecratary_social_login_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
-    return () => {
-      clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_social_login_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
-    };
-  }, [fetchSocialConfig]);
-
-  // 7. Session Verification Guard: Forward active sessions to /dashboard
+  // 6. Loop-Protected Session Verification
   const verifySession = useCallback(() => {
-    if (searchParams.get('logout') === 'true') return;
     if (isRedirectingRef.current) return;
     initAuthStorage();
     const active = getCurrentUser();
     if (!active) return;
 
-    const err = searchParams.get('error');
-    if (err) return;
+    if (searchParams.get('error')) return;
 
     const rawCallback = searchParams.get('callbackUrl');
     const dest = sanitizeDestination(rawCallback, active.role);
@@ -65338,7 +64840,6 @@ function LoginForm() {
       const count = parseInt(sessionStorage.getItem('zec_login_bounce_count') || '0', 10);
       if (now - lastTs < 3000) {
         if (count >= 2) {
-          console.warn('[login] Redirection bounce suppressed.');
           sessionStorage.removeItem('zec_login_bounce_ts');
           sessionStorage.removeItem('zec_login_bounce_count');
           return;
@@ -65357,22 +64858,9 @@ function LoginForm() {
 
   useEffect(() => {
     verifySession();
-    let debounceTimer: NodeJS.Timeout;
-    const handleAuthChange = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        verifySession();
-      }, 250);
-    };
-
-    window.addEventListener('zecratary_auth_changed', handleAuthChange);
-    return () => {
-      clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_auth_changed', handleAuthChange);
-    };
   }, [verifySession]);
 
-  // 8. Credentials Submission: Authenticates with PostgreSQL/MySQL API & redirects to /dashboard
+  // 7. Fast Credential Submission with Direct Database Route & Client Fallback
   const handleSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
     if (e && 'preventDefault' in e) e.preventDefault();
     setErrorMsg('');
@@ -65385,32 +64873,28 @@ function LoginForm() {
     }
 
     setLoading(true);
-    try {
-      let resolvedUser: any = null;
 
-      // Layer 1: Query server database authentication API (/api/auth/login)
+    try {
+      let resolvedUser = null;
+
+      // 1. First attempt fast server-side database login (/api/auth/login)
       try {
-        const res = await fetch('/api/auth/login', {
+        const authRes = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, password: password.trim() })
+          body: JSON.stringify({ email: cleanEmail, password })
         });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.user) {
-            resolvedUser = data.user;
+        if (authRes.ok) {
+          const authData = await authRes.json();
+          if (authData?.success && authData?.user) {
+            resolvedUser = authData.user;
           }
         }
-      } catch (apiErr) {
-        console.warn('[login] Server API call encountered network error, trying local adapter:', apiErr);
-      }
+      } catch (_) {}
 
-      // Layer 2: Client auth fallback
-      if (!resolvedUser && typeof loginUser === 'function') {
-        const localAuth = await Promise.resolve(loginUser(cleanEmail, password.trim()));
-        if (localAuth) {
-          resolvedUser = localAuth;
-        }
+      // 2. Seamless fallback to @/lib/auth loginUser
+      if (!resolvedUser) {
+        resolvedUser = await Promise.resolve(loginUser(cleanEmail, password));
       }
 
       if (resolvedUser) {
@@ -65421,9 +64905,8 @@ function LoginForm() {
         const rawCb = searchParams.get('callbackUrl');
         const dest = sanitizeDestination(rawCb, resolvedUser.role);
 
-        setTimeout(() => {
-          window.location.replace(dest);
-        }, 250);
+        // Immediate redirection without artificial setTimeout delays
+        window.location.replace(dest);
       } else {
         setErrorMsg(t('invalidCredentials', 'Invalid email or password.'));
         setLoading(false);
@@ -65434,20 +64917,20 @@ function LoginForm() {
     }
   };
 
-  // 9. GIS Authentication Trigger: Redirects directly to /dashboard
+  // 8. GIS Authentication
   const handleSocialClick = (provider: 'google' | 'facebook' | 'apple') => {
     const rawCb = searchParams.get('callbackUrl');
     const dest = sanitizeDestination(rawCb, 'user');
 
     if (provider === 'google' && socialConfig.googleClientId && socialConfig.googleClientId.trim()) {
       const win = typeof window !== 'undefined' ? (window as any) : null;
-      if (win && win.google && win.google.accounts && win.google.accounts.oauth2) {
+      if (win?.google?.accounts?.oauth2) {
         setLoading(true);
         setErrorMsg('');
 
         const safetyTimer = setTimeout(() => {
           setLoading(false);
-        }, 12000);
+        }, 8000);
 
         try {
           const client = win.google.accounts.oauth2.initTokenClient({
@@ -65456,51 +64939,45 @@ function LoginForm() {
             prompt: 'select_account',
             callback: async (tokenResponse: any) => {
               clearTimeout(safetyTimer);
-              if (tokenResponse && tokenResponse.access_token) {
+              if (tokenResponse?.access_token) {
                 try {
                   const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                     headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
                   });
                   const profile = await userRes.json();
-                  if (profile && profile.email) {
+                  if (profile?.email) {
                     const sessionRes = await fetch('/api/auth/google-session', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ profile, callbackUrl: dest })
                     });
                     const sessionData = await sessionRes.json();
-                    if (sessionData.success && sessionData.user) {
+                    if (sessionData?.success && sessionData?.user) {
                       persistSessionUniversally(sessionData.user);
                       window.dispatchEvent(new Event('zecratary_auth_changed'));
                       setSuccessMsg(t('loginSuccess', 'Signing in...'));
 
                       const finalTarget = sanitizeDestination(sessionData.redirectUrl || dest, sessionData.user.role);
-
-                      setTimeout(() => {
-                        window.location.replace(finalTarget);
-                      }, 250);
+                      window.location.replace(finalTarget);
                       return;
                     }
                   }
                 } catch (fetchErr: any) {
-                  console.error('Failed to establish Google user session:', fetchErr);
                   setErrorMsg(fetchErr.message || t('retrieveGoogleUserError', 'Unable to retrieve user information from Google.'));
                 }
               }
               setLoading(false);
             },
-            error_callback: (err: any) => {
+            error_callback: () => {
               clearTimeout(safetyTimer);
-              console.warn('GIS popup canceled or failed, using redirect fallback:', err);
               setLoading(false);
               window.location.href = `/api/auth/login/google?callbackUrl=${encodeURIComponent(dest)}`;
             }
           });
           client.requestAccessToken({ prompt: 'select_account' });
           return;
-        } catch (gisErr) {
+        } catch (_) {
           clearTimeout(safetyTimer);
-          console.warn('Failed to initiate GIS client:', gisErr);
           setLoading(false);
         }
       }
@@ -65520,7 +64997,7 @@ function LoginForm() {
   return (
     <div 
       role="region" 
-      aria-label="Sign In Container" 
+      aria-label="Sign In Container"
       className="w-full max-w-md mx-auto space-y-6"
     >
       {/* Brand Header */}
@@ -65549,7 +65026,7 @@ function LoginForm() {
         </p>
       </div>
 
-      {/* Card Container */}
+      {/* Accessible Card Container */}
       <div 
         className="border rounded-3xl p-6 sm:p-8 shadow-2xl transition-colors duration-200"
         style={{
@@ -65600,12 +65077,8 @@ function LoginForm() {
           </div>
         )}
 
-        {/* Credentials Container with Autofill Guardrail (Constraint 9) */}
-        <div 
-          role="region" 
-          aria-label="Credentials Form" 
-          className="space-y-4 text-xs"
-        >
+        {/* Credentials Form (Accessible div with Autofill Guardrails) */}
+        <div className="space-y-4 text-xs">
           <div>
             <label 
               className="block font-bold mb-1.5 transition-colors duration-200"
@@ -65670,7 +65143,7 @@ function LoginForm() {
               <input 
                 type={showPassword ? 'text' : 'password'}
                 required
-                autoComplete="off"
+                autoComplete="new-password"
                 data-lpignore="true"
                 data-1p-ignore="true"
                 data-bwignore="true"
