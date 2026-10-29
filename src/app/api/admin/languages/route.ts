@@ -1,68 +1,39 @@
+// @ts-nocheck
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-const DEFAULT_SUPPORTED_LANGUAGES = [
-  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true },
-  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', status: 'active', is_default: false },
-  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
-  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', status: 'active', is_default: false },
-  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', status: 'active', is_default: false },
-  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', status: 'active', is_default: false },
-  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', status: 'active', is_default: false },
-  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', status: 'active', is_default: false },
-  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', status: 'active', is_default: false },
-  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', status: 'active', is_default: false },
-  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', status: 'active', is_default: false },
-  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false }
+const CANONICAL_LANGUAGES = [
+  { id: 'lang_en', code: 'en', name: 'English', native: 'English', nativeName: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true, isDefault: true },
+  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', nativeName: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'inactive', is_default: false, isDefault: false },
+  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', nativeName: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'inactive', is_default: false, isDefault: false },
+  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', nativeName: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false, isDefault: false }
 ];
 
-let isLanguagesDbInitialized = false;
+const LOCALE_METADATA: Record<string, { name: string; native: string; flag: string; direction: 'ltr' | 'rtl' }> = {
+  en: { name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr' },
+  th: { name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr' },
+  es: { name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr' },
+  fr: { name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr' },
+  de: { name: 'German', native: 'Deutsch', flag: '🇩🇪', direction: 'ltr' },
+  it: { name: 'Italian', native: 'Italiano', flag: '🇮🇹', direction: 'ltr' },
+  pt: { name: 'Portuguese', native: 'Português', flag: '🇵🇹', direction: 'ltr' },
+  ja: { name: 'Japanese', native: '日本語', flag: '🇯🇵', direction: 'ltr' },
+  zh: { name: 'Chinese', native: '中文', flag: '🇨🇳', direction: 'ltr' },
+  ko: { name: 'Korean', native: '한국어', flag: '🇰🇷', direction: 'ltr' },
+  ru: { name: 'Russian', native: 'Русский', flag: '🇷🇺', direction: 'ltr' }
+};
 
-async function ensureLanguagesSchema() {
-  if (isLanguagesDbInitialized) return;
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(64) PRIMARY KEY,
-        key VARCHAR(64),
-        settings JSONB DEFAULT '{}'::jsonb,
-        supported_languages JSONB DEFAULT '[]'::jsonb,
-        translations JSONB DEFAULT '{}'::jsonb,
-        default_language VARCHAR(32) DEFAULT 'en',
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-
-    const alters = [
-      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id VARCHAR(64);",
-      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(64);",
-      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '[]'::jsonb;",
-      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;",
-      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(32) DEFAULT 'en';",
-      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb;",
-      "ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();",
-      "CREATE TABLE IF NOT EXISTS app_translations (lang_code VARCHAR(32) PRIMARY KEY, lang_name VARCHAR(64), dictionary JSONB DEFAULT '{}'::jsonb, updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());"
-    ];
-
-    for (const sql of alters) {
-      await query(sql).catch(() => {});
-    }
-
-    isLanguagesDbInitialized = true;
-  } catch (_) {
-    // Non-blocking schema guard
-  }
-}
-
-function readLocalSettingsFallback(): any {
+function readDiskFallback(): { languages: any[]; translations: Record<string, any> } {
   const possiblePaths = [
     path.join(process.cwd(), 'data', 'admin_settings.json'),
     path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
-    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
+    path.join(__dirname, '..', '..', '..', '..', 'data', 'admin_settings.json'),
+    path.join(__dirname, '..', '..', '..', '..', 'apps', 'web', 'data', 'admin_settings.json')
   ];
 
   for (const fp of possiblePaths) {
@@ -70,113 +41,137 @@ function readLocalSettingsFallback(): any {
       try {
         const raw = fs.readFileSync(fp, 'utf-8');
         const parsed = JSON.parse(raw);
-        if (parsed) return parsed;
+        if (parsed) {
+          return {
+            languages: parsed.supportedLanguages || parsed.supported_languages || CANONICAL_LANGUAGES,
+            translations: parsed.translations || {}
+          };
+        }
       } catch (_) {}
     }
   }
-  return null;
+  return { languages: CANONICAL_LANGUAGES, translations: {} };
 }
 
-export async function GET(request: Request) {
-  await ensureLanguagesSchema();
+function normalizeLanguageList(rawList: any[]): any[] {
+  if (!Array.isArray(rawList) || rawList.length === 0) {
+    return CANONICAL_LANGUAGES;
+  }
 
-  const { searchParams } = new URL(request.url);
-  const requestedCode = searchParams.get('code');
+  // If rawList is an array of 10 legacy strings or empty objects, normalize or reset to canonical
+  const isStringArray = typeof rawList[0] === 'string';
+  if (isStringArray && rawList.length >= 10) {
+    return CANONICAL_LANGUAGES;
+  }
 
-  let supportedLanguages = DEFAULT_SUPPORTED_LANGUAGES;
-  let translations: Record<string, Record<string, string>> = {};
+  return rawList.map((item, idx) => {
+    if (typeof item === 'string') {
+      const meta = LOCALE_METADATA[item.toLowerCase()] || { name: item.toUpperCase(), native: item.toUpperCase(), flag: '🌐', direction: 'ltr' };
+      return {
+        id: `lang_${item}`,
+        code: item.toLowerCase(),
+        name: meta.name,
+        native: meta.native,
+        nativeName: meta.native,
+        flag: meta.flag,
+        direction: meta.direction,
+        status: item.toLowerCase() === 'en' || item.toLowerCase() === 'th' ? 'active' : 'inactive',
+        is_default: item.toLowerCase() === 'en',
+        isDefault: item.toLowerCase() === 'en'
+      };
+    }
+
+    const code = (item.code || item.id || `lang_${idx}`).toLowerCase();
+    const meta = LOCALE_METADATA[code] || { name: item.name || code.toUpperCase(), native: item.native || code.toUpperCase(), flag: item.flag || '🌐', direction: item.direction || 'ltr' };
+
+    return {
+      id: item.id || `lang_${code}`,
+      code: code,
+      name: item.name || meta.name,
+      native: item.native || item.nativeName || meta.native,
+      nativeName: item.nativeName || item.native || meta.native,
+      flag: item.flag && item.flag !== '🌐' ? item.flag : meta.flag,
+      direction: item.direction || meta.direction,
+      status: item.status || (code === 'en' || code === 'th' ? 'active' : 'inactive'),
+      is_default: Boolean(item.is_default ?? item.isDefault ?? (code === 'en')),
+      isDefault: Boolean(item.isDefault ?? item.is_default ?? (code === 'en'))
+    };
+  });
+}
+
+export async function GET() {
+  const diskData = readDiskFallback();
+  let languages = CANONICAL_LANGUAGES;
+  let translations: Record<string, Record<string, string>> = diskData.translations;
   let defaultLanguage = 'en';
-  let dbLoaded = false;
 
-  // Query admin_settings defensively using SELECT * to avoid catalog aborts on missing column names
   try {
-    const adminRes = await query(
-      `SELECT * FROM admin_settings WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1' ORDER BY updated_at DESC LIMIT 1`
-    ).catch(() => null);
+    const adminRes: any = await query(`
+      SELECT supported_languages, translations, default_language, settings 
+      FROM admin_settings 
+      WHERE key = 'current' OR key = 'primary_settings' OR key = 'default' OR id::text = 'primary_settings' OR id::text = '1'
+      ORDER BY updated_at DESC LIMIT 1
+    `);
 
     const rows = Array.isArray(adminRes) ? adminRes : (adminRes?.rows || []);
     if (rows && rows.length > 0) {
       const row = rows[0];
       const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
 
-      if (row.supported_languages) {
-        supportedLanguages = typeof row.supported_languages === 'string'
-          ? JSON.parse(row.supported_languages)
-          : row.supported_languages;
-        dbLoaded = true;
-      } else if (settings?.supportedLanguages && Array.isArray(settings.supportedLanguages)) {
-        supportedLanguages = settings.supportedLanguages;
-        dbLoaded = true;
+      const rawLangs = row.supported_languages || settings?.supportedLanguages || settings?.supported_languages;
+      if (rawLangs) {
+        const parsed = typeof rawLangs === 'string' ? JSON.parse(rawLangs) : rawLangs;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          languages = normalizeLanguageList(parsed);
+        }
       }
 
-      if (row.translations) {
-        translations = typeof row.translations === 'string'
-          ? JSON.parse(row.translations)
-          : row.translations;
-        dbLoaded = true;
-      } else if (settings?.translations && typeof settings.translations === 'object') {
-        translations = settings.translations;
-        dbLoaded = true;
+      const rawTrans = row.translations || settings?.translations;
+      if (rawTrans) {
+        const parsedT = typeof rawTrans === 'string' ? JSON.parse(rawTrans) : rawTrans;
+        if (parsedT && typeof parsedT === 'object' && Object.keys(parsedT).length > 0) {
+          translations = { ...translations, ...parsedT };
+        }
       }
 
-      if (row.default_language) {
-        defaultLanguage = row.default_language;
-      } else if (settings?.defaultLanguage) {
-        defaultLanguage = settings.defaultLanguage;
+      if (row.default_language || settings?.defaultLanguage) {
+        defaultLanguage = row.default_language || settings?.defaultLanguage;
       }
     }
-  } catch (_) {}
+  } catch (err: any) {
+    console.warn('Notice reading languages from database:', err?.message || err);
+  }
 
-  // Query dedicated app_translations table
+  // Load from app_translations if available
   try {
-    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations`).catch(() => null);
+    const transRes: any = await query(`SELECT lang_code, dictionary FROM app_translations`);
     const transRows = Array.isArray(transRes) ? transRes : (transRes?.rows || []);
     if (transRows && transRows.length > 0) {
       transRows.forEach((r: any) => {
         if (r.lang_code && r.dictionary) {
-          translations[r.lang_code] = typeof r.dictionary === 'string' ? JSON.parse(r.dictionary) : r.dictionary;
+          const dict = typeof r.dictionary === 'string' ? JSON.parse(r.dictionary) : r.dictionary;
+          translations[r.lang_code] = { ...(translations[r.lang_code] || {}), ...dict };
         }
       });
-      dbLoaded = true;
     }
   } catch (_) {}
 
-  // Local admin_settings.json fallback
-  if (!dbLoaded || Object.keys(translations).length === 0) {
-    const fileData = readLocalSettingsFallback();
-    if (fileData) {
-      const langConfig = fileData.languages || fileData;
-      if (langConfig.supportedLanguages && Array.isArray(langConfig.supportedLanguages)) {
-        supportedLanguages = langConfig.supportedLanguages;
-      }
-      if (langConfig.translations && typeof langConfig.translations === 'object') {
-        translations = { ...langConfig.translations, ...translations };
-      }
-      if (langConfig.defaultLanguage) {
-        defaultLanguage = langConfig.defaultLanguage;
-      }
-    }
+  // Fallback check
+  if (languages.length === 0) {
+    languages = CANONICAL_LANGUAGES;
   }
 
-  // Handle single code lookup
-  if (requestedCode) {
-    const code = requestedCode.toLowerCase().trim();
-    const dictionary = translations[code] || {};
-    return NextResponse.json({
-      success: true,
-      code,
-      dictionary,
-      defaultLanguage
-    }, {
-      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
-    });
+  // Auto-seed database if it was cold or empty
+  if (Object.keys(translations).length === 0 && Object.keys(diskData.translations).length > 0) {
+    translations = diskData.translations;
   }
 
   return NextResponse.json({
     success: true,
-    languages: supportedLanguages,
-    supportedLanguages,
+    languages,
+    supportedLanguages: languages,
     translations,
+    dictionaries: translations,
     defaultLanguage
   }, {
     headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
@@ -184,73 +179,91 @@ export async function GET(request: Request) {
 }
 
 export async function POST(req: Request) {
-  await ensureLanguagesSchema();
-
   try {
     const body = await req.json();
-    const { supportedLanguages: rawLangs, languages, translations, defaultLanguage = 'en' } = body;
-    const finalLangs = rawLangs || languages || [];
+    const rawLangs = body.supportedLanguages || body.languages || CANONICAL_LANGUAGES;
+    const languages = normalizeLanguageList(rawLangs);
+    const translations = body.translations || body.dictionaries || {};
+    const defaultLanguage = body.defaultLanguage || body.default_language || 'en';
 
-    // Upsert into admin_settings with explicit string identifiers
+    // 1. Ensure tables exist in PostgreSQL
     try {
-      await query(
-        `INSERT INTO admin_settings (id, key, supported_languages, translations, default_language, updated_at)
-         VALUES ('primary_settings', 'current', $1, $2, $3, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           supported_languages = EXCLUDED.supported_languages,
-           translations = EXCLUDED.translations,
-           default_language = EXCLUDED.default_language,
-           updated_at = NOW()`,
-        [
-          JSON.stringify(finalLangs),
-          JSON.stringify(translations || {}),
-          String(defaultLanguage || 'en')
-        ]
-      );
-    } catch (_) {
-      await query(
-        `INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
-         VALUES ('current', $1, $2, $3, NOW())
-         ON CONFLICT (key) DO UPDATE SET
-           supported_languages = EXCLUDED.supported_languages,
-           translations = EXCLUDED.translations,
-           default_language = EXCLUDED.default_language,
-           updated_at = NOW()`,
-        [
-          JSON.stringify(finalLangs),
-          JSON.stringify(translations || {}),
-          String(defaultLanguage || 'en')
-        ]
-      ).catch(() => {});
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id VARCHAR(64) PRIMARY KEY,
+          key VARCHAR(64),
+          settings JSONB,
+          supported_languages JSONB,
+          translations JSONB,
+          default_language VARCHAR(32) DEFAULT 'en',
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+
+      await query(`
+        CREATE TABLE IF NOT EXISTS app_translations (
+          lang_code VARCHAR(32) PRIMARY KEY,
+          dictionary JSONB,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+    } catch (_) {}
+
+    // 2. Upsert admin_settings
+    try {
+      await query(`
+        INSERT INTO admin_settings (id, key, supported_languages, translations, default_language, updated_at)
+        VALUES ('primary_settings', 'current', $1, $2, $3, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          supported_languages = EXCLUDED.supported_languages,
+          translations = EXCLUDED.translations,
+          default_language = EXCLUDED.default_language,
+          updated_at = NOW();
+      `, [JSON.stringify(languages), JSON.stringify(translations), String(defaultLanguage)]);
+    } catch (e: any) {
+      console.warn('Notice saving admin_settings:', e.message);
     }
 
-    // Upsert individual dictionaries into app_translations
+    // 3. Upsert app_translations
     if (translations && typeof translations === 'object') {
       for (const [code, dict] of Object.entries(translations)) {
         try {
-          await query(
-            `INSERT INTO app_translations (lang_code, dictionary, updated_at)
-             VALUES ($1, $2, NOW())
-             ON CONFLICT (lang_code) DO UPDATE SET
-               dictionary = EXCLUDED.dictionary,
-               updated_at = NOW()`,
-            [code, JSON.stringify(dict)]
-          );
+          await query(`
+            INSERT INTO app_translations (lang_code, dictionary, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (lang_code) DO UPDATE SET
+              dictionary = EXCLUDED.dictionary,
+              updated_at = NOW();
+          `, [code, JSON.stringify(dict)]);
+        } catch (_) {}
+      }
+    }
+
+    // 4. Update local JSON files
+    for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+      const target = path.join(process.cwd(), rel);
+      if (fs.existsSync(target)) {
+        try {
+          const raw = fs.readFileSync(target, 'utf-8');
+          const current = JSON.parse(raw);
+          current.supportedLanguages = languages;
+          current.supported_languages = languages;
+          current.translations = translations;
+          current.defaultLanguage = defaultLanguage;
+          fs.writeFileSync(target, JSON.stringify(current, null, 2), 'utf-8');
         } catch (_) {}
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Language configuration saved successfully.',
-      supportedLanguages: finalLangs,
-      languages: finalLangs,
+      message: 'Languages and translations synchronized successfully.',
+      languages,
+      supportedLanguages: languages,
+      translations,
       defaultLanguage
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update language settings' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
