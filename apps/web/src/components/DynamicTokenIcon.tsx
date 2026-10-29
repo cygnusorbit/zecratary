@@ -7,6 +7,7 @@ import { Coins, Sparkles, Zap } from 'lucide-react';
 export function TokenEmojiLoader({ size = 14, className = "" }: { size?: number; className?: string }) {
   return (
     <span 
+      suppressHydrationWarning
       className={`inline-flex items-center justify-center shrink-0 align-middle ${className}`}
       style={{ width: `${size}px`, height: `${size}px` }}
       title="Loading token emoji..."
@@ -36,43 +37,24 @@ export function DynamicTokenIcon({
   className = '', 
   style = {} 
 }: DynamicTokenIconProps) {
-  const [activeSymbol, setActiveSymbol] = useState<string>(() => {
-    if (symbol) return symbol;
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('zecratary_token_symbol') || '';
-    }
-    return '';
-  });
-
-  const [isLoading, setIsLoading] = useState<boolean>(() => {
-    if (loading) return true;
-    if (symbol) return false;
-    if (typeof window !== 'undefined') {
-      return !localStorage.getItem('zecratary_token_symbol');
-    }
-    return true;
-  });
+  const [mounted, setMounted] = useState<boolean>(false);
+  const [activeSymbol, setActiveSymbol] = useState<string>(() => symbol || '');
 
   useEffect(() => {
+    setMounted(true);
+
     if (symbol) {
       setActiveSymbol(symbol);
-      setIsLoading(false);
       return;
     }
 
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('zecratary_token_symbol');
-      if (stored) {
-        setActiveSymbol(stored);
-        setIsLoading(false);
-      }
+      if (stored) setActiveSymbol(stored);
 
       const handleSettingsUpdate = (e: any) => {
         const sym = e?.detail?.tokenSymbol || e?.detail?.settings?.tokenSymbol || localStorage.getItem('zecratary_token_symbol');
-        if (sym) {
-          setActiveSymbol(sym);
-          setIsLoading(false);
-        }
+        if (sym) setActiveSymbol(sym);
       };
 
       let balanceBc: BroadcastChannel | null = null;
@@ -81,10 +63,7 @@ export function DynamicTokenIcon({
         balanceBc.onmessage = (event) => {
           if (event?.data?.tokenSymbol || event?.data?.settings?.tokenSymbol) {
             const sym = event.data.tokenSymbol || event.data.settings?.tokenSymbol;
-            if (sym) {
-              setActiveSymbol(sym);
-              setIsLoading(false);
-            }
+            if (sym) setActiveSymbol(sym);
           }
         };
       } catch (_) {}
@@ -100,14 +79,15 @@ export function DynamicTokenIcon({
     }
   }, [symbol]);
 
-  // If explicitly loading or symbol has not yet resolved, show loader animation
-  if (loading || isLoading || (!activeSymbol && !icon)) {
+  const targetSymbol = symbol || (mounted ? activeSymbol : '');
+
+  if (loading || (!targetSymbol && !icon)) {
     return <TokenEmojiLoader size={size} className={className} />;
   }
 
   const targetImage = (icon && (icon.startsWith('http') || icon.startsWith('/') || icon.startsWith('data:image'))) 
     ? icon 
-    : (activeSymbol && (activeSymbol.startsWith('http') || activeSymbol.startsWith('/') || activeSymbol.startsWith('data:image')) ? activeSymbol : null);
+    : (targetSymbol && (targetSymbol.startsWith('http') || targetSymbol.startsWith('/') || targetSymbol.startsWith('data:image')) ? targetSymbol : null);
 
   if (targetImage) {
     return (
@@ -120,7 +100,7 @@ export function DynamicTokenIcon({
     );
   }
 
-  const lower = activeSymbol.toLowerCase();
+  const lower = targetSymbol.toLowerCase();
   if (lower === 'coins' || lower === 'coin') {
     return <Coins style={{ width: `${size}px`, height: `${size}px`, ...style }} className={`shrink-0 ${className}`} />;
   }
@@ -131,13 +111,13 @@ export function DynamicTokenIcon({
     return <Zap style={{ width: `${size}px`, height: `${size}px`, ...style }} className={`shrink-0 ${className}`} />;
   }
 
-  // Unicode emoji glyph
   return (
     <span 
+      suppressHydrationWarning
       style={{ fontSize: `${size}px`, lineHeight: 1, ...style }} 
       className={`inline-flex items-center justify-center select-none shrink-0 ${className}`}
     >
-      {activeSymbol}
+      {targetSymbol}
     </span>
   );
 }

@@ -7,7 +7,6 @@ import { applyThemeToDocument, fetchAndApplyServerTheme, applyGlobalFont } from 
 export default function GlobalThemeSync() {
   const isInserted = useRef(false);
 
-  // Injects the pre-hydration theme script on the server into the HTML stream outside the React tree
   useServerInsertedHTML(() => {
     if (isInserted.current) return null;
     isInserted.current = true;
@@ -70,7 +69,6 @@ export default function GlobalThemeSync() {
   });
 
   useEffect(() => {
-    // Remove the preloading class to enable smooth runtime transitions
     if (typeof document !== 'undefined') {
       document.documentElement.classList.remove('theme-preloading');
     }

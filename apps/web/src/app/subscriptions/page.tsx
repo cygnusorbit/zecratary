@@ -132,25 +132,12 @@ export default function SubscriptionsPage() {
   const [currencyCode, setCurrencyCode] = useState<string>('USD');
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
 
-  // Dynamic Token Identity with NO default hardcoded emoji (replaces default emoji with loader animation)
-  const [tokenIdentity, setTokenIdentity] = useState<{ tokenName: string; tokenSymbol: string }>(() => {
-    if (typeof window !== 'undefined') {
-      const storedSym = localStorage.getItem('zecratary_token_symbol');
-      const storedName = localStorage.getItem('zecratary_token_name');
-      return {
-        tokenName: storedName || '',
-        tokenSymbol: storedSym || ''
-      };
-    }
-    return { tokenName: '', tokenSymbol: '' };
+  // SSR-deterministic initial state (zero-flash, prevents hydration mismatch)
+  const [tokenIdentity, setTokenIdentity] = useState<{ tokenName: string; tokenSymbol: string }>({ 
+    tokenName: '', 
+    tokenSymbol: '' 
   });
-
-  const [isTokenEmojiLoading, setIsTokenEmojiLoading] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return !localStorage.getItem('zecratary_token_symbol');
-    }
-    return true;
-  });
+  const [isTokenEmojiLoading, setIsTokenEmojiLoading] = useState<boolean>(true);
 
   // Dynamic Gateway and Wallet Configuration (Synced with /admin/payment-gateway & /admin/wallet-settings)
   const [gatewayConfig, setGatewayConfig] = useState<any>({
@@ -310,7 +297,6 @@ export default function SubscriptionsPage() {
     };
   };
 
-  // Authoritative token settings synchronization with /admin/token-setting
   const fetchTokenSetting = useCallback(async () => {
     if (typeof window !== 'undefined') {
       const cachedSym = localStorage.getItem('zecratary_token_symbol');
@@ -325,7 +311,6 @@ export default function SubscriptionsPage() {
     }
 
     try {
-      // 1. Check /api/admin/token-setting
       const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
@@ -346,7 +331,6 @@ export default function SubscriptionsPage() {
         }
       }
 
-      // 2. Check /api/admin/token-settings
       const altAdmin = await fetch('/api/admin/token-settings?t=' + Date.now(), { cache: 'no-store' });
       if (altAdmin.ok) {
         const aData = await altAdmin.json();
@@ -367,7 +351,6 @@ export default function SubscriptionsPage() {
         }
       }
 
-      // 3. Fallback to /api/tokens
       const altRes = await fetch('/api/tokens?t=' + Date.now(), { cache: 'no-store' });
       if (altRes.ok) {
         const altData = await altRes.json();
@@ -389,7 +372,6 @@ export default function SubscriptionsPage() {
     } catch (_) {}
   }, []);
 
-  // Fetch plans, user billing info, and balances directly from PostgreSQL/MySQL
   const fetchSubscriptionData = useCallback(async (activeUser: User | null) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -399,7 +381,6 @@ export default function SubscriptionsPage() {
     const targetEmail = activeUser?.email || 'admin@zecratary.com';
 
     try {
-      // 1. Ingest Currency & Gateway Settings
       let activeCur = 'USD';
       if (typeof window !== 'undefined') {
         activeCur = localStorage.getItem('zecratary_currency') || 'USD';
@@ -436,10 +417,8 @@ export default function SubscriptionsPage() {
       setCurrencyCode(activeCur.toUpperCase());
       setCurrencySymbol(CURRENCY_SYMBOLS[activeCur.toUpperCase()] || '$');
 
-      // 2. Authoritative Token Settings Ingestion
       await fetchTokenSetting();
 
-      // 3. User Billing Details & Transactions Ingestion
       try {
         const bRes = await fetch(`/api/billing?email=${encodeURIComponent(targetEmail)}&userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
         if (bRes.ok) {
@@ -494,7 +473,6 @@ export default function SubscriptionsPage() {
               }
             }
 
-            // Only synchronize tokenIdentity if the endpoint actually retrieved a non-empty symbol
             if (bData.tokenIdentity && bData.tokenIdentity.tokenSymbol) {
               setTokenIdentity({
                 tokenName: bData.tokenIdentity.tokenName || 'Tokens',
@@ -506,7 +484,6 @@ export default function SubscriptionsPage() {
         }
       } catch (_) {}
 
-      // 4. Ingest Plans strictly from /api/admin/plans (Authoritative source - NO DEFAULT_PLANS)
       let fetchedPlansList: any[] = [];
       try {
         const pRes = await fetch(`/api/admin/plans?t=${Date.now()}`, { cache: 'no-store' });
@@ -960,7 +937,7 @@ export default function SubscriptionsPage() {
           </div>
         )}
 
-        {/* 1. Header Bar (Clean bar: token link removed) */}
+        {/* 1. Header Bar (Clean bar: token button removed next to refresh) */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
           <div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-3">
