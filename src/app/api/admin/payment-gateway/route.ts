@@ -3,6 +3,19 @@ import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+
 function normalizeBool(val: any, fallback = false): boolean {
   if (val === undefined || val === null) return fallback;
   if (typeof val === 'boolean') return val;
@@ -94,7 +107,7 @@ async function savePaymentSettingsDual(ps: any, currency = 'USD') {
       // 3. Fallback conditional update
       try {
         const row = await query(`SELECT id FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const exists = Array.isArray(row) ? row.length > 0 : Boolean(row?.rows?.length);
+        const exists = Array.isArray(row) ? row.length > 0 : Boolean(((row as any)?.rows)?.length);
         if (exists) {
           await query(`UPDATE admin_settings SET payment_settings = $1, currency = $2 WHERE id = 1`, [jsonSettings, currency]).catch(async () => {
             await query(`UPDATE admin_settings SET payment_settings = ?, currency = ? WHERE id = 1`, [jsonSettings, currency]);
@@ -170,7 +183,7 @@ export async function GET() {
 
     // Load from database row id = 1
     const sRes = await query(`SELECT * FROM admin_settings WHERE id = 1 LIMIT 1`).catch(() => null);
-    const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    const row = parseDbRow(sRes);
     if (row) {
       if (row.payment_settings) {
         const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
@@ -206,7 +219,7 @@ export async function GET() {
     }
 
     const tRes = await query(`SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 100`).catch(() => []);
-    const transactions = Array.isArray(tRes) ? tRes : (tRes?.rows || []);
+    const transactions = parseDbRows(tRes);
 
     return NextResponse.json({
       success: true,

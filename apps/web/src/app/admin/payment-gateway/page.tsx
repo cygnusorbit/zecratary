@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
-export function normalizeBool(val: any, fallback = false): boolean {
+function normalizeBool(val: any, fallback = false): boolean {
   if (val === undefined || val === null) return fallback;
   if (typeof val === 'boolean') return val;
   if (typeof val === 'number') return val === 1;

@@ -152,7 +152,7 @@ export async function DELETE(req: NextRequest) {
       success: true,
       message: `Successfully deleted ${result.deletedCount} transaction record(s). User token balance(s) updated in PostgreSQL.`,
       deletedCount: result.deletedCount,
-      affectedUsers: result.affectedUsers
+      affectedUsers: (result as any)?.affectedUsers
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

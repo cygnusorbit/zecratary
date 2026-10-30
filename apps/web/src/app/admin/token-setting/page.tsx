@@ -14,7 +14,9 @@ export interface TokenPackage {
   id: string;
   name: string;
   tokenAmount: number;
+  tokens?: number;
   priceDollars: number;
+  price?: number;
   badge?: string;
   bonusTokens?: number;
   isPopular?: boolean;
@@ -38,6 +40,7 @@ export interface TokenSettings {
   importTextCost: number;
   importPhotoCost: number;
   aiChefCost: number;
+  chefCost?: number;
   mealPlannerCost: number;
   macroAnalysisCost: number;
   planAllocations: Record<string, number>;
@@ -55,9 +58,9 @@ export interface TokenTransactionRecord {
 }
 
 const DEFAULT_TOKEN_PACKAGES: TokenPackage[] = [
-  { id: 'pkg_starter', name: 'Starter Spark', tokenAmount: 250, priceDollars: 4.99, badge: 'Popular', bonusTokens: 0, isPopular: true },
-  { id: 'pkg_chef', name: 'Culinary Master', tokenAmount: 1000, priceDollars: 14.99, badge: 'Best Value', bonusTokens: 150, isPopular: false },
-  { id: 'pkg_executive', name: 'Kitchen Enterprise', tokenAmount: 5000, priceDollars: 49.99, badge: 'VIP', bonusTokens: 1000, isPopular: false }
+  { id: 'pkg_starter', name: 'Starter Spark', tokenAmount: 250, tokens: 250, priceDollars: 4.99, price: 4.99, badge: 'Popular', bonusTokens: 0, isPopular: true },
+  { id: 'pkg_chef', name: 'Culinary Master', tokenAmount: 1000, tokens: 1000, priceDollars: 14.99, price: 14.99, badge: 'Best Value', bonusTokens: 150, isPopular: false },
+  { id: 'pkg_executive', name: 'Kitchen Enterprise', tokenAmount: 5000, tokens: 5000, priceDollars: 49.99, price: 49.99, badge: 'VIP', bonusTokens: 1000, isPopular: false }
 ];
 
 const DEFAULT_SETTINGS: TokenSettings = {
@@ -69,6 +72,7 @@ const DEFAULT_SETTINGS: TokenSettings = {
   importTextCost: 2,
   importPhotoCost: 10,
   aiChefCost: 2,
+  chefCost: 2,
   mealPlannerCost: 5,
   macroAnalysisCost: 3,
   planAllocations: {
@@ -79,26 +83,15 @@ const DEFAULT_SETTINGS: TokenSettings = {
   packages: DEFAULT_TOKEN_PACKAGES
 };
 
-
-/**
- * Dynamically synchronizes any token emoji/symbol in transaction descriptions
- * with the active token symbol from /admin/token-setting.
- */
 function formatLedgerDescription(desc: string | undefined | null, symbol: string): string {
   if (!desc) return '—';
   const cleanSym = symbol && !symbol.startsWith('http') && !symbol.startsWith('/') ? symbol.trim() : '🪙';
   
-  // 1. If description has (+100 🪙) or (+100 <any_old_symbol>), replace the old symbol with cleanSym
   let formatted = desc.replace(/(\([+-]?[\d,]+(?:\.\d+)?\s*)([^\w\s\)]+)(\))/g, `$1${cleanSym}$3`);
-  
-  // 2. If description has (+2,000) with numbers only, inject cleanSym: (+2,000 💎)
   formatted = formatted.replace(/(\([+-]?[\d,]+(?:\.\d+)?\))(?!\s*[^\w\s\)])/g, (match) => {
     return match.slice(0, -1) + ` ${cleanSym})`;
   });
-
-  // 3. Replace any standalone 🪙
   formatted = formatted.replace(/🪙/g, cleanSym);
-
   return formatted;
 }
 
@@ -131,7 +124,7 @@ export default function AdminTokenSettingPage() {
   const [pkgBadge, setPkgBadge] = useState('Hot');
   const [pkgBonus, setPkgBonus] = useState<number>(50);
 
-  // Ledger filter & pagination state (Default: 10 per page)
+  // Ledger filter & pagination state
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [ledgerFilterType, setLedgerFilterType] = useState('all');
   const [ledgerPage, setLedgerPage] = useState<number>(1);
@@ -145,14 +138,16 @@ export default function AdminTokenSettingPage() {
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  // Fetch Token Settings, Plans and Audit Ledger
   const loadTokenData = useCallback(async () => {
     if (isFetchingRef.current || isSavingRef.current) return;
     isFetchingRef.current = true;
     setLoading(true);
 
     try {
-      const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
+      let res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) {
+        res = await fetch('/api/admin/token-settings?t=' + Date.now(), { cache: 'no-store' });
+      }
       if (res.ok) {
         const data = await res.json();
         if (data.currencySymbol) setCurrencySymbol(data.currencySymbol);
@@ -174,19 +169,36 @@ export default function AdminTokenSettingPage() {
           }
 
           const activeSymbol = loaded.tokenSymbol || '🪙';
+          const resolvedChef = Number(loaded.aiChefCost ?? loaded.chefCost ?? DEFAULT_SETTINGS.aiChefCost);
+
+          const loadedPkgs = Array.isArray(loaded.packages) && loaded.packages.length > 0 
+            ? loaded.packages.map((p: any) => ({
+                id: p.id || 'pkg_' + Math.random().toString(36).substring(2, 7),
+                name: p.name || 'Bundle',
+                tokenAmount: Number(p.tokenAmount ?? p.tokens ?? 250),
+                tokens: Number(p.tokens ?? p.tokenAmount ?? 250),
+                priceDollars: Number(p.priceDollars ?? p.price ?? 4.99),
+                price: Number(p.price ?? p.priceDollars ?? 4.99),
+                badge: p.badge || undefined,
+                bonusTokens: Number(p.bonusTokens || 0),
+                isPopular: Boolean(p.isPopular)
+              }))
+            : DEFAULT_TOKEN_PACKAGES;
+
           setSettings({
             tokenName: loaded.tokenName || 'Foodie Token',
             tokenSymbol: activeSymbol,
-            startingBalance: loaded.startingBalance !== undefined ? loaded.startingBalance : 100,
+            startingBalance: loaded.startingBalance !== undefined ? Number(loaded.startingBalance) : 100,
             isEnabled: loaded.isEnabled !== undefined ? Boolean(loaded.isEnabled) : true,
-            importUrlCost: loaded.importUrlCost !== undefined ? loaded.importUrlCost : 5,
-            importTextCost: loaded.importTextCost !== undefined ? loaded.importTextCost : 2,
-            importPhotoCost: loaded.importPhotoCost !== undefined ? loaded.importPhotoCost : 10,
-            aiChefCost: loaded.aiChefCost !== undefined ? loaded.aiChefCost : 2,
-            mealPlannerCost: loaded.mealPlannerCost !== undefined ? loaded.mealPlannerCost : 5,
-            macroAnalysisCost: loaded.macroAnalysisCost !== undefined ? loaded.macroAnalysisCost : 3,
+            importUrlCost: loaded.importUrlCost !== undefined ? Number(loaded.importUrlCost) : 5,
+            importTextCost: loaded.importTextCost !== undefined ? Number(loaded.importTextCost) : 2,
+            importPhotoCost: loaded.importPhotoCost !== undefined ? Number(loaded.importPhotoCost) : 10,
+            aiChefCost: resolvedChef,
+            chefCost: resolvedChef,
+            mealPlannerCost: loaded.mealPlannerCost !== undefined ? Number(loaded.mealPlannerCost) : 5,
+            macroAnalysisCost: loaded.macroAnalysisCost !== undefined ? Number(loaded.macroAnalysisCost) : 3,
             planAllocations: mergedPlanAllocations,
-            packages: Array.isArray(loaded.packages) && loaded.packages.length > 0 ? loaded.packages : DEFAULT_TOKEN_PACKAGES
+            packages: loadedPkgs
           });
 
           if (typeof window !== 'undefined') {
@@ -225,12 +237,11 @@ export default function AdminTokenSettingPage() {
     };
   }, [loadTokenData, tr]);
 
-  // Reset pagination page on filter/search change
   useEffect(() => {
     setLedgerPage(1);
   }, [ledgerSearch, ledgerFilterType, ledgerPageSize]);
 
-  // Save Settings to Database & Server File
+  // Robust Save: Handles schema adaptation and dual-endpoint resilience
   const handleSaveSettings = async () => {
     if (saving || isSavingRef.current) return;
     setSaving(true);
@@ -238,14 +249,48 @@ export default function AdminTokenSettingPage() {
     setFeedback(null);
 
     const activeSymbol = settings.tokenSymbol.trim() || '🪙';
-    const payload = { ...settings, tokenSymbol: activeSymbol };
+    const resolvedChef = Number(settings.aiChefCost ?? settings.chefCost ?? 2);
+
+    const normalizedPkgs = (settings.packages || []).map(p => ({
+      id: p.id,
+      name: p.name,
+      tokens: Number(p.tokens ?? p.tokenAmount ?? 250),
+      tokenAmount: Number(p.tokenAmount ?? p.tokens ?? 250),
+      price: Number(p.price ?? p.priceDollars ?? 4.99),
+      priceDollars: Number(p.priceDollars ?? p.price ?? 4.99),
+      badge: p.badge || undefined,
+      bonusTokens: Number(p.bonusTokens || 0),
+      isPopular: Boolean(p.isPopular)
+    }));
+
+    const payload = {
+      ...settings,
+      tokenSymbol: activeSymbol,
+      aiChefCost: resolvedChef,
+      chefCost: resolvedChef,
+      packages: normalizedPkgs
+    };
+
+    const requestBody = {
+      ...payload,
+      tokenSettings: payload,
+      settings: payload
+    };
 
     try {
-      const res = await fetch('/api/admin/token-setting', {
+      let res = await fetch('/api/admin/token-setting', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tokenSettings: payload })
+        body: JSON.stringify(requestBody)
       });
+
+      if (!res.ok) {
+        res = await fetch('/api/admin/token-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+      }
 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
@@ -265,7 +310,7 @@ export default function AdminTokenSettingPage() {
             bc.close();
           } catch (_) {}
         }
-        showToast('success', tr('toastTokenSettingsSaved', 'Token configurations saved and synchronized with PostgreSQL & MySQL!'));
+        showToast('success', tr('toastTokenSettingsSaved', 'Token settings saved and synchronized with PostgreSQL & MySQL!'));
       } else {
         throw new Error(data.error || 'Failed to save token settings.');
       }
@@ -286,7 +331,10 @@ export default function AdminTokenSettingPage() {
   const handleClearLedger = async () => {
     if (!confirm(tr('confirmClearLedger', 'Are you sure you want to clear recent token transactions? This cannot be undone.'))) return;
     try {
-      const res = await fetch('/api/admin/token-setting', { method: 'DELETE' });
+      let res = await fetch('/api/admin/token-setting', { method: 'DELETE' });
+      if (!res.ok) {
+        res = await fetch('/api/admin/token-settings', { method: 'DELETE' });
+      }
       if (res.ok) {
         setTransactions([]);
         showToast('success', tr('toastLedgerCleared', 'Token transaction audit trail cleared successfully.'));
@@ -296,13 +344,16 @@ export default function AdminTokenSettingPage() {
     }
   };
 
-  // Package Management Handlers
   const handleAddPackage = () => {
+    const amt = Math.max(1, parseInt(pkgTokens, 10) || 500);
+    const prc = Math.max(0.01, parseFloat(pkgPrice) || 5.99);
     const newPkg: TokenPackage = {
       id: 'pkg_' + Date.now().toString(36),
       name: pkgName.trim() || 'Custom Bundle',
-      tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || 500),
-      priceDollars: Math.max(0.01, parseFloat(pkgPrice) || 5.99),
+      tokenAmount: amt,
+      tokens: amt,
+      priceDollars: prc,
+      price: prc,
       badge: pkgBadge.trim() || undefined,
       bonusTokens: parseInt(pkgBonus, 10) || 0,
       isPopular: false
@@ -318,13 +369,18 @@ export default function AdminTokenSettingPage() {
   };
 
   const handleUpdatePackage = (pkgId: string) => {
+    const amt = Math.max(1, parseInt(pkgTokens, 10) || 500);
+    const prc = Math.max(0.01, parseFloat(pkgPrice) || 5.99);
+
     setSettings(prev => ({
       ...prev,
       packages: prev.packages.map(p => p.id === pkgId ? {
         ...p,
         name: pkgName.trim(),
-        tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || p.tokenAmount),
-        priceDollars: Math.max(0.01, parseFloat(pkgPrice) || p.priceDollars),
+        tokenAmount: amt,
+        tokens: amt,
+        priceDollars: prc,
+        price: prc,
         badge: pkgBadge.trim() || undefined,
         bonusTokens: parseInt(pkgBonus, 10) || 0
       } : p)
@@ -348,19 +404,18 @@ export default function AdminTokenSettingPage() {
   const handleStartEdit = (pkg: TokenPackage) => {
     setEditingPkgId(pkg.id);
     setPkgName(pkg.name);
-    setPkgTokens(pkg.tokenAmount);
-    setPkgPrice(pkg.priceDollars);
+    setPkgTokens(pkg.tokenAmount ?? pkg.tokens ?? 500);
+    setPkgPrice(pkg.priceDollars ?? pkg.price ?? 4.99);
     setPkgBadge(pkg.badge || '');
     setPkgBonus(pkg.bonusTokens || 0);
   };
 
-  // Filtered ledger records
   const filteredTransactions = useMemo(() => {
     return transactions.filter(tx => {
       const matchSearch = !ledgerSearch.trim() || 
-        tx.customer_email.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
+        (tx.customer_email && tx.customer_email.toLowerCase().includes(ledgerSearch.toLowerCase())) ||
         (tx.description && tx.description.toLowerCase().includes(ledgerSearch.toLowerCase())) ||
-        tx.type.toLowerCase().includes(ledgerSearch.toLowerCase());
+        (tx.type && tx.type.toLowerCase().includes(ledgerSearch.toLowerCase()));
       
       const matchType = ledgerFilterType === 'all' || 
         (ledgerFilterType === 'purchases' && (tx.type.toLowerCase().includes('purchase') || tx.type.toLowerCase().includes('topup'))) ||
@@ -371,7 +426,6 @@ export default function AdminTokenSettingPage() {
     });
   }, [transactions, ledgerSearch, ledgerFilterType]);
 
-  // Paginated ledger records (Task 2)
   const totalLedgerRecords = filteredTransactions.length;
   const totalLedgerPages = Math.max(1, Math.ceil(totalLedgerRecords / ledgerPageSize));
   const paginatedTransactions = useMemo(() => {
@@ -379,7 +433,6 @@ export default function AdminTokenSettingPage() {
     return filteredTransactions.slice(start, start + ledgerPageSize);
   }, [filteredTransactions, ledgerPage, ledgerPageSize]);
 
-  // Active dynamic token symbol
   const activeTokenSymbol = settings.tokenSymbol || '🪙';
 
   return (
@@ -387,7 +440,7 @@ export default function AdminTokenSettingPage() {
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Top Header & Primary Action Bar (Task 1: Removed Synced badge, Task 3: Dynamic Emoji in Title) */}
+      {/* 1. Top Header & Primary Action Bar (Task 1: Save Button with text "Configurations" removed) */}
       <div 
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
         style={{ borderColor: 'var(--color-border)' }}
@@ -451,7 +504,7 @@ export default function AdminTokenSettingPage() {
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
             <Save className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
-            <span>{saving ? tr('btnSaving', 'Saving...') : tr('btnSaveTokenSettings', 'Save Configurations')}</span>
+            <span>{saving ? tr('btnSaving', 'Saving...') : tr('btnSave', 'Save')}</span>
           </button>
         </div>
       </div>
@@ -475,7 +528,7 @@ export default function AdminTokenSettingPage() {
         </div>
       )}
 
-      {/* Workspace Sub-Tabs (Zero Unmount Architecture) */}
+      {/* Workspace Sub-Tabs */}
       <div 
         className="flex p-1.5 rounded-2xl border transition-colors duration-200"
         style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -544,7 +597,6 @@ export default function AdminTokenSettingPage() {
                 : tr('tokenMasterSwitchFree', 'Free Token Mode (Bypass Consumption)')}
             </span>
 
-            {/* Accessible Animated Slide Toggle Switch */}
             <button
               type="button"
               role="switch"
@@ -565,7 +617,7 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
 
-        {/* Token Identity Section (Task 3: Dynamic Live Emoji Preview) */}
+        {/* Token Identity Section */}
         <div 
           className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -706,10 +758,14 @@ export default function AdminTokenSettingPage() {
                     data-bwignore="true"
                     data-form-type="other"
                     value={action.val}
-                    onChange={(e) => setSettings({
-                      ...settings,
-                      [action.key]: Math.max(0, parseInt(e.target.value, 10) || 0)
-                    })}
+                    onChange={(e) => {
+                      const v = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      setSettings(prev => ({
+                        ...prev,
+                        [action.key]: v,
+                        ...(action.key === 'aiChefCost' ? { chefCost: v } : {})
+                      }));
+                    }}
                     className="w-16 px-2.5 py-1.5 rounded-lg border font-mono font-bold text-center outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -728,7 +784,6 @@ export default function AdminTokenSettingPage() {
         data-lpignore="true"
         className={activeTab === 'packages' ? 'space-y-6 animate-in fade-in' : 'hidden'}
       >
-        {/* Bundle Creator / Editor Card */}
         <div 
           className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -872,7 +927,7 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
 
-        {/* Active Bundles Grid & Live Mockup Cards */}
+        {/* Active Bundles Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {settings.packages.map((pkg) => (
             <div
@@ -893,7 +948,7 @@ export default function AdminTokenSettingPage() {
                 <h3 className="text-base font-extrabold" style={{ color: 'var(--color-text)' }}>{pkg.name}</h3>
                 <div className="flex items-baseline gap-1 mt-2">
                   <span className="text-2xl font-black" style={{ color: 'var(--color-primary)' }}>
-                    {currencySymbol}{pkg.priceDollars.toFixed(2)}
+                    {currencySymbol}{Number(pkg.priceDollars ?? pkg.price ?? 0).toFixed(2)}
                   </span>
                   <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {tr('oneTimePayment', '/ one-time')}
@@ -907,7 +962,7 @@ export default function AdminTokenSettingPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-xl">{activeTokenSymbol}</span>
                     <span className="text-base font-black font-mono" style={{ color: 'var(--color-text)' }}>
-                      +{pkg.tokenAmount.toLocaleString()}
+                      +{Number(pkg.tokenAmount ?? pkg.tokens ?? 0).toLocaleString()}
                     </span>
                   </div>
                   {pkg.bonusTokens > 0 && (
@@ -1069,7 +1124,7 @@ export default function AdminTokenSettingPage() {
         </div>
       </div>
 
-      {/* TAB 4: TOKEN AUDIT LEDGER (Task 2: Pagination with default 10/page) */}
+      {/* TAB 4: TOKEN AUDIT LEDGER */}
       <div 
         role="region"
         aria-label="Token Transaction Audit Ledger"
@@ -1088,7 +1143,6 @@ export default function AdminTokenSettingPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Filter by Type */}
             <select
               value={ledgerFilterType}
               onChange={(e) => setLedgerFilterType(e.target.value)}
@@ -1101,7 +1155,6 @@ export default function AdminTokenSettingPage() {
               <option value="grants">{tr('filterGrants', 'Grants & Signups')}</option>
             </select>
 
-            {/* Rows Per Page Selector (Default: 10) */}
             <div 
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -1122,7 +1175,6 @@ export default function AdminTokenSettingPage() {
               </select>
             </div>
 
-            {/* Clear Ledger Action */}
             <button
               type="button"
               onClick={handleClearLedger}
@@ -1133,7 +1185,6 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
 
-        {/* Ledger Table Container */}
         <div 
           className="border rounded-3xl overflow-hidden shadow-xl transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -1206,7 +1257,7 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
 
-        {/* Ledger Pagination Bar (Task 2) */}
+        {/* Ledger Pagination Bar */}
         <div 
           className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 px-1 text-xs"
           style={{ color: 'var(--color-text-secondary)' }}

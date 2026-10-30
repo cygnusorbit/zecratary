@@ -4,21 +4,6 @@ import { recordTokenUsage } from '@/lib/tokenUsage';
 import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 import { resolveAndScrapeBestRecipe, extractImageFromUrl } from '@/lib/recipeScraper';
 
-
-// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
-
-
 export const dynamic = 'force-dynamic';
 
 function cleanJsonString(raw: string): string {
@@ -29,7 +14,7 @@ function cleanJsonString(raw: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Ingest and parse request body immediately at the top of the handler
+    // 1. Ingest and parse request body immediately
     let body: any = {};
     try {
       body = await req.json();
@@ -40,7 +25,7 @@ export async function POST(req: NextRequest) {
     const prompt = (body.prompt || '').trim();
     const isQuestionnaire = Boolean(body.isQuestionnaireComplete);
     const topicTitle = body.topicTitle || 'Custom Meal Plan';
-    const qaList: any[] = Array.isArray(body.questionnaireSummary) ? body.questionnaireSummary : [];
+    const qaList = Array.isArray(body.questionnaireSummary) ? body.questionnaireSummary : [];
     const answersMap = body.questionnaireAnswers || {};
     const prefs = body.preferences || {};
     const pantryItems = Array.isArray(body.pantry) ? body.pantry : [];
@@ -66,7 +51,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Prompt or questionnaire completion is required' }, { status: 400 });
     }
 
-    // 2. All Saved Recipe Search: Grounding AI in PostgreSQL Saved Recipes (Single Evaluation)
+    // 2. All Saved Recipe Search Grounding from PostgreSQL
     let savedRecipesContext = '';
     const enableSavedRecipeSearch = (body as any)?.enableSavedRecipeSearch !== undefined 
       ? Boolean((body as any).enableSavedRecipeSearch) 
@@ -74,7 +59,6 @@ export async function POST(req: NextRequest) {
 
     if (enableSavedRecipeSearch) {
       try {
-        const targetUserId = userId || 'guest';
         const savedRows = await query(
           `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
            FROM saved_recipes 
@@ -85,7 +69,6 @@ export async function POST(req: NextRequest) {
         if (rows.length > 0) {
           savedRecipesContext = `
 ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
-The "All Saved Recipe Search" capability is ENABLED. The following recipes are saved in the user's PostgreSQL recipe library:
 ${rows.map((r: any, idx: number) => {
   const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
   const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
@@ -95,9 +78,6 @@ ${rows.map((r: any, idx: number) => {
 - Instructions: ${insts}
 - Source: ${r.source_url || 'Personal Saved Collection'}`;
 }).join('\n\n')}
-
-MANDATORY DIRECTIVE FOR SAVED RECIPES:
-Whenever the user's request aligns with or can be satisfied by their saved favorites above, you are encouraged to reference, adapt, or recommend these saved dishes.
 `;
         }
       } catch (err) {
@@ -168,7 +148,7 @@ Whenever the user's request aligns with or can be satisfied by their saved favor
     // 4. Strict Dietary Filter Verification
     if (strictDietEnforcement && filterWordsList.length > 0) {
       const combinedCheck = `${prompt} ${JSON.stringify(answersMap)}`.toLowerCase();
-      const matched = filterWordsList.find((w: any) => {
+      const matched = filterWordsList.find(w => {
         const clean = w.trim().toLowerCase();
         return clean.length > 1 && combinedCheck.includes(clean);
       });
@@ -181,16 +161,16 @@ Whenever the user's request aligns with or can be satisfied by their saved favor
       }
     }
 
-    // 5. Token Deduction Telemetry
+    // 5. Authoritative Token Deduction Telemetry
     const tokenSettings = await getTokenSettings();
-    const chefCost = tokenSettings.chefCost ?? 1;
+    const authoritativeCost = tokenSettings.isEnabled ? (tokenSettings.chefCost ?? 8) : 0;
     let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
 
-    if (tokenSettings.isEnabled && chefCost > 0) {
+    if (authoritativeCost > 0 && (userId || userEmail)) {
       deduction = await deductUserTokens({
         userId,
         userEmail,
-        cost: chefCost,
+        cost: authoritativeCost,
         feature: 'chef',
         description: isQuestionnaire ? `Intake plan: ${topicTitle}` : `Chef prompt: ${prompt.slice(0, 35)}...`
       });
@@ -198,9 +178,9 @@ Whenever the user's request aligns with or can be satisfied by their saved favor
       if (!deduction.success) {
         return NextResponse.json({
           success: false,
-          error: deduction.error,
+          error: deduction.error || 'Insufficient token balance.',
           insufficientTokens: true,
-          required: chefCost,
+          required: authoritativeCost,
           currentBalance: deduction.currentBalance,
           tokenSymbol: tokenSettings.tokenSymbol
         }, { status: 402 });
@@ -499,7 +479,7 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       recommendedRecipe,
       recipe: recommendedRecipe,
       model: activeModel,
-      consumedSystemTokens: chefCost,
+      consumedSystemTokens: authoritativeCost,
       tokenSymbol: tokenSettings.tokenSymbol,
       remainingBalance: deduction.currentBalance
     }, { headers: { 'Cache-Control': 'no-store' } });
