@@ -99,12 +99,18 @@
   ],
   "updatedAt": "2026-10-28T18:32:59.612Z",
   "chefAiSettings": {
-    "model": "gemini-3.5-flash-lite",
-    "apiKey": "AQ.Ab8RN6IhH6iaU_4chRKwnTIyKxG4bBTJURnex1GtD9nPAttcOQ",
     "provider": "gemini",
-    "updatedAt": "2026-09-16T05:43:42.177Z"
+    "apiKey": "AQ.Ab8RN6LVSCAjIza9Daebr4F4O3Rv_5YQGwwCybcJYMyJWCpCMw",
+    "model": "gemini-3.5-flash-lite",
+    "updatedAt": "2026-10-30T14:03:15.078Z"
   },
-  "chefQuestionnaire": [],
+  "chefQuestionnaire": [
+    "How many days would you like to plan for (up to 7 days)?",
+    "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+    "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+    "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+    "What is your approximate ingredient budget per serving?"
+  ],
   "ingredientCategories": [
     "Produce",
     "Dairy & Eggs",
