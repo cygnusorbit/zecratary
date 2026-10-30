@@ -1,83 +1,108 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getTokenSettings, saveTokenSettings, initTokenTables } from '@/lib/tokenService';
+import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    await initTokenTables();
-    const settings = await getTokenSettings();
+    let currency = 'USD';
+    let currencySymbol = '$';
+
+    try {
+      const adminRes: any = await query(
+        `SELECT * FROM admin_settings WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1' LIMIT 1;`
+      ).catch(() => null);
+      const row = Array.isArray(adminRes) ? adminRes[0] : adminRes?.rows?.[0];
+      if (row) {
+        if (row.currency) currency = row.currency;
+        if (row.currency_symbol) currencySymbol = row.currency_symbol;
+        if (row.currencies && Array.isArray(row.currencies)) {
+          const active = row.currencies.find((c: any) => c.is_default || c.active);
+          if (active) {
+            currency = active.code || currency;
+            currencySymbol = active.symbol || currencySymbol;
+          }
+        }
+      }
+    } catch (_) {}
 
     let plans: any[] = [];
     try {
-      plans = await query('SELECT id, slug, name, monthly_tokens, token_limit, price FROM subscription_plans ORDER BY created_at ASC');
+      const plansRes: any = await query(`SELECT * FROM subscription_plans;`).catch(() => null);
+      const rows = Array.isArray(plansRes) ? plansRes : (plansRes?.rows || []);
+      plans = rows.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        price: Number(p.price ?? p.monthly_price_dollars ?? p.price_monthly ?? 0),
+        monthly_price_dollars: Number(p.monthly_price_dollars ?? p.price ?? 0),
+        interval: p.interval || 'month',
+        token_limit: Number(p.token_limit ?? p.tokens_monthly ?? 50000),
+        is_active: p.is_active !== false,
+      }));
+      plans.sort((a, b) => a.price - b.price);
     } catch (_) {}
 
-    let transactions: any[] = [];
+    let settings = {
+      is_enabled: true,
+      default_free_tokens: 500,
+      tokens_per_request: 1,
+      cost_per_1k_tokens: 0.002,
+    };
+
     try {
-      transactions = await query('SELECT id, user_email as customer_email, amount, balance_after, type, description, created_at FROM token_transactions ORDER BY created_at DESC LIMIT 50');
+      const tRes: any = await query(
+        `SELECT * FROM token_settings WHERE id::text = 'current' OR id::text = '1' LIMIT 1;`
+      ).catch(() => null);
+      const tRow = Array.isArray(tRes) ? tRes[0] : tRes?.rows?.[0];
+      if (tRow) {
+        settings = {
+          is_enabled: tRow.is_enabled !== false,
+          default_free_tokens: Number(tRow.default_free_tokens ?? 500),
+          tokens_per_request: Number(tRow.tokens_per_request ?? 1),
+          cost_per_1k_tokens: Number(tRow.cost_per_1k_tokens ?? 0.002),
+        };
+      }
     } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      settings,
-      tokenSettings: settings,
-      chefCost: settings.chefCost,
-      aiChefCost: settings.chefCost,
-      tokenSymbol: settings.tokenSymbol,
-      tokenName: settings.tokenName,
+      currency,
+      currencySymbol,
       plans,
-      transactions,
-      currency: 'USD',
-      currencySymbol: '$'
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+      settings,
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const raw = await req.json();
-    const body = raw.tokenSettings || raw.settings || raw;
+    const body = await req.json();
+    const { settings } = body;
 
-    const rawChef = body.aiChefCost ?? body.chefCost ?? (body.featureCosts ? (body.featureCosts['AI Chef Recipe Generation'] ?? body.featureCosts['chef']) : undefined);
-    const resolvedChefCost = rawChef !== undefined ? Math.max(0, Number(rawChef)) : 8;
-
-    const updated = await saveTokenSettings({
-      tokenName: body.tokenName !== undefined ? String(body.tokenName).trim() : 'Foodie Token',
-      tokenSymbol: body.tokenSymbol !== undefined ? String(body.tokenSymbol).trim() : '',
-      chefCost: resolvedChefCost,
-      aiChefCost: resolvedChefCost,
-      importUrlCost: body.importUrlCost !== undefined ? Number(body.importUrlCost) : 5,
-      importTextCost: body.importTextCost !== undefined ? Number(body.importTextCost) : 2,
-      importPhotoCost: body.importPhotoCost !== undefined ? Number(body.importPhotoCost) : 10,
-      mealPlannerCost: body.mealPlannerCost !== undefined ? Number(body.mealPlannerCost) : 5,
-      macroAnalysisCost: body.macroAnalysisCost !== undefined ? Number(body.macroAnalysisCost) : 3,
-      startingBalance: body.startingBalance !== undefined ? Number(body.startingBalance) : 100,
-      packages: Array.isArray(body.packages) ? body.packages : undefined,
-      isEnabled: body.isEnabled !== undefined ? Boolean(body.isEnabled) : true,
-      planAllocations: body.planAllocations || {}
-    });
-
-    if (body.planAllocations && typeof body.planAllocations === 'object') {
-      for (const [slug, amount] of Object.entries(body.planAllocations)) {
-        try {
-          await query('UPDATE subscription_plans SET monthly_tokens = $1, token_limit = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
-        } catch (_) {}
-      }
+    if (settings) {
+      await query(`
+        INSERT INTO token_settings (id, is_enabled, default_free_tokens, tokens_per_request, cost_per_1k_tokens, updated_at)
+        VALUES ('current', $1, $2, $3, $4, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          is_enabled = EXCLUDED.is_enabled,
+          default_free_tokens = EXCLUDED.default_free_tokens,
+          tokens_per_request = EXCLUDED.tokens_per_request,
+          cost_per_1k_tokens = EXCLUDED.cost_per_1k_tokens,
+          updated_at = NOW();
+      `, [
+        settings.is_enabled !== false,
+        parseInt(settings.default_free_tokens || '500', 10),
+        parseInt(settings.tokens_per_request || '1', 10),
+        parseFloat(settings.cost_per_1k_tokens || '0.002')
+      ]).catch(() => {});
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Token settings successfully persisted to PostgreSQL & MySQL.',
-      settings: updated,
-      tokenSettings: updated,
-      chefCost: updated.chefCost,
-      aiChefCost: updated.chefCost,
-      tokenSymbol: updated.tokenSymbol
-    });
+    return NextResponse.json({ success: true, message: 'Settings saved successfully' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

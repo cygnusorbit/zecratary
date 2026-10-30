@@ -4,7 +4,7 @@
   "titlebarEmoji": "🍅",
   "faviconEmoji": "🍅",
   "aiProvider": "gemini",
-  "aiModel": "gemini-3.5-flash-lite",
+  "aiModel": "gemini-3.6-flash",
   "currency": "USD",
   "taxRate": 0,
   "maintenanceMode": false,
@@ -101,8 +101,108 @@
   "chefAiSettings": {
     "provider": "gemini",
     "apiKey": "AQ.Ab8RN6LVSCAjIza9Daebr4F4O3Rv_5YQGwwCybcJYMyJWCpCMw",
-    "model": "gemini-3.5-flash-lite",
-    "updatedAt": "2026-10-30T14:03:15.078Z"
+    "model": "gemini-3.6-flash",
+    "temperature": 0.7,
+    "maxTokens": 4096,
+    "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, recommended recipe sources, and dietary preferences when generating culinary or meal planning responses.",
+    "enableWebSearch": true,
+    "enablePantryContext": true,
+    "strictDietEnforcement": true,
+    "maxPlanDays": 7,
+    "resultDisplayMode": "card",
+    "enableVoiceInteraction": true,
+    "voiceEngine": "version2",
+    "voiceSpeed": 1,
+    "voiceAutoPlay": false,
+    "selectedVoiceName": "en-US-Neural2-F",
+    "knowledgeBaseList": [
+      "Culinary Masterclass DB v2",
+      "Nutritional Guidelines 2026"
+    ],
+    "customVocabularyList": [
+      "Umami"
+    ],
+    "filterWordsList": [],
+    "recommendedRecipeUrls": [
+      "https://www.recipetineats.com/recipes/",
+      "https://mysingaporefood.com/recipes/",
+      "https://www.marionskitchen.com/recipes/",
+      "https://rasamalaysia.com/recipe-index/"
+    ],
+    "sections": [
+      {
+        "id": "sec_core",
+        "topicTitle": "Core Meal Plan Logistics",
+        "description": "Basic duration, meal types, and start dates for the multi-day plan.",
+        "enabled": true,
+        "questions": [
+          {
+            "id": "q_core_1",
+            "text": "How many days would you like to plan for (up to 7 days)?",
+            "dedicatedAnswers": [
+              "3 Days (Quick Prep)",
+              "5 Days (Workweek)",
+              "7 Days (Full Week)",
+              "Weekend Plan (2 Days)"
+            ]
+          },
+          {
+            "id": "q_core_2",
+            "text": "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+            "dedicatedAnswers": [
+              "Dinner only",
+              "Lunch & Dinner",
+              "All Meals (Breakfast, Lunch, Dinner)",
+              "Breakfast & Dinner",
+              "All Meals + Snack"
+            ]
+          },
+          {
+            "id": "q_core_3",
+            "text": "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+            "dedicatedAnswers": [
+              "Start Today",
+              "Start Tomorrow",
+              "Next Monday (Fresh Week)",
+              "This Coming Weekend",
+              "Flexible / Any Day"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "sec_pref",
+        "topicTitle": "Dietary Preferences & Budget",
+        "description": "Themes, nutritional restrictions, and financial target per serving.",
+        "enabled": true,
+        "questions": [
+          {
+            "id": "q_pref_1",
+            "text": "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+            "dedicatedAnswers": [
+              "High-Protein Wholesome",
+              "Quick & Easy (<25m)",
+              "Mediterranean Fresh",
+              "Keto / Low-Carb",
+              "Budget-Friendly Comfort",
+              "Plant-Based / Balanced Veggie"
+            ]
+          },
+          {
+            "id": "q_pref_2",
+            "text": "What is your approximate ingredient budget per serving?",
+            "dedicatedAnswers": [
+              "Under $5/serving (Economy)",
+              "$5 - $8/serving (Balanced)",
+              "$8 - $12/serving (Generous)",
+              "$12+/serving (Premium)",
+              "Flexible Target"
+            ]
+          }
+        ]
+      }
+    ],
+    "updatedAt": "2026-10-30T16:05:30.322Z"
   },
   "chefQuestionnaire": [
     "How many days would you like to plan for (up to 7 days)?",
@@ -7570,5 +7670,68 @@
     }
   },
   "defaultLanguage": "en",
-  "lastUpdated": "2026-10-28T17:54:46.521Z"
+  "lastUpdated": "2026-10-28T17:54:46.521Z",
+  "chefQuestionnaireWithAnswers": [
+    {
+      "id": "q_core_1",
+      "text": "How many days would you like to plan for (up to 7 days)?",
+      "dedicatedAnswers": [
+        "3 Days (Quick Prep)",
+        "5 Days (Workweek)",
+        "7 Days (Full Week)",
+        "Weekend Plan (2 Days)"
+      ]
+    },
+    {
+      "id": "q_core_2",
+      "text": "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+      "dedicatedAnswers": [
+        "Dinner only",
+        "Lunch & Dinner",
+        "All Meals (Breakfast, Lunch, Dinner)",
+        "Breakfast & Dinner",
+        "All Meals + Snack"
+      ]
+    },
+    {
+      "id": "q_core_3",
+      "text": "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+      "dedicatedAnswers": [
+        "Start Today",
+        "Start Tomorrow",
+        "Next Monday (Fresh Week)",
+        "This Coming Weekend",
+        "Flexible / Any Day"
+      ]
+    },
+    {
+      "id": "q_pref_1",
+      "text": "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+      "dedicatedAnswers": [
+        "High-Protein Wholesome",
+        "Quick & Easy (<25m)",
+        "Mediterranean Fresh",
+        "Keto / Low-Carb",
+        "Budget-Friendly Comfort",
+        "Plant-Based / Balanced Veggie"
+      ]
+    },
+    {
+      "id": "q_pref_2",
+      "text": "What is your approximate ingredient budget per serving?",
+      "dedicatedAnswers": [
+        "Under $5/serving (Economy)",
+        "$5 - $8/serving (Balanced)",
+        "$8 - $12/serving (Generous)",
+        "$12+/serving (Premium)",
+        "Flexible Target"
+      ]
+    }
+  ],
+  "recommendedRecipeUrls": [
+    "https://www.recipetineats.com/recipes/",
+    "https://mysingaporefood.com/recipes/",
+    "https://www.marionskitchen.com/recipes/",
+    "https://rasamalaysia.com/recipe-index/"
+  ]
 }

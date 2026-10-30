@@ -5,6 +5,7 @@ import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 import { resolveAndScrapeBestRecipe, extractImageFromUrl } from '@/lib/recipeScraper';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 function cleanJsonString(raw: string): string {
   if (!raw) return '';
@@ -14,7 +15,6 @@ function cleanJsonString(raw: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Ingest and parse request body immediately
     let body: any = {};
     try {
       body = await req.json();
@@ -24,25 +24,25 @@ export async function POST(req: NextRequest) {
 
     const prompt = (body.prompt || '').trim();
     const isQuestionnaire = Boolean(body.isQuestionnaireComplete);
-    const topicTitle = body.topicTitle || 'Custom Meal Plan';
-    const qaList = Array.isArray(body.questionnaireSummary) ? body.questionnaireSummary : [];
-    const answersMap = body.questionnaireAnswers || {};
+    const topicTitle = body.topicTitle || 'Culinary Meal Plan';
+    const qaList: any[] = Array.isArray(body.questionnaireSummary) ? body.questionnaireSummary : [];
+    const answersMap: Record<string, any> = body.questionnaireAnswers || {};
     const prefs = body.preferences || {};
     const pantryItems = Array.isArray(body.pantry) ? body.pantry : [];
     let referenceUrls: string[] = Array.isArray(body.recommendedRecipeUrls) 
       ? body.recommendedRecipeUrls.filter(Boolean) 
       : [];
 
-    let userId = body.userId;
-    let userEmail = body.userEmail || body.email;
+    let userId = String(body.userId || '').trim();
+    let userEmail = String(body.userEmail || body.email || '').toLowerCase().trim();
 
     if (!userId || !userEmail) {
       const cookieHeader = req.cookies.get('zecratary_session')?.value;
       if (cookieHeader) {
         try {
           const parsed = JSON.parse(decodeURIComponent(cookieHeader));
-          userId = userId || parsed.id;
-          userEmail = userEmail || parsed.email;
+          userId = userId || String(parsed.id || '').trim();
+          userEmail = userEmail || String(parsed.email || '').toLowerCase().trim();
         } catch (_) {}
       }
     }
@@ -51,56 +51,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Prompt or questionnaire completion is required' }, { status: 400 });
     }
 
-    // 2. All Saved Recipe Search Grounding from PostgreSQL
-    let savedRecipesContext = '';
-    const enableSavedRecipeSearch = (body as any)?.enableSavedRecipeSearch !== undefined 
-      ? Boolean((body as any).enableSavedRecipeSearch) 
-      : true;
-
-    if (enableSavedRecipeSearch) {
-      try {
-        const savedRows = await query(
-          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
-           FROM saved_recipes 
-           ORDER BY updated_at DESC LIMIT 20`
-        ).catch(() => []);
-        
-        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
-        if (rows.length > 0) {
-          savedRecipesContext = `
-ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
-${rows.map((r: any, idx: number) => {
-  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
-  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
-  return `[Saved Recipe ${idx + 1}: "${r.title}"]
-- Meal Type: ${r.meal_type || 'General'}
-- Ingredients: ${ings}
-- Instructions: ${insts}
-- Source: ${r.source_url || 'Personal Saved Collection'}`;
-}).join('\n\n')}
-`;
-        }
-      } catch (err) {
-        console.warn('[AI API] Could not retrieve saved recipes:', err);
-      }
-    }
-
-    // 3. Fetch AI Configurations from PostgreSQL admin_settings
+    // 1. Fetch AI Configurations from PostgreSQL / MySQL admin_settings
     let activeModel = 'gemini-2.5-flash';
     let provider = 'gemini';
     let apiKey = '';
     let temperature = 0.7;
     let maxTokens = 4096;
-    let systemPrompt = 'You are Chef Foodie, an expert executive culinary AI assistant.';
+    let systemPrompt = 'You are Chef Foodie, an expert autonomous culinary AI assistant.';
     let strictDietEnforcement = false;
     let filterWordsList: string[] = [];
     let customVocabularyList: string[] = [];
     let maxPlanDays = 7;
+    let resultDisplayMode = 'card';
 
     try {
-      const sRows = await query('SELECT chef_ai_settings, ai_model, ai_provider, value FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-      if (sRows.length > 0) {
-        const row = sRows[0];
+      const sRows: any = await query(`
+        SELECT chef_ai_settings, ai_model, ai_provider, value 
+        FROM admin_settings 
+        WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1'
+        LIMIT 1;
+      `);
+      const row = Array.isArray(sRows) ? sRows[0] : sRows?.rows?.[0];
+      if (row) {
         let c = row.chef_ai_settings;
         if (typeof c === 'string') {
           try { c = JSON.parse(c); } catch (_) { c = {}; }
@@ -109,7 +81,7 @@ ${rows.map((r: any, idx: number) => {
         }
 
         if (c) {
-          if (c.model || row.ai_model) activeModel = (c.model || row.ai_model).replace(/^models\//, '');
+          if (c.model || row.ai_model) activeModel = String(c.model || row.ai_model).replace(/^models\//, '');
           if (c.provider || row.ai_provider) provider = c.provider || row.ai_provider;
           if (c.apiKey) apiKey = c.apiKey;
           if (c.temperature !== undefined) temperature = Number(c.temperature);
@@ -119,24 +91,24 @@ ${rows.map((r: any, idx: number) => {
           if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
           if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
           if (c.maxPlanDays !== undefined) maxPlanDays = Number(c.maxPlanDays) || 7;
+          if (c.resultDisplayMode) resultDisplayMode = c.resultDisplayMode;
           if (referenceUrls.length === 0 && Array.isArray(c.recommendedRecipeUrls)) {
             referenceUrls = c.recommendedRecipeUrls.filter(Boolean);
           }
         }
       }
-    } catch (e) {
-      console.warn('[PostgreSQL] Settings load notice:', e);
-    }
+    } catch (_) {}
 
     if (!apiKey) {
       try {
-        const kRows = await query(
-          "SELECT key_value FROM admin_api_keys WHERE (provider = $1 OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-          [provider]
-        );
-        if (kRows.length > 0 && kRows[0].key_value) {
-          apiKey = kRows[0].key_value;
-        }
+        const kRows: any = await query(`
+          SELECT key_value FROM admin_api_keys 
+          WHERE (provider = $1::text OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) 
+            AND status = 'active' 
+          ORDER BY updated_at DESC LIMIT 1;
+        `, [provider]);
+        const kRow = Array.isArray(kRows) ? kRows[0] : kRows?.rows?.[0];
+        if (kRow?.key_value) apiKey = kRow.key_value;
       } catch (_) {}
     }
     if (!apiKey) {
@@ -145,11 +117,11 @@ ${rows.map((r: any, idx: number) => {
         : (process.env.OPENAI_API_KEY || '');
     }
 
-    // 4. Strict Dietary Filter Verification
+    // 2. Enforce Strict Dietary Filters
     if (strictDietEnforcement && filterWordsList.length > 0) {
       const combinedCheck = `${prompt} ${JSON.stringify(answersMap)}`.toLowerCase();
-      const matched = filterWordsList.find(w => {
-        const clean = w.trim().toLowerCase();
+      const matched = filterWordsList.find((w: any) => {
+        const clean = String(w || '').trim().toLowerCase();
         return clean.length > 1 && combinedCheck.includes(clean);
       });
       if (matched) {
@@ -161,33 +133,33 @@ ${rows.map((r: any, idx: number) => {
       }
     }
 
-    // 5. Authoritative Token Deduction Telemetry
+    // 3. Token Deduction Telemetry
     const tokenSettings = await getTokenSettings();
-    const authoritativeCost = tokenSettings.isEnabled ? (tokenSettings.chefCost ?? 8) : 0;
+    const chefCost = tokenSettings.chefCost ?? 1;
     let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
 
-    if (authoritativeCost > 0 && (userId || userEmail)) {
+    if (tokenSettings.isEnabled && chefCost > 0 && !body.isDecisionConfirmation) {
       deduction = await deductUserTokens({
-        userId,
-        userEmail,
-        cost: authoritativeCost,
+        userId: userId || 'guest',
+        userEmail: userEmail || 'user@zecratary.com',
+        cost: chefCost,
         feature: 'chef',
-        description: isQuestionnaire ? `Intake plan: ${topicTitle}` : `Chef prompt: ${prompt.slice(0, 35)}...`
+        description: isQuestionnaire ? `Questionnaire plan: ${topicTitle}` : `Chef prompt: ${prompt.slice(0, 35)}...`
       });
 
       if (!deduction.success) {
         return NextResponse.json({
           success: false,
-          error: deduction.error || 'Insufficient token balance.',
+          error: deduction.error,
           insufficientTokens: true,
-          required: authoritativeCost,
+          required: chefCost,
           currentBalance: deduction.currentBalance,
           tokenSymbol: tokenSettings.tokenSymbol
         }, { status: 402 });
       }
     }
 
-    // 6. Parse Intake Questionnaire Variables
+    // 4. Parse Intake Questionnaire Variables
     let parsedDays = body.requestedDays || 3;
     let parsedMealTypes = body.requestedMealTypes || ['Dinner'];
     let parsedStartDate = body.startDate || 'Today';
@@ -195,8 +167,8 @@ ${rows.map((r: any, idx: number) => {
     let parsedBudget = body.requestedBudget || '$5 - $8 per serving';
 
     for (const item of qaList) {
-      const q = (item.question || '').toLowerCase();
-      const a = (item.answer || '').trim();
+      const q = String((item as any)?.question || '').toLowerCase();
+      const a = String((item as any)?.answer || '').trim();
       if (/\b(how many days|duration|number of days)\b/i.test(q)) {
         const m = a.match(/\d+/);
         if (m) parsedDays = Math.min(14, Math.max(1, parseInt(m[0], 10)));
@@ -224,13 +196,14 @@ ${rows.map((r: any, idx: number) => {
     const allergies = Array.isArray(prefs.allergy) ? prefs.allergy : ['Peanuts'];
     const avoid = Array.isArray(prefs.avoid) ? prefs.avoid : ['Oily'];
 
-    // 7. Intelligent Index Link Crawling & Slug Discovery
+    // 5. Intelligent Two-Tier Reference URL Scraping & Crawling
     let scrapedGrounding: any = null;
     if (referenceUrls.length > 0) {
       try {
-        scrapedGrounding = await resolveAndScrapeBestRecipe(prompt || parsedTheme, referenceUrls);
-      } catch (scrapeErr) {
-        console.warn('[AI Route] Web scraper notice:', scrapeErr);
+        const queryTerm = prompt || parsedTheme || topicTitle;
+        scrapedGrounding = await resolveAndScrapeBestRecipe(queryTerm, referenceUrls);
+      } catch (err) {
+        console.warn('[AI Route Scraper]:', err);
       }
     }
 
@@ -238,47 +211,47 @@ ${rows.map((r: any, idx: number) => {
     let generatedPlan: any = null;
     let recommendedRecipe: any = null;
 
-    // 8. Query Generative AI with Scraped Source Grounding
+    // 6. Execute AI Synthesis / Hybrid Adaptation
     if (apiKey && apiKey.length > 10 && !apiKey.includes('sample')) {
       const modelsToTry = [activeModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
       const uniqueModels = Array.from(new Set(modelsToTry));
 
+      // Explicitly typed callback parameters satisfying TypeScript strict noImplicitAny rules
       const intakeContext = qaList.length > 0 
         ? qaList.map((pair: any) => `Q: ${pair.question}\nA: ${pair.answer}`).join('\n')
         : Object.entries(answersMap).map(([k, v]: [string, any]) => `Step ${k}: ${v}`).join('\n');
 
       const scrapedGroundingPrompt = scrapedGrounding ? `
-PRIMARY SOURCE RECIPE (CRAWLED & EXTRACTED FROM ADMIN RECOMMENDED URL):
+PRIMARY AUTHENTIC SCRAPED RECIPE (FROM CURATED WEB REFERENCE):
 - Title: ${scrapedGrounding.title}
 - Source URL: ${scrapedGrounding.sourceUrl}
 - Domain: ${scrapedGrounding.sourceName}
-- Ingredients: ${scrapedGrounding.ingredients.join(', ')}
-- Instructions: ${scrapedGrounding.instructions.join(' ')}
-- Prep: ${scrapedGrounding.prepMinutes}m | Cook: ${scrapedGrounding.cookMinutes}m
-MANDATORY: Adapt and recommend this authentic dish as the signature Recommended Recipe, citing the source URL.` : '';
+- Ingredients: ${(scrapedGrounding.ingredients || []).join(', ')}
+- Instructions: ${(scrapedGrounding.instructions || []).join(' ')}
+- Prep: ${scrapedGrounding.prepMinutes || 15}m | Cook: ${scrapedGrounding.cookMinutes || 20}m
+MANDATORY DIRECTIVE: Use this authentic human-tested dish as the ground truth for your Final Recommended Recipe. Adapt ingredient quantities to ${servings} servings and strictly omit all allergies: ${allergies.concat(avoid).join(', ') || 'None'}.` : '';
 
       const fullPrompt = isQuestionnaire
         ? `${systemPrompt}
-${savedRecipesContext}
-You are Chef Foodie. Formulate an accurate ${parsedDays}-day meal plan and a signature Recommended Recipe.
-LOGISTICS & DIET:
+You are Chef Foodie. The user completed the intake questionnaire for "${topicTitle}".
+INTAKE SUMMARY:
 - Total Days: ${parsedDays}
 - Meal Types: ${parsedMealTypes.join(', ')}
 - Theme: ${parsedTheme}
-- Budget: ${parsedBudget}
-- Servings: ${servings} people (${country})
-- Diets: ${diets.join(', ')}
-- Strictly Avoid / Allergies: ${allergies.concat(avoid).join(', ') || 'None'}
-- Pantry In-Stock: ${pantryItems.length > 0 ? pantryItems.join(', ') : 'Standard kitchen staples'}
-${referenceUrls.length > 0 ? `- Primary Sources: ${referenceUrls.join(', ')}` : ''}
+- Budget Target: ${parsedBudget}
+- Household Servings: ${servings} people (${country})
+- Dietary Rules: ${diets.join(', ') || 'Standard'}
+- Prohibited Allergies/Avoid: ${allergies.concat(avoid).join(', ') || 'None'}
+- Pantry In-Stock Items: ${pantryItems.length > 0 ? pantryItems.join(', ') : 'Standard kitchen essentials'}
 ${scrapedGroundingPrompt}
 
-USER INTAKE RESPONSES:
+USER QUESTIONNAIRE RESPONSES:
 ${intakeContext}
 
-Return ONLY valid JSON matching this schema:
+Return ONLY valid JSON with this exact structure:
 {
-  "reply": "Warm culinary message detailing the plan",
+  "reply": "Warm culinary message detailing why this meal plan and recipe suit their questionnaire answers.",
+  "sourcingType": "${scrapedGrounding ? 'scraped_hybrid' : 'ai_generated'}",
   "plan": {
     "title": "${parsedDays}-Day ${parsedTheme} Plan",
     "totalDays": ${parsedDays},
@@ -291,7 +264,7 @@ Return ONLY valid JSON matching this schema:
         "dayLabel": "Day 1",
         "dateStr": "${parsedStartDate}",
         "mealType": "${parsedMealTypes[0] || 'Dinner'}",
-        "title": "Dish Name",
+        "title": "Dish Title",
         "description": "Short culinary summary",
         "prepMinutes": 15,
         "cookMinutes": 20,
@@ -301,9 +274,9 @@ Return ONLY valid JSON matching this schema:
     ]
   },
   "recommendedRecipe": {
-    "title": "${scrapedGrounding?.title || 'Signature Recipe Name'}",
-    "description": "${scrapedGrounding?.description || 'Detailed chef description'}",
-    "sourceUrl": "${scrapedGrounding?.sourceUrl || referenceUrls[0] || ''}",
+    "title": "${scrapedGrounding?.title || 'Signature Recommended Dish'}",
+    "description": "${scrapedGrounding?.description || 'Chef curated culinary specialty'}",
+    "sourceUrl": "${scrapedGrounding?.sourceUrl || ''}",
     "sourceName": "${scrapedGrounding?.sourceName || ''}",
     "prepMinutes": ${scrapedGrounding?.prepMinutes || 15},
     "cookMinutes": ${scrapedGrounding?.cookMinutes || 20},
@@ -312,14 +285,13 @@ Return ONLY valid JSON matching this schema:
     "mealType": "${parsedMealTypes[0] || 'Dinner'}",
     "ingredients": ["ingredient 1", "ingredient 2"],
     "instructions": ["Step 1", "Step 2", "Step 3"],
-    "chefTip": "Technique secret"
+    "chefTip": "Chef seasoning secret",
+    "isScraped": ${Boolean(scrapedGrounding)}
   }
 }`
         : `${systemPrompt}
-${savedRecipesContext}
 User Query: "${prompt}"
 Context: Cooking for ${servings} people in ${country}. Diet: ${diets.join(', ')}. Avoid: ${allergies.concat(avoid).join(', ')}. Pantry items: ${pantryItems.join(', ')}.
-${referenceUrls.length > 0 ? `Primary References: ${referenceUrls.join(', ')}` : ''}
 ${scrapedGroundingPrompt}
 
 Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
@@ -360,7 +332,7 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       }
     }
 
-    // 9. Synthetic Fallback if LLM was unavailable
+    // 7. Resilient Fallback Synthesizer if LLM is Offline
     if (!responseText) {
       if (scrapedGrounding) {
         recommendedRecipe = {
@@ -376,9 +348,10 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
           ingredients: scrapedGrounding.ingredients,
           instructions: scrapedGrounding.instructions,
           chefTip: 'Rest for 2 minutes before serving so aromas infuse completely.',
-          image: scrapedGrounding.image
+          image: scrapedGrounding.image,
+          isScraped: true
         };
-        responseText = `Here is a curated recipe recommendation derived directly from your primary source (${scrapedGrounding.sourceName || 'web source'}).`;
+        responseText = `Here is your authentic recipe recommendation scraped from your curated web reference (${scrapedGrounding.sourceName || 'web source'}).`;
       } else if (isQuestionnaire) {
         const meals: any[] = [];
         for (let dIdx = 0; dIdx < parsedDays; dIdx++) {
@@ -440,7 +413,7 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       }
     }
 
-    // 10. Attach Scraped Image & Outbound Citation
+    // 8. Attach Authentic Photo & Resolve Image Fallbacks
     if (recommendedRecipe) {
       if (scrapedGrounding?.image && !recommendedRecipe.image) {
         recommendedRecipe.image = scrapedGrounding.image;
@@ -459,13 +432,13 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       }
     }
 
-    // 11. Record Usage Telemetry
+    // 9. Record Usage Telemetry
     const promptTokens = Math.max(25, Math.ceil((prompt.length + 150) / 4));
     const completionTokens = Math.max(40, Math.ceil(responseText.length / 4) + (recommendedRecipe ? 100 : 0));
 
     recordTokenUsage({
-      userId,
-      userEmail,
+      userId: userId || 'guest',
+      userEmail: userEmail || 'user@zecratary.com',
       promptTokens,
       completionTokens,
       model: activeModel,
@@ -479,7 +452,8 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       recommendedRecipe,
       recipe: recommendedRecipe,
       model: activeModel,
-      consumedSystemTokens: authoritativeCost,
+      resultDisplayMode,
+      consumedSystemTokens: chefCost,
       tokenSymbol: tokenSettings.tokenSymbol,
       remainingBalance: deduction.currentBalance
     }, { headers: { 'Cache-Control': 'no-store' } });

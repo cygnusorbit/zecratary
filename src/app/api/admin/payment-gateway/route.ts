@@ -106,11 +106,11 @@ async function savePaymentSettingsDual(ps: any, currency = 'USD') {
     } catch (myErr) {
       // 3. Fallback conditional update
       try {
-        const row = await query(`SELECT id FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = await query(`SELECT id FROM admin_settings WHERE id = '1' LIMIT 1`);
         const exists = Array.isArray(row) ? row.length > 0 : Boolean(((row as any)?.rows)?.length);
         if (exists) {
-          await query(`UPDATE admin_settings SET payment_settings = $1, currency = $2 WHERE id = 1`, [jsonSettings, currency]).catch(async () => {
-            await query(`UPDATE admin_settings SET payment_settings = ?, currency = ? WHERE id = 1`, [jsonSettings, currency]);
+          await query(`UPDATE admin_settings SET payment_settings = $1, currency = $2 WHERE id = '1'`, [jsonSettings, currency]).catch(async () => {
+            await query(`UPDATE admin_settings SET payment_settings = ?, currency = ? WHERE id = '1'`, [jsonSettings, currency]);
           });
         } else {
           await query(`INSERT INTO admin_settings (id, payment_settings, currency) VALUES (1, $1, $2)`, [jsonSettings, currency]).catch(async () => {
@@ -182,7 +182,7 @@ export async function GET() {
     };
 
     // Load from database row id = 1
-    const sRes = await query(`SELECT * FROM admin_settings WHERE id = 1 LIMIT 1`).catch(() => null);
+    const sRes = await query(`SELECT * FROM admin_settings WHERE id = '1' LIMIT 1`).catch(() => null);
     const row = parseDbRow(sRes);
     if (row) {
       if (row.payment_settings) {

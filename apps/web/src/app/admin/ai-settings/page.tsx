@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Sparkles, Globe, PackageCheck, 
-  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, Eye, EyeOff, Calendar, Clock, Flame, Users, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle, ChevronDown, BarChart3, TrendingUp, Hash, DollarSign
+  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, Eye, EyeOff, Calendar, Clock, Flame, Users, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle, ChevronDown, BarChart3, TrendingUp, MessageSquare
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -16,12 +16,18 @@ import {
 } from '@/lib/adminSync';
 import { applyThemeToDocument, fetchAndApplyServerTheme, getMemoryThemeColors, setMemoryThemeColors } from '@/lib/themeConfig';
 
+interface QuestionnaireQuestion {
+  id: string;
+  text: string;
+  dedicatedAnswers: string[];
+}
+
 interface QuestionnaireSection {
   id: string;
   topicTitle: string;
   description: string;
   enabled?: boolean;
-  questions: string[];
+  questions: QuestionnaireQuestion[];
 }
 
 interface DailyUsagePoint {
@@ -33,6 +39,26 @@ interface DailyUsagePoint {
   cost: number;
 }
 
+const getDefaultDedicatedAnswersForText = (text: string): string[] => {
+  const lower = (text || '').toLowerCase();
+  if (lower.includes('how many days') || lower.includes('duration') || lower.includes('plan for')) {
+    return ["3 Days (Quick Prep)", "5 Days (Workweek)", "7 Days (Full Week)", "Weekend Plan (2 Days)"];
+  }
+  if (lower.includes('meal type') || lower.includes('breakfast') || lower.includes('dinner')) {
+    return ["Dinner only", "Lunch & Dinner", "All Meals (Breakfast, Lunch, Dinner)", "Breakfast & Dinner", "All Meals + Snack"];
+  }
+  if (lower.includes('when') || lower.includes('start')) {
+    return ["Start Today", "Start Tomorrow", "Next Monday (Fresh Week)", "This Coming Weekend", "Flexible / Any Day"];
+  }
+  if (lower.includes('preference') || lower.includes('theme') || lower.includes('diet') || lower.includes('macro')) {
+    return ["High-Protein Wholesome", "Quick & Easy (<25m)", "Mediterranean Fresh", "Keto / Low-Carb", "Budget-Friendly Comfort", "Plant-Based / Balanced Veggie"];
+  }
+  if (lower.includes('budget') || lower.includes('serving') || lower.includes('$')) {
+    return ["Under $5/serving (Economy)", "$5 - $8/serving (Balanced)", "$8 - $12/serving (Generous)", "$12+/serving (Premium)", "Flexible Target"];
+  }
+  return ["Standard Option", "Custom Preference"];
+};
+
 const DEFAULT_SECTIONS: QuestionnaireSection[] = [
   {
     id: 'sec_core',
@@ -40,9 +66,38 @@ const DEFAULT_SECTIONS: QuestionnaireSection[] = [
     description: 'Basic duration, meal types, and start dates for the multi-day plan.',
     enabled: true,
     questions: [
-      "How many days would you like to plan for (up to 7 days)?",
-      "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
-      "When would you like the meal plan to start (today, tomorrow, or a specific date)?"
+      {
+        id: 'q_core_1',
+        text: "How many days would you like to plan for (up to 7 days)?",
+        dedicatedAnswers: [
+          "3 Days (Quick Prep)",
+          "5 Days (Workweek)",
+          "7 Days (Full Week)",
+          "Weekend Plan (2 Days)"
+        ]
+      },
+      {
+        id: 'q_core_2',
+        text: "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+        dedicatedAnswers: [
+          "Dinner only",
+          "Lunch & Dinner",
+          "All Meals (Breakfast, Lunch, Dinner)",
+          "Breakfast & Dinner",
+          "All Meals + Snack"
+        ]
+      },
+      {
+        id: 'q_core_3',
+        text: "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+        dedicatedAnswers: [
+          "Start Today",
+          "Start Tomorrow",
+          "Next Monday (Fresh Week)",
+          "This Coming Weekend",
+          "Flexible / Any Day"
+        ]
+      }
     ]
   },
   {
@@ -51,8 +106,29 @@ const DEFAULT_SECTIONS: QuestionnaireSection[] = [
     description: 'Themes, nutritional restrictions, and financial target per serving.',
     enabled: true,
     questions: [
-      "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
-      "What is your approximate ingredient budget per serving?"
+      {
+        id: 'q_pref_1',
+        text: "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+        dedicatedAnswers: [
+          "High-Protein Wholesome",
+          "Quick & Easy (<25m)",
+          "Mediterranean Fresh",
+          "Keto / Low-Carb",
+          "Budget-Friendly Comfort",
+          "Plant-Based / Balanced Veggie"
+        ]
+      },
+      {
+        id: 'q_pref_2',
+        text: "What is your approximate ingredient budget per serving?",
+        dedicatedAnswers: [
+          "Under $5/serving (Economy)",
+          "$5 - $8/serving (Balanced)",
+          "$8 - $12/serving (Generous)",
+          "$12+/serving (Premium)",
+          "Flexible Target"
+        ]
+      }
     ]
   }
 ];
@@ -77,7 +153,7 @@ export default function ChefAISettingsPage() {
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [systemPrompt, setSystemPrompt] = useState(
-    'You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, and dietary preferences when generating culinary or meal planning responses.'
+    'You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, recommended recipe sources, and dietary preferences when generating culinary or meal planning responses.'
   );
   const [envKeysMap, setEnvKeysMap] = useState<Record<string, string>>({});
   const [syncingEnvKey, setSyncingEnvKey] = useState(false);
@@ -106,7 +182,7 @@ export default function ChefAISettingsPage() {
   const [voiceAutoPlay, setVoiceAutoPlay] = useState(false);
   const [selectedVoiceName, setSelectedVoiceName] = useState('en-US-Neural2-F');
 
-  // Agent Parameters: Knowledge Base, Custom Vocabulary, Filter Words
+  // Agent Parameters
   const [knowledgeBaseList, setKnowledgeBaseList] = useState<string[]>(['Culinary Masterclass DB v2', 'Nutritional Guidelines 2026']);
   const [newKbInput, setNewKbInput] = useState('');
 
@@ -116,16 +192,21 @@ export default function ChefAISettingsPage() {
   const [filterWordsList, setFilterWordsList] = useState<string[]>(['Oily', 'Artificial preservatives', 'Unhealthy trans fats']);
   const [newFilterInput, setNewFilterInput] = useState('');
 
-  // Multi-Topic Questionnaire State
+  // Recommended Recipes Url (Primary Source for /chef)
+  const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
+  const [newRecipeUrlInput, setNewRecipeUrlInput] = useState('');
+
+  // Multi-Topic Questionnaire State with Dedicated Answers
   const [sections, setSections] = useState<QuestionnaireSection[]>(DEFAULT_SECTIONS);
   const [newTopicTitle, setNewTopicTitle] = useState('');
   const [newTopicDesc, setNewTopicDesc] = useState('');
   const [activeTopicId, setActiveTopicId] = useState<string>('sec_core');
   const [newQuestionText, setNewQuestionText] = useState('');
+  const [dedicatedAnswerInputs, setDedicatedAnswerInputs] = useState<Record<string, string>>({});
 
   const [saved, setSaved] = useState(false);
 
-  // Dynamic Theme Synchronization & Smooth Day/Dark Transition
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback((incomingColors?: any) => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -268,7 +349,7 @@ export default function ChefAISettingsPage() {
     loadUsageMetrics(usageTimeframe);
   }, [usageTimeframe, loadUsageMetrics]);
 
-  // Fetch API Keys from .env / PostgreSQL
+  // Fetch API Keys
   const fetchEnvKeys = async () => {
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
@@ -299,7 +380,7 @@ export default function ChefAISettingsPage() {
     return {};
   };
 
-  // Load Settings Exclusively from Server Storage
+  // Load Settings from Server Storage
   const loadSettingsFromServer = useCallback(async () => {
     if (typeof purgeLegacyBrowserAdminStorage === 'function') {
       purgeLegacyBrowserAdminStorage();
@@ -334,8 +415,43 @@ export default function ChefAISettingsPage() {
         if (Array.isArray(c.customVocabularyList)) setCustomVocabularyList(c.customVocabularyList);
         if (Array.isArray(c.filterWordsList)) setFilterWordsList(c.filterWordsList);
 
+        if (Array.isArray(c.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(c.recommendedRecipeUrls.filter(Boolean));
+        } else if (Array.isArray(c.recommendedRecipesUrls)) {
+          setRecommendedRecipeUrls(c.recommendedRecipesUrls.filter(Boolean));
+        } else if (Array.isArray(serverData.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(serverData.recommendedRecipeUrls.filter(Boolean));
+        }
+
         if (Array.isArray(c.sections) && c.sections.length > 0) {
-          setSections(c.sections.map((s: any) => ({ ...s, enabled: s.enabled !== false })));
+          setSections(c.sections.map((s: any, secIdx: number) => ({
+            id: s.id || `sec_${secIdx}`,
+            topicTitle: s.topicTitle || `Topic ${secIdx + 1}`,
+            description: s.description || '',
+            enabled: s.enabled !== false,
+            questions: Array.isArray(s.questions)
+              ? s.questions.map((q: any, qIdx: number) => {
+                  if (typeof q === 'string') {
+                    return {
+                      id: `${s.id || 'sec'}_q_${qIdx}`,
+                      text: q,
+                      dedicatedAnswers: getDefaultDedicatedAnswersForText(q)
+                    };
+                  }
+                  return {
+                    id: q.id || `${s.id || 'sec'}_q_${qIdx}`,
+                    text: q.text || q.question || '',
+                    dedicatedAnswers: Array.isArray(q.dedicatedAnswers) 
+                      ? q.dedicatedAnswers 
+                      : Array.isArray(q.answers) 
+                        ? q.answers 
+                        : Array.isArray(q.options) 
+                          ? q.options 
+                          : getDefaultDedicatedAnswersForText(q.text || '')
+                  };
+                })
+              : []
+          })));
         }
       }
     } catch (err) {
@@ -368,7 +484,6 @@ export default function ChefAISettingsPage() {
     }
   };
 
-  // Resilient Dual-Tier Test Connection
   const handleTestApiKey = async () => {
     const keyToTest = apiKey.trim() || 
       (provider === 'gemini' 
@@ -390,7 +505,6 @@ export default function ChefAISettingsPage() {
     let latency = 0;
 
     try {
-      // Primary verification via server route
       const res = await fetch('/api/admin/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -413,7 +527,6 @@ export default function ChefAISettingsPage() {
         success = true;
         message = data.message || `${t('connectedPrefix', 'Connected to')} ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} (${model}) in ${latency}ms!`;
       } else if (res.status === 404 || !res.ok) {
-        // Direct Provider Fallback Verification
         if (provider === 'gemini') {
           const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
           const directData = await directRes.json();
@@ -445,32 +558,13 @@ export default function ChefAISettingsPage() {
       }
     } catch (err: any) {
       latency = Math.round(performance.now() - startTime);
-      // Fallback check on network error
-      if (provider === 'gemini') {
-        try {
-          const pingRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
-          const pingData = await pingRes.json();
-          if (pingRes.ok && pingData.models) {
-            success = true;
-            message = `${t('connectedPrefix', 'Connected to')} Google Gemini (${model}) in ${latency}ms!`;
-          } else {
-            success = false;
-            message = pingData.error?.message || err.message || t('verificationEndpointError', 'Handshake error.');
-          }
-        } catch (e: any) {
-          success = false;
-          message = e.message || err.message || t('verificationEndpointError', 'Could not reach endpoint.');
-        }
-      } else {
-        success = false;
-        message = err.message || t('verificationEndpointError', 'Could not reach verification endpoint.');
-      }
+      success = false;
+      message = err.message || t('verificationEndpointError', 'Could not reach verification endpoint.');
     } finally {
       setTestingKey(false);
       setTestResult({ success, message, latency });
 
       if (success) {
-        // Auto-persist working key & model to server storage
         persistServerAdminSettings({
           aiProvider: provider,
           aiModel: model,
@@ -565,31 +659,7 @@ export default function ChefAISettingsPage() {
             updatedAt: new Date().toISOString()
           }
         });
-
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-          window.dispatchEvent(new Event('zecratary_settings_updated'));
-          window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-          window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
-          try {
-            const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
-            syncCh.postMessage({ model: activeModel, provider: 'gemini' });
-            syncCh.close();
-          } catch (_) {}
-        }
       } else if (!silent) {
-        // Direct ping fallback for silent/manual autoconnect
-        try {
-          const direct = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
-          if (direct.ok) {
-            setTestResult({
-              success: true,
-              message: `${t('connectedPrefix', 'Connected to')} Google Gemini (${activeModel})! Verified and synchronized.`,
-              latency
-            });
-            return;
-          }
-        } catch (_) {}
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
       }
     } catch (err: any) {
@@ -650,6 +720,7 @@ export default function ChefAISettingsPage() {
     }
   };
 
+  // Topic Section Handlers
   const handleAddTopicSection = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTopicTitle.trim()) return;
@@ -682,32 +753,180 @@ export default function ChefAISettingsPage() {
     if (e) e.stopPropagation();
     setSections(sections.map(sec => {
       if (sec.id === secId) {
-        return { ...sec, enabled: sec.enabled === false ? true : false };
+        return { ...sec, enabled: sec.enabled === false };
       }
       return sec;
     }));
   };
 
+  // Question & Dedicated Answer Handlers
   const handleAddQuestionToTopic = (secId: string) => {
     if (!newQuestionText.trim()) return;
+    const newText = newQuestionText.trim();
+    const newQuestion: QuestionnaireQuestion = {
+      id: `${secId}_q_${Date.now()}`,
+      text: newText,
+      dedicatedAnswers: getDefaultDedicatedAnswersForText(newText)
+    };
+
     setSections(sections.map(sec => {
       if (sec.id === secId) {
-        return { ...sec, questions: [...sec.questions, newQuestionText.trim()] };
+        return { ...sec, questions: [...sec.questions, newQuestion] };
       }
       return sec;
     }));
     setNewQuestionText('');
   };
 
-  const handleRemoveQuestionFromTopic = (secId: string, qIndex: number) => {
+  const handleUpdateQuestionText = (secId: string, qIdx: number, newText: string) => {
     setSections(sections.map(sec => {
       if (sec.id === secId) {
-        return { ...sec, questions: sec.questions.filter((_, i) => i !== qIndex) };
+        const qs = [...sec.questions];
+        qs[qIdx] = { ...qs[qIdx], text: newText };
+        return { ...sec, questions: qs };
       }
       return sec;
     }));
   };
 
+  const handleRemoveQuestionFromTopic = (secId: string, qIdx: number) => {
+    setSections(sections.map(sec => {
+      if (sec.id === secId) {
+        return { ...sec, questions: sec.questions.filter((_, i) => i !== qIdx) };
+      }
+      return sec;
+    }));
+  };
+
+  const handleAddDedicatedAnswer = (secId: string, qIdx: number) => {
+    const inputKey = `${secId}_${qIdx}`;
+    const raw = (dedicatedAnswerInputs[inputKey] || '').trim();
+    if (!raw) return;
+
+    const newItems = raw.includes(',') 
+      ? raw.split(',').map(s => s.trim()).filter(Boolean)
+      : [raw];
+
+    setSections(prevSections => prevSections.map(sec => {
+      if (sec.id === secId) {
+        const qs = [...sec.questions];
+        const targetQ = { ...qs[qIdx] };
+        const currentAnswers = [...(targetQ.dedicatedAnswers || [])];
+
+        newItems.forEach(item => {
+          if (!currentAnswers.includes(item)) {
+            currentAnswers.push(item);
+          }
+        });
+
+        targetQ.dedicatedAnswers = currentAnswers;
+        qs[qIdx] = targetQ;
+        return { ...sec, questions: qs };
+      }
+      return sec;
+    }));
+
+    setDedicatedAnswerInputs(prev => ({ ...prev, [inputKey]: '' }));
+  };
+
+  const handleRemoveDedicatedAnswer = (secId: string, qIdx: number, ansIdx: number) => {
+    setSections(sections.map(sec => {
+      if (sec.id === secId) {
+        const qs = [...sec.questions];
+        const targetQ = { ...qs[qIdx] };
+        targetQ.dedicatedAnswers = (targetQ.dedicatedAnswers || []).filter((_, i) => i !== ansIdx);
+        qs[qIdx] = targetQ;
+        return { ...sec, questions: qs };
+      }
+      return sec;
+    }));
+  };
+
+  // Recommended Recipes Url Handlers
+  const persistUrlsToDb = async (urls: string[]) => {
+    try {
+      await persistServerAdminSettings({
+        aiProvider: provider,
+        aiModel: model,
+        chefAiSettings: {
+          provider,
+          apiKey: apiKey.trim(),
+          model,
+          temperature,
+          maxTokens,
+          systemPrompt,
+          enableWebSearch,
+          enablePantryContext,
+          strictDietEnforcement,
+          maxPlanDays,
+          resultDisplayMode,
+          enableVoiceInteraction,
+          voiceEngine,
+          voiceSpeed,
+          voiceAutoPlay,
+          selectedVoiceName,
+          knowledgeBaseList,
+          customVocabularyList,
+          filterWordsList,
+          recommendedRecipeUrls: urls,
+          sections,
+          updatedAt: new Date().toISOString()
+        },
+        recommendedRecipeUrls: urls
+      });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+      }
+    } catch (_) {}
+  };
+
+  const handleAddRecommendedUrls = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const raw = newRecipeUrlInput.trim();
+    if (!raw) return;
+
+    const entries = raw
+      .split(/[\n,]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const cleanedUrls: string[] = [];
+    for (let entry of entries) {
+      if (!/^https?:\/\//i.test(entry)) {
+        entry = 'https://' + entry;
+      }
+      try {
+        new URL(entry);
+        if (!recommendedRecipeUrls.includes(entry) && !cleanedUrls.includes(entry)) {
+          cleanedUrls.push(entry);
+        }
+      } catch (_) {}
+    }
+
+    if (cleanedUrls.length > 0) {
+      const updated = [...recommendedRecipeUrls, ...cleanedUrls];
+      setRecommendedRecipeUrls(updated);
+      setNewRecipeUrlInput('');
+      persistUrlsToDb(updated);
+    }
+  };
+
+  const handleRemoveRecommendedUrl = (idx: number) => {
+    const updated = recommendedRecipeUrls.filter((_, i) => i !== idx);
+    setRecommendedRecipeUrls(updated);
+    persistUrlsToDb(updated);
+  };
+
+  const handleClearAllRecommendedUrls = () => {
+    if (confirm(t('confirmClearAllUrls', 'Clear all recommended recipe URLs?'))) {
+      setRecommendedRecipeUrls([]);
+      persistUrlsToDb([]);
+    }
+  };
+
+  // Master Save Configuration Handler
   const handleSave = async (e?: React.FormEvent | React.MouseEvent) => {
     if (e) e.preventDefault();
     if (isSaving) return;
@@ -734,11 +953,16 @@ export default function ChefAISettingsPage() {
       knowledgeBaseList,
       customVocabularyList,
       filterWordsList,
+      recommendedRecipeUrls,
       sections,
       updatedAt: new Date().toISOString()
     };
 
     const activeFlattenedQuestions = sections
+      .filter(s => s.enabled !== false)
+      .flatMap(s => s.questions.map(q => q.text));
+
+    const activeFlattenedItems = sections
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
@@ -747,12 +971,14 @@ export default function ChefAISettingsPage() {
         aiProvider: provider,
         aiModel: model,
         chefAiSettings: config,
-        chefQuestionnaire: activeFlattenedQuestions
+        recommendedRecipeUrls,
+        chefQuestionnaire: activeFlattenedQuestions,
+        chefQuestionnaireWithAnswers: activeFlattenedItems
       });
 
       if (cleanApiKey) {
         try {
-          const res = await fetch('/api/admin/keys', {
+          await fetch('/api/admin/keys', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -763,14 +989,6 @@ export default function ChefAISettingsPage() {
               status: 'active'
             })
           });
-
-          const data = await res.json();
-          if (res.ok && data.success) {
-            setTestResult({
-              success: true,
-              message: `${t('keySavedToEnv', 'Key saved to local .env and synchronized')} (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
-            });
-          }
         } catch (_) {}
       }
 
@@ -808,7 +1026,6 @@ export default function ChefAISettingsPage() {
   const totalCombinedTokens = totalPromptTokens + totalCompletionTokens;
   const totalCostEstimate = usagePoints.reduce((acc, p) => acc + p.cost, 0);
 
-  // Chart Coordinates Calculation
   const chartHeight = 160;
   const chartWidth = 680;
   const maxTokenValue = Math.max(...usagePoints.map(p => p.promptTokens + p.completionTokens), 1000);
@@ -875,8 +1092,6 @@ export default function ChefAISettingsPage() {
               backgroundColor: 'var(--color-primary)',
               boxShadow: 'var(--color-primary-shadow, 0 8px 20px -4px rgba(224, 86, 56, 0.3))'
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             {isSaving ? (
               <>
@@ -922,7 +1137,6 @@ export default function ChefAISettingsPage() {
         })}
       </div>
 
-      {/* Accessible Landmark Container */}
       <div 
         role="region"
         aria-label={t('aiAssistantConfigForm', 'AI Assistant Settings Configuration Form')}
@@ -933,7 +1147,7 @@ export default function ChefAISettingsPage() {
         {/* TAB 1: GENERAL & MODEL CONFIG */}
         {activeTab === 'general' && (
           <div className="space-y-6 animate-in fade-in">
-            {/* 1.1 AI Engine Provider & Model Selection */}
+            {/* AI Engine Provider & Model Selection */}
             <div 
               className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
               style={{
@@ -1114,7 +1328,7 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
-                {/* Harmonized Model Selector with Custom Chevron */}
+                {/* Model Selector */}
                 <div>
                   <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('modelVersionIdentifier', 'Model Version Identifier')}
@@ -1159,7 +1373,7 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* 1.2 NEW: AI USAGE & TOKEN CONSUMPTION CHART */}
+            {/* AI Engine Usage & Token Consumption Analytics */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm transition-colors duration-200"
               style={{
@@ -1326,7 +1540,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* SVG Dynamic Timeline Bar Chart */}
+              {/* Dynamic Bar Chart */}
               <div 
                 className="border rounded-2xl p-4 space-y-3 transition-colors shadow-inner"
                 style={{
@@ -1368,7 +1582,6 @@ export default function ChefAISettingsPage() {
                     className="w-full h-44 select-none min-w-[500px]"
                     preserveAspectRatio="none"
                   >
-                    {/* Horizontal Gridlines */}
                     {[0, 0.25, 0.5, 0.75, 1].map((ratio, gIdx) => {
                       const y = chartHeight - ratio * (chartHeight - 20) + 10;
                       return (
@@ -1396,7 +1609,6 @@ export default function ChefAISettingsPage() {
                       );
                     })}
 
-                    {/* Bars for Each Day */}
                     {usagePoints.map((p, idx) => {
                       const n = usagePoints.length;
                       const colWidth = (chartWidth - 40) / n;
@@ -1417,7 +1629,6 @@ export default function ChefAISettingsPage() {
                           onMouseLeave={() => setHoveredPointIndex(null)}
                           className="cursor-pointer"
                         >
-                          {/* Hover Background Pill */}
                           <rect
                             x={30 + idx * colWidth}
                             y="0"
@@ -1428,7 +1639,6 @@ export default function ChefAISettingsPage() {
                             rx="4"
                           />
 
-                          {/* Completion Tokens Bar (Stacked on top) */}
                           <rect
                             x={x}
                             y={compY}
@@ -1439,7 +1649,6 @@ export default function ChefAISettingsPage() {
                             rx="2"
                           />
 
-                          {/* Prompt Tokens Bar (Bottom) */}
                           <rect
                             x={x}
                             y={promptY}
@@ -1450,7 +1659,6 @@ export default function ChefAISettingsPage() {
                             rx="2"
                           />
 
-                          {/* X Axis Date Label */}
                           {(n <= 10 || idx % Math.ceil(n / 7) === 0 || idx === n - 1) && (
                             <text
                               x={x + barW / 2}
@@ -1468,33 +1676,12 @@ export default function ChefAISettingsPage() {
                     })}
                   </svg>
                 </div>
-
-                {/* Model Distribution Ratio */}
-                <div className="pt-2 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                    {t('modelEngineBreakdown', 'Active Engine Invocations Share:')}
-                  </span>
-                  <div className="flex items-center gap-3 font-mono text-[10px]">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
-                      <span>Gemini 3.5 Flash Lite (71%)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-emerald)' }} />
-                      <span>Gemini 3.6 Flash (22%)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-blue, #3b82f6)' }} />
-                      <span>GPT-4o (7%)</span>
-                    </span>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER & RESULTS APPEARANCE PREVIEW */}
+        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER WITH DEDICATED ANSWERS */}
         {activeTab === 'questionnaire' && (
           <div className="space-y-6 animate-in fade-in">
             <div 
@@ -1513,7 +1700,7 @@ export default function ChefAISettingsPage() {
                     <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
                   </h2>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
+                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics and customize dedicated preset answers for the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
                   </p>
                 </div>
                 <span 
@@ -1529,12 +1716,13 @@ export default function ChefAISettingsPage() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
-                <div className="lg:col-span-5 space-y-3">
+                {/* Topic Sections Column */}
+                <div className="lg:col-span-4 space-y-3">
                   <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
                   </label>
                   
-                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                  <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
                     {sections.map((sec) => {
                       const isActive = sec.id === activeTopicId;
                       const isEnabled = sec.enabled !== false;
@@ -1576,6 +1764,9 @@ export default function ChefAISettingsPage() {
                               </span>
                             </div>
                             <p className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{sec.description}</p>
+                            <span className="text-[9px] font-mono block opacity-75" style={{ color: 'var(--color-text-secondary)' }}>
+                              {sec.questions.length} {t('questionsCount', 'Questions')}
+                            </span>
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
@@ -1627,22 +1818,13 @@ export default function ChefAISettingsPage() {
                       value={newTopicTitle}
                       onChange={(e) => setNewTopicTitle(e.target.value)}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
-                      aria-label={t('topicTitlePlaceholder', 'Topic Title')}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <input
                       type="text"
@@ -1650,22 +1832,13 @@ export default function ChefAISettingsPage() {
                       value={newTopicDesc}
                       onChange={(e) => setNewTopicDesc(e.target.value)}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
-                      aria-label={t('topicDescPlaceholder', 'Topic Description')}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
@@ -1673,16 +1846,15 @@ export default function ChefAISettingsPage() {
                       disabled={!newTopicTitle.trim()}
                       className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
                       style={{ backgroundColor: 'var(--color-primary)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                     >
                       {t('createTopicBtn', 'Create Topic Category')}
                     </button>
                   </div>
                 </div>
 
+                {/* Questions & Dedicated Answers Editor Column */}
                 <div 
-                  className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
+                  className="lg:col-span-8 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -1702,17 +1874,10 @@ export default function ChefAISettingsPage() {
                               setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
                             }}
                             autoComplete="off"
-                            autoCorrect="off"
-                            autoCapitalize="off"
-                            data-lpignore="true"
-                            data-1p-ignore="true"
-                            data-bwignore="true"
-                            data-form-type="other"
                             spellCheck={false}
                             className="font-bold text-sm bg-transparent border-b border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
                             style={{ color: 'var(--color-text)' }}
                             placeholder={t('topicTitlePlaceholder', 'Topic Title...')}
-                            title={t('editTopicTitleTooltip', 'Edit Topic Title')}
                           />
                           <span 
                             className="text-[9px] px-2 py-0.5 rounded font-extrabold uppercase shrink-0 border"
@@ -1733,91 +1898,170 @@ export default function ChefAISettingsPage() {
                             setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
                           }}
                           autoComplete="off"
-                          autoCorrect="off"
-                          autoCapitalize="off"
-                          data-lpignore="true"
-                          data-1p-ignore="true"
-                          data-bwignore="true"
-                          data-form-type="other"
                           spellCheck={false}
                           className="text-[11px] bg-transparent border-b border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
                           style={{ color: 'var(--color-text-secondary)' }}
                           placeholder={t('topicDescPlaceholder', 'Topic Description...')}
-                          title={t('editTopicDescTooltip', 'Edit Topic Description')}
                         />
                       </div>
-                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span className="text-[10px] font-bold shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
                         {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
                       </span>
                     </div>
 
-                    <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                    {/* Question Cards with Dedicated Answers */}
+                    <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
                       {activeSection?.questions.length === 0 ? (
-                        <div className="text-center py-8 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
+                        <div className="text-center py-10 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
                           {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
                         </div>
                       ) : (
-                        activeSection?.questions.map((qText, qIdx) => (
+                        activeSection?.questions.map((qItem, qIdx) => (
                           <div 
-                            key={qIdx} 
-                            className="flex items-center gap-2.5 border rounded-xl p-3 shadow-xs"
+                            key={qItem.id || qIdx} 
+                            className="border rounded-2xl p-4 space-y-3 shadow-xs transition"
                             style={{
                               backgroundColor: 'var(--color-card)',
                               borderColor: 'var(--color-border)'
                             }}
                           >
-                            <span 
-                              className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                            {/* Question Row */}
+                            <div className="flex items-center gap-2.5">
+                              <span 
+                                className="w-6 h-6 rounded-lg font-bold text-xs flex items-center justify-center shrink-0 border"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-primary)',
+                                  color: 'var(--color-primary)'
+                                }}
+                              >
+                                {qIdx + 1}
+                              </span>
+                              <input
+                                type="text"
+                                value={qItem.text}
+                                onChange={(e) => handleUpdateQuestionText(activeSection.id, qIdx, e.target.value)}
+                                placeholder={t('questionTextPlaceholder', 'Enter question text...')}
+                                autoComplete="off"
+                                spellCheck={false}
+                                aria-label={`${t('questionNumber', 'Question')} ${qIdx + 1}`}
+                                className="settings-input flex-1 border rounded-xl px-3.5 py-2 text-xs outline-none font-semibold transition"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
+                                }}
+                                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
+                                className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shrink-0"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                                title={t('removeQuestionTooltip', 'Remove question')}
+                                aria-label={t('removeQuestionTooltip', 'Remove question')}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+
+                            {/* Dedicated Answers Container */}
+                            <div 
+                              className="p-3 rounded-xl border space-y-2.5 transition-colors duration-200"
                               style={{
                                 backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-primary)',
-                                color: 'var(--color-primary)'
+                                borderColor: 'var(--color-border)'
                               }}
                             >
-                              {qIdx + 1}
-                            </span>
-                            <input
-                              type="text"
-                              value={qText}
-                              onChange={(e) => {
-                                const updatedQ = e.target.value;
-                                setSections(sections.map(s => {
-                                  if (s.id === activeSection.id) {
-                                    const qs = [...s.questions];
-                                    qs[qIdx] = updatedQ;
-                                    return { ...s, questions: qs };
-                                  }
-                                  return s;
-                                }));
-                              }}
-                              autoComplete="off"
-                              autoCorrect="off"
-                              autoCapitalize="off"
-                              data-lpignore="true"
-                              data-1p-ignore="true"
-                              data-bwignore="true"
-                              data-form-type="other"
-                              spellCheck={false}
-                              aria-label={`${t('questionNumber', 'Question')} ${qIdx + 1}`}
-                              className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
-                              style={{ color: 'var(--color-text)' }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
-                              className="transition p-1 cursor-pointer hover:opacity-75"
-                              style={{ color: 'var(--color-text-secondary)' }}
-                              title={t('removeQuestionTooltip', 'Remove question')}
-                              aria-label={t('removeQuestionTooltip', 'Remove question')}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                                  <Sparkles className="h-3 w-3" /> {t('dedicatedAnswersHeader', 'Dedicated Answers for Wizard Manager')} ({qItem.dedicatedAnswers?.length || 0})
+                                </span>
+                                <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {t('dedicatedAnswersSubtitle', 'Preset choices presented to user during intake')}
+                                </span>
+                              </div>
+
+                              {/* Interactive Preset Chips */}
+                              <div className="flex flex-wrap gap-1.5 min-h-[28px] items-center">
+                                {!qItem.dedicatedAnswers || qItem.dedicatedAnswers.length === 0 ? (
+                                  <span className="text-[10px] italic py-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                    {t('noDedicatedAnswers', 'No dedicated answers added yet. Users will need to type freely, or add preset answers below.')}
+                                  </span>
+                                ) : (
+                                  qItem.dedicatedAnswers.map((ans, ansIdx) => (
+                                    <span
+                                      key={ansIdx}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border shadow-2xs transition"
+                                      style={{
+                                        backgroundColor: 'var(--color-card)',
+                                        borderColor: 'var(--color-border)',
+                                        color: 'var(--color-text)'
+                                      }}
+                                    >
+                                      <span>{ans}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveDedicatedAnswer(activeSection.id, qIdx, ansIdx)}
+                                        className="hover:opacity-75 cursor-pointer ml-0.5 text-slate-400 hover:text-red-500 transition"
+                                        title={t('removeAnswer', 'Remove answer')}
+                                        aria-label={`${t('removeAnswer', 'Remove')} ${ans}`}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+
+                              {/* Add Dedicated Answer Input */}
+                              <div className="flex gap-2 pt-1">
+                                <input
+                                  type="text"
+                                  placeholder={t('addDedicatedAnswerPlaceholder', 'Add dedicated answer option (e.g. 3 Days, High-Protein)...')}
+                                  value={dedicatedAnswerInputs[`${activeSection.id}_${qIdx}`] || ''}
+                                  onChange={(e) => setDedicatedAnswerInputs({
+                                    ...dedicatedAnswerInputs,
+                                    [`${activeSection.id}_${qIdx}`]: e.target.value
+                                  })}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleAddDedicatedAnswer(activeSection.id, qIdx);
+                                    }
+                                  }}
+                                  className="settings-input flex-1 border rounded-lg px-3 py-1.5 text-xs outline-none transition"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddDedicatedAnswer(activeSection.id, qIdx)}
+                                  className="text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90 shrink-0"
+                                  style={{ backgroundColor: 'var(--color-primary)' }}
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  <span>{t('addAnswerBtn', 'Add Answer')}</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         ))
                       )}
                     </div>
                   </div>
 
+                  {/* Add New Question Input */}
                   <div className="flex gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                     <input
                       type="text"
@@ -1826,12 +2070,6 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => setNewQuestionText(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
                       aria-label={t('addQuestionPrefix', 'Add question')}
                       className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
@@ -1846,10 +2084,10 @@ export default function ChefAISettingsPage() {
                     <button
                       type="button"
                       onClick={() => handleAddQuestionToTopic(activeSection.id)}
-                      className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
+                      className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
                       style={{ backgroundColor: 'var(--color-emerald)' }}
                     >
-                      <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                      <Plus className="h-4 w-4" /> {t('addQuestionBtn', 'Add Question')}
                     </button>
                   </div>
                 </div>
@@ -1909,7 +2147,7 @@ export default function ChefAISettingsPage() {
                 })}
               </div>
 
-              {/* LIVE PREVIEW BOX */}
+              {/* Live Preview Box */}
               <div className="pt-3 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
@@ -1946,17 +2184,6 @@ export default function ChefAISettingsPage() {
                           <span className="font-bold" style={{ color: 'var(--color-primary)' }}>{t('previewDay1Title', 'Day 1 - Sunday:')}</span>
                           <span className="font-medium" style={{ color: 'var(--color-text)' }}>{t('previewMealName1', 'Avocado Quinoa Bowl')}</span>
                           <span style={{ color: 'var(--color-text-secondary)' }}>25m</span>
-                        </div>
-                        <div 
-                          className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <span className="font-bold" style={{ color: 'var(--color-primary)' }}>{t('previewDay2Title', 'Day 2 - Monday:')}</span>
-                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>{t('previewMealName2', 'Grilled Salmon Salad')}</span>
-                          <span style={{ color: 'var(--color-text-secondary)' }}>20m</span>
                         </div>
                       </div>
                     </div>
@@ -2113,7 +2340,6 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* Harmonized Persona Selector with Custom Chevron */}
               <div className="space-y-2">
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('assistantVoicePersona', 'Assistant Voice Persona')}
@@ -2208,10 +2434,9 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 4: AGENT PARAMETERS & KNOWLEDGE TUNING */}
+        {/* TAB 4: AGENT PARAMETERS */}
         {activeTab === 'advanced' && (
           <div className="space-y-6 animate-in fade-in">
-            {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
             <div 
               className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
               style={{
@@ -2349,7 +2574,6 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* AGENT PARAMETERS, KNOWLEDGE TUNING & RESTORED MAX TOKENS */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
               style={{
@@ -2364,7 +2588,6 @@ export default function ChefAISettingsPage() {
                 <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
               </h2>
 
-              {/* TEMPERATURE, RESTORED MAX TOKENS, AND MAX PLAN DAYS */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="space-y-2">
                   <div className="flex justify-between font-bold">
@@ -2387,7 +2610,6 @@ export default function ChefAISettingsPage() {
                   </p>
                 </div>
 
-                {/* RESTORED: Max Output Tokens Cap */}
                 <div className="space-y-2">
                   <div className="flex justify-between font-bold">
                     <span style={{ color: 'var(--color-text-secondary)' }}>{t('maxTokensLabel', 'Max Tokens Output')}: {maxTokens}</span>
@@ -2420,12 +2642,6 @@ export default function ChefAISettingsPage() {
                     value={maxPlanDays}
                     onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
                     autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
                     aria-label={t('maxPlanDaysCap', 'Max Plan Days')}
                     className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
                     style={{
@@ -2442,7 +2658,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* KNOWLEDGE BASE FEATURE */}
+              {/* Knowledge Base */}
               <div className="space-y-3 pt-1">
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
@@ -2475,12 +2691,6 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
                       aria-label={t('knowledgeBaseHeader', 'Knowledge Base')}
                       className="bg-transparent border-none outline-none w-full text-xs"
@@ -2532,7 +2742,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* CUSTOM VOCABULARY FEATURE */}
+              {/* Custom Vocabulary */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
@@ -2565,12 +2775,6 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
                       aria-label={t('customVocabularyHeader', 'Custom Vocabulary')}
                       className="bg-transparent border-none outline-none w-full text-xs"
@@ -2583,14 +2787,6 @@ export default function ChefAISettingsPage() {
                         if (newVocabInput.trim()) {
                           setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
                           setNewVocabInput('');
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          if (newVocabInput.trim()) {
-                            setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                            setNewVocabInput('');
-                          }
                         }
                       }}
                       className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80 outline-none"
@@ -2630,7 +2826,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* FILTER WORDS FEATURE */}
+              {/* Filter Words */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-danger, #ef4444)' }}>
@@ -2663,12 +2859,6 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
                       aria-label={t('filterWordsHeader', 'Filter Words')}
                       className="bg-transparent border-none outline-none w-full text-xs"
@@ -2681,14 +2871,6 @@ export default function ChefAISettingsPage() {
                         if (newFilterInput.trim()) {
                           setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
                           setNewFilterInput('');
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          if (newFilterInput.trim()) {
-                            setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                            setNewFilterInput('');
-                          }
                         }
                       }}
                       className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80 outline-none"
@@ -2728,7 +2910,169 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* SYSTEM PROMPT / PERSONA */}
+              {/* RECOMMENDED RECIPES URL (PRIMARY SOURCE FOR /chef) */}
+              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <div>
+                    <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                      <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
+                    </h3>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('recommendedRecipesUrlDesc', 'Configure primary source URLs for recipe recommendations. When users ask for recipes on /chef, AI will search and prioritize these URLs as the primary source.')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span 
+                      className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border shrink-0"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {recommendedRecipeUrls.length} {t('urlsActiveBadge', 'Active URLs (Primary)')}
+                    </span>
+                    {recommendedRecipeUrls.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllRecommendedUrls}
+                        className="text-[10px] text-red-400 hover:text-red-500 font-bold transition cursor-pointer"
+                      >
+                        {t('clearAll', 'Clear All')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Multi-URL Input Box with Batch Support */}
+                <div className="space-y-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div 
+                      className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <input
+                        type="text"
+                        placeholder={t('recommendedRecipeUrlPlaceholder', 'Add recipe URL (paste single or multiple separated by commas or newlines)...')}
+                        value={newRecipeUrlInput}
+                        onChange={(e) => setNewRecipeUrlInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddRecommendedUrls();
+                          }
+                        }}
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-label={t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
+                        className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                        style={{ color: 'var(--color-text)' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAddRecommendedUrls()}
+                      disabled={!newRecipeUrlInput.trim()}
+                      className="px-4 py-2.5 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-40 hover:opacity-90 shrink-0"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      <Plus className="h-4 w-4" /> {t('addUrlBtn', 'Add URL')}
+                    </button>
+                  </div>
+                  <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                    💡 {t('multiUrlHint', 'Tip: You can paste multiple URLs at once separated by commas or newlines. Chef AI will prioritize these as primary culinary references.')}
+                  </span>
+                </div>
+
+                {/* URL List / Badges */}
+                <div className="space-y-2 pt-1">
+                  {recommendedRecipeUrls.length === 0 ? (
+                    <div 
+                      className="p-4 text-center border border-dashed rounded-2xl text-xs space-y-0.5"
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                    >
+                      <span className="font-semibold block">{t('noRecommendedUrlsTitle', 'No Recommended Recipe URLs configured.')}</span>
+                      <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[260px] overflow-y-auto pr-1">
+                      {recommendedRecipeUrls.map((urlStr, idx) => {
+                        let domain = 'Website';
+                        try {
+                          domain = new URL(urlStr).hostname.replace(/^www\./, '');
+                        } catch (_) {}
+
+                        return (
+                          <div 
+                            key={idx}
+                            className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span 
+                                  className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border truncate"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-primary)'
+                                  }}
+                                >
+                                  {domain}
+                                </span>
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  {t('primaryTag', 'Primary')}
+                                </span>
+                              </div>
+                              <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
+                                {urlStr}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <a
+                                href={urlStr}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1 rounded-lg hover:opacity-80 transition cursor-pointer"
+                                style={{ color: 'var(--color-primary)' }}
+                                title={t('openUrlTooltip', 'Open in new tab')}
+                              >
+                                <Globe className="h-3.5 w-3.5" />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveRecommendedUrl(idx)}
+                                className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
+                                style={{ color: 'var(--color-text-secondary)' }}
+                                title={t('removeUrlTooltip', 'Remove URL')}
+                                aria-label={t('removeUrlTooltip', 'Remove URL')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* System Prompt */}
               <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
@@ -2738,12 +3082,6 @@ export default function ChefAISettingsPage() {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
                   spellCheck={false}
                   aria-label={t('systemPromptHeader', 'System Prompt')}
                   className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
