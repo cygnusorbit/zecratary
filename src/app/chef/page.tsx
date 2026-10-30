@@ -6,7 +6,7 @@ import {
   Calendar, CalendarPlus, X, Loader2, User as UserIcon, 
   Sparkles, Bookmark, Package, Plus, Trash2, ChevronDown, 
   Cpu, Mic, MicOff, Volume2, Square, Award,
-  Layers, CheckCircle2, ShoppingCart, Globe, Coins
+  Layers, CheckCircle2, ShoppingCart, Globe
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -220,7 +220,7 @@ const resolveChefRecipeCost = (...sources: any[]): number => {
       }
     }
   }
-  return 0; // Dynamic default without hardcoding
+  return 0;
 };
 
 const resolveIsTokenEnabled = (...sources: any[]): boolean => {
@@ -1213,7 +1213,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER - 100% FLUID BAR WITH LIVE WALLET */}
+      {/* TOP HEADER - 100% FLUID BAR WITHOUT REDUNDANT TOKEN TOPUP BOX */}
       <div 
         role="region"
         aria-label={t('chefHeaderAria', 'Chef Navigation and Active AI Model Status')}
@@ -1309,30 +1309,6 @@ export default function ChefChatPage() {
                 <span>{t('tokenFreeModeBadge', 'Free Token Mode')}</span>
               </div>
             )}
-
-            {/* LIVE WALLET BADGE WITH TOP-UP ACTION */}
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-xs transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)'
-              }}
-              title={(t('tokenBalanceTooltip', 'Available Balance: {balance} {symbol}')).replace('{balance}', String(tokenBalance)).replace('{symbol}', tokenSymbol || '')}
-            >
-              <Coins className="h-4 w-4 text-amber-400 shrink-0" />
-              <span className="text-xs font-mono font-bold" style={{ color: 'var(--color-text)' }}>
-                {tokenBalance} {tokenSymbol ? <span className="font-sans text-[11px] font-medium" style={{ color: 'var(--color-text-secondary)' }}>{tokenSymbol}</span> : null}
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsTokenPurchaseOpen(true)}
-                className="ml-0.5 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs shrink-0"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topUpTokens', 'Top Up Tokens')}
-              >
-                {t('topUpBtn', 'Top Up')}
-              </button>
-            </div>
 
             {/* DYNAMIC AI MODEL BADGE */}
             <div 
@@ -2037,7 +2013,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR (ZERO HARDCODED TOKENS & DYNAMIC BADGE) */}
+      {/* PROMPT INPUT BAR (DYNAMIC BADGE SYNCED WITH /admin/token-setting) */}
       <div 
         role="region"
         aria-label={t('promptInputAria', 'Culinary Prompt Input Bar')}
@@ -2503,7 +2479,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOKEN PURCHASE MODAL */}
+      {/* TOKEN PURCHASE MODAL (Triggered on-demand when tokens run low) */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
