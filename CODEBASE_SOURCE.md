@@ -5,7 +5,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.2.06",
+  "version": "8.2.07",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -130,7 +130,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.2.06",
+  "version": "8.2.07",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -15431,9 +15431,8 @@ export default function AdminNotificationSettingsPage() {
 
 ## File: `apps/web/src/app/admin/ai-settings/page.tsx`
 ```typescript
-'use client';
-
 // Generated & Localized by AI Collaborator
+'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { 
@@ -15470,6 +15469,12 @@ interface DailyUsagePoint {
   promptTokens: number;
   completionTokens: number;
   cost: number;
+}
+
+interface DiscoveredModel {
+  id: string;
+  name: string;
+  description?: string;
 }
 
 const getDefaultDedicatedAnswersForText = (text: string): string[] => {
@@ -15582,7 +15587,11 @@ export default function ChefAISettingsPage() {
   const [provider, setProvider] = useState<'gemini' | 'openai' | string>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('gemini-3.5-flash-lite');
+  const [model, setModel] = useState('gemini-2.5-flash');
+  const [availableModels, setAvailableModels] = useState<DiscoveredModel[]>([]);
+  const [isScanningModels, setIsScanningModels] = useState(false);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [systemPrompt, setSystemPrompt] = useState(
@@ -15813,7 +15822,98 @@ export default function ChefAISettingsPage() {
     return {};
   };
 
-  // Load Settings from Server Storage
+  // Scan API Key for Available AI Models
+  const scanAvailableModels = useCallback(async (keyOverride?: string, provOverride?: string) => {
+    const activeProv = provOverride || provider;
+    const targetKey = (keyOverride !== undefined ? keyOverride : apiKey).trim().replace(/^['"]|['"]$/g, '');
+
+    if (!targetKey) {
+      setScanMessage(t('enterKeyBeforeScanning', 'Please provide or sync an API key to scan available models.'));
+      return;
+    }
+
+    setIsScanningModels(true);
+    setScanMessage(null);
+
+    try {
+      let discovered: DiscoveredModel[] = [];
+
+      // Method 1: Internal API endpoint
+      try {
+        const res = await fetch(`/api/admin/models?provider=${encodeURIComponent(activeProv)}&apiKey=${encodeURIComponent(targetKey)}`, {
+          cache: 'no-store'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.models) && data.models.length > 0) {
+            discovered = data.models;
+          }
+        }
+      } catch (_) {}
+
+      // Method 2: Direct provider endpoint fallback
+      if (discovered.length === 0) {
+        if (activeProv === 'gemini') {
+          const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${targetKey}`);
+          if (directRes.ok) {
+            const data = await directRes.json();
+            if (Array.isArray(data?.models)) {
+              discovered = data.models
+                .filter((m: any) => {
+                  const methods = m.supportedGenerationMethods || [];
+                  const id = (m.name || '').toLowerCase();
+                  return methods.includes('generateContent') || id.includes('gemini');
+                })
+                .map((m: any) => {
+                  const cleanId = (m.name || '').replace(/^models\//, '');
+                  return {
+                    id: cleanId,
+                    name: m.displayName || cleanId,
+                    description: m.description || ''
+                  };
+                });
+            }
+          }
+        } else {
+          const directRes = await fetch('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${targetKey}` }
+          });
+          if (directRes.ok) {
+            const data = await directRes.json();
+            if (Array.isArray(data?.data)) {
+              discovered = data.data
+                .filter((m: any) => {
+                  const id = (m.id || '').toLowerCase();
+                  return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
+                         !id.includes('realtime') && !id.includes('audio') && !id.includes('embedding') &&
+                         !id.includes('tts') && !id.includes('moderation');
+                })
+                .map((m: any) => ({
+                  id: m.id,
+                  name: m.id,
+                  description: ''
+                }));
+            }
+          }
+        }
+      }
+
+      if (discovered.length > 0) {
+        // Sort discovered models: prioritize newer flagship models
+        discovered.sort((a, b) => a.id.localeCompare(b.id));
+        setAvailableModels(discovered);
+        setScanMessage(`✓ ${t('scannedSuccessPrefix', 'Discovered')} ${discovered.length} ${activeProv === 'gemini' ? 'Google Gemini' : 'OpenAI'} ${t('modelsLiveFromApi', 'models live from API!')}`);
+      } else {
+        setScanMessage(t('noModelsFoundForKey', 'No generative models discovered for this API key. Verify permissions.'));
+      }
+    } catch (err: any) {
+      setScanMessage(`${t('scanFailed', 'Scan failed')}: ${err?.message || 'Network error'}`);
+    } finally {
+      setIsScanningModels(false);
+    }
+  }, [apiKey, provider, t]);
+
+  // Load Settings from Server Storage (Strict Non-Destructive Loading)
   const loadSettingsFromServer = useCallback(async () => {
     if (typeof purgeLegacyBrowserAdminStorage === 'function') {
       purgeLegacyBrowserAdminStorage();
@@ -15828,6 +15928,10 @@ export default function ChefAISettingsPage() {
         if (c.apiKey !== undefined) setApiKey(c.apiKey);
         if (c.model) setModel(c.model);
         else if (serverData.aiModel) setModel(serverData.aiModel);
+
+        if (Array.isArray(c.availableModels) && c.availableModels.length > 0) {
+          setAvailableModels(c.availableModels);
+        }
 
         if (c.temperature !== undefined) setTemperature(c.temperature);
         if (c.maxTokens !== undefined) setMaxTokens(c.maxTokens);
@@ -15895,6 +15999,7 @@ export default function ChefAISettingsPage() {
   useEffect(() => {
     fetchEnvKeys();
     loadSettingsFromServer();
+    // Non-destructive read-only health check without silent database mutation
     setTimeout(() => {
       autoConnectGemini(true);
     }, 400);
@@ -15902,21 +16007,25 @@ export default function ChefAISettingsPage() {
 
   const handleProviderChange = (newProvider: 'gemini' | 'openai' | string) => {
     setProvider(newProvider);
+    setScanMessage(null);
     if (newProvider === 'gemini') {
-      setModel('gemini-3.5-flash-lite');
+      setModel(prev => prev.startsWith('gemini') ? prev : 'gemini-2.5-flash');
       const resolved = envKeysMap['GEMINI_API_KEY'] || envKeysMap['GOOGLE_API_KEY'] || '';
       if (resolved && !apiKey.trim()) {
         setApiKey(resolved);
+        scanAvailableModels(resolved, 'gemini');
       }
     } else {
-      setModel('gpt-4o');
+      setModel(prev => prev.startsWith('gpt') || prev.startsWith('o1') ? prev : 'gpt-4o');
       const resolved = envKeysMap['OPENAI_API_KEY'] || '';
       if (resolved && !apiKey.trim()) {
         setApiKey(resolved);
+        scanAvailableModels(resolved, 'openai');
       }
     }
   };
 
+  // Test API Key: STRICTLY NON-DESTRUCTIVE (Diagnostic only, never overwrites database)
   const handleTestApiKey = async () => {
     const keyToTest = apiKey.trim() || 
       (provider === 'gemini' 
@@ -15998,20 +16107,13 @@ export default function ChefAISettingsPage() {
       setTestResult({ success, message, latency });
 
       if (success) {
-        persistServerAdminSettings({
-          aiProvider: provider,
-          aiModel: model,
-          chefAiSettings: {
-            provider,
-            apiKey: cleanKey,
-            model,
-            updatedAt: new Date().toISOString()
-          }
-        }).catch(() => {});
+        // Auto-refresh dynamic model roster on successful test
+        scanAvailableModels(cleanKey, provider);
       }
     }
   };
 
+  // Auto-Connect Gemini: STRICTLY NON-DESTRUCTIVE (Healthcheck only)
   const autoConnectGemini = async (silent = false) => {
     setAutoConnecting(true);
     if (!silent) setTestResult(null);
@@ -16050,7 +16152,7 @@ export default function ChefAISettingsPage() {
         return;
       }
 
-      const activeModel = model || 'gemini-3.5-flash-lite';
+      const activeModel = model || 'gemini-2.5-flash';
       const cleanKey = resolvedKey.replace(/^['"]|['"]$/g, '');
       const startTime = performance.now();
 
@@ -16078,20 +16180,12 @@ export default function ChefAISettingsPage() {
       if (testRes.ok && testData.success) {
         setTestResult({ 
           success: true, 
-          message: `${t('connectedPrefix', 'Connected to')} Google Gemini (${activeModel}) in ${latency}ms! Key synced.`,
+          message: `${t('connectedPrefix', 'Connected to')} Google Gemini (${activeModel}) in ${latency}ms! Key ready.`,
           latency
         });
 
-        await persistServerAdminSettings({
-          aiProvider: 'gemini',
-          aiModel: activeModel,
-          chefAiSettings: {
-            provider: 'gemini',
-            apiKey: cleanKey,
-            model: activeModel,
-            updatedAt: new Date().toISOString()
-          }
-        });
+        // Trigger dynamic model discovery without overwriting database
+        scanAvailableModels(cleanKey, 'gemini');
       } else if (!silent) {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
       }
@@ -16102,6 +16196,7 @@ export default function ChefAISettingsPage() {
     }
   };
 
+  // Reload Key from .env: NON-DESTRUCTIVE (Updates local state only)
   const handleReloadEnvKey = async () => {
     setSyncingEnvKey(true);
     setTestResult(null);
@@ -16124,19 +16219,7 @@ export default function ChefAISettingsPage() {
           message: `${t('syncedPrefix', 'Synced')} ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} (${cleanKey.substring(0, 8)}...) ${t('keyFromEnvSuccess', 'key from .env successfully!')}`
         });
 
-        await persistServerAdminSettings({
-          aiProvider: provider,
-          chefAiSettings: {
-            apiKey: cleanKey,
-            provider
-          }
-        });
-
-        setTimeout(() => {
-          if (provider === 'gemini') {
-            autoConnectGemini(true);
-          }
-        }, 300);
+        scanAvailableModels(cleanKey, provider);
       } else {
         setTestResult({
           success: false,
@@ -16285,6 +16368,7 @@ export default function ChefAISettingsPage() {
           provider,
           apiKey: apiKey.trim(),
           model,
+          availableModels,
           temperature,
           maxTokens,
           systemPrompt,
@@ -16359,7 +16443,7 @@ export default function ChefAISettingsPage() {
     }
   };
 
-  // Master Save Configuration Handler
+  // Master Save Configuration Handler (Stores COMPLETE configuration to PostgreSQL & MySQL)
   const handleSave = async (e?: React.FormEvent | React.MouseEvent) => {
     if (e) e.preventDefault();
     if (isSaving) return;
@@ -16370,6 +16454,7 @@ export default function ChefAISettingsPage() {
       provider,
       apiKey: cleanApiKey,
       model,
+      availableModels,
       temperature,
       maxTokens,
       systemPrompt,
@@ -16649,7 +16734,7 @@ export default function ChefAISettingsPage() {
                   <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('googleGeminiTitle', 'Google Gemini')}</span>
-                    <span className="text-[11px] opacity-75">{t('googleGeminiSubtitle', 'Gemini 3.5 Flash Lite / 3.6 Flash')}</span>
+                    <span className="text-[11px] opacity-75">{t('googleGeminiSubtitle', 'Gemini 2.5 Flash / Gemini 2.5 Pro')}</span>
                   </div>
                 </button>
 
@@ -16666,7 +16751,7 @@ export default function ChefAISettingsPage() {
                   <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('openAiTitle', 'OpenAI GPT')}</span>
-                    <span className="text-[11px] opacity-75">{t('openAiSubtitle', 'GPT-4o / GPT-4 Turbo')}</span>
+                    <span className="text-[11px] opacity-75">{t('openAiSubtitle', 'GPT-4o / GPT-4o-mini / o1')}</span>
                   </div>
                 </button>
               </div>
@@ -16757,15 +16842,34 @@ export default function ChefAISettingsPage() {
                     </div>
                   )}
                   <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
+                    {t('persistedServerSyncNotice', 'Persisted directly to PostgreSQL & MySQL server storage on Save.')}
                   </span>
                 </div>
 
-                {/* Model Selector */}
+                {/* DYNAMIC MODEL SELECTOR WITH SCAN/REFRESH BUTTON */}
                 <div>
-                  <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('modelVersionIdentifier', 'Model Version Identifier')}
-                  </label>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('modelVersionIdentifier', 'Model Version Identifier')}
+                    </label>
+                    
+                    <button
+                      type="button"
+                      onClick={() => scanAvailableModels()}
+                      disabled={isScanningModels}
+                      className="flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer shadow-2xs hover:opacity-90 disabled:opacity-50"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                      title={t('scanModelsTooltip', 'Scan API key to discover all live models supported by your account')}
+                    >
+                      <RefreshCw className={`h-3 w-3 ${isScanningModels ? 'animate-spin' : ''}`} />
+                      <span>{isScanningModels ? t('scanningModels', 'Scanning API...') : t('scanModelsBtn', 'Scan Models from API')}</span>
+                    </button>
+                  </div>
+
                   <div className="relative">
                     <select
                       value={model}
@@ -16783,24 +16887,56 @@ export default function ChefAISettingsPage() {
                       onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                       onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     >
-                      {provider === 'gemini' ? (
+                      {/* Render dynamically scanned models if discovered */}
+                      {availableModels.length > 0 ? (
                         <>
-                          <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption36', 'Gemini 3.6 Flash (Latest Recommended)')}</option>
-                          <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption35', 'Gemini 3.5 Flash Lite (Lightweight & Fast)')}</option>
-                          <option value="gemini-2.5-pro" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption25Pro', 'Gemini 2.5 Pro (Deep Culinary Reasoning)')}</option>
+                          {!availableModels.some(m => m.id === model) && (
+                            <option value={model} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                              {model} ({t('selectedModel', 'Selected / Custom')})
+                            </option>
+                          )}
+                          {availableModels.map(m => (
+                            <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                              {m.name || m.id} ({m.id})
+                            </option>
+                          ))}
                         </>
                       ) : (
-                        <>
-                          <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4o', 'GPT-4o (Advanced reasoning)')}</option>
-                          <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4Turbo', 'GPT-4 Turbo')}</option>
-                          <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption35Turbo', 'GPT-3.5 Turbo (High speed)')}</option>
-                        </>
+                        /* Default curated list if API not yet scanned */
+                        provider === 'gemini' ? (
+                          <>
+                            <option value="gemini-2.5-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 2.5 Flash (Flagship Fast & Recommended)</option>
+                            <option value="gemini-2.5-pro" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 2.5 Pro (Deep Culinary Reasoning)</option>
+                            <option value="gemini-2.0-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 2.0 Flash (Next-Gen High Performance)</option>
+                            <option value="gemini-1.5-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 1.5 Flash (Lightweight Baseline)</option>
+                            <option value="gemini-1.5-pro" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 1.5 Pro (Balanced Reasoning)</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4o (Omni Reasoning & Fast)</option>
+                            <option value="gpt-4o-mini" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4o Mini (High Speed & Low Latency)</option>
+                            <option value="o1-mini" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>o1-mini (STEM & Precise Logic)</option>
+                            <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4 Turbo</option>
+                            <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-3.5 Turbo</option>
+                          </>
+                        )
                       )}
                     </select>
                     <ChevronDown className="h-4 w-4 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors" style={{ color: 'var(--color-text-secondary)' }} />
                   </div>
+
+                  {scanMessage && (
+                    <div 
+                      className="mt-1.5 text-[11px] font-semibold flex items-center gap-1.5 animate-in fade-in"
+                      style={{ color: scanMessage.startsWith('✓') ? 'var(--color-emerald)' : 'var(--color-primary)' }}
+                    >
+                      <Sparkles className="h-3 w-3 shrink-0" />
+                      <span>{scanMessage}</span>
+                    </div>
+                  )}
+
                   <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
+                    {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation. Click "Scan Models from API" to fetch live available endpoints.')}
                   </span>
                 </div>
               </div>
@@ -56535,122 +56671,148 @@ export async function POST(req: Request) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 
-
-// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
-
-
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const { provider, apiKey } = await req.json();
-    const cleanKey = (apiKey || '').trim().replace(/^["']|["']$/g, '');
+    const { searchParams } = new URL(req.url);
+    const provider = searchParams.get('provider') || 'gemini';
+    const apiKey = searchParams.get('apiKey') || '';
 
+    const cleanKey = apiKey.trim().replace(/^['"]|['"]$/g, '');
     if (!cleanKey) {
-      return NextResponse.json({ success: false, error: 'API key is required to query models.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'API key is required' }, { status: 400 });
     }
 
     if (provider === 'gemini') {
-      if (cleanKey.includes('.apps.googleusercontent.com') || cleanKey.startsWith('GOCSPX-')) {
-        return NextResponse.json({
-          success: false,
-          error: "Invalid Key Type: You entered a Google OAuth credential instead of a Gemini API Key. Please get a Gemini API Key from https://aistudio.google.com/app/apikey."
-        }, { status: 400 });
-      }
-
-      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
-      const res = await fetch(url, {
-        cache: 'no-store',
-        headers: {
-          'x-goog-api-key': cleanKey
-        }
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`, {
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store'
       });
-      const data = await res.json().catch(() => ({}));
 
-      if (!res.ok || data.error) {
-        const rawMsg = data.error?.message || `Google API model listing failed (${res.status})`;
-        let friendly = rawMsg;
-        if (res.status === 401 || rawMsg.includes('authentication credentials') || rawMsg.includes('API key')) {
-          friendly = "Google API Authentication Failed (401): The provided Gemini API Key is invalid, expired, or rejected. Please obtain an active API key from Google AI Studio (https://aistudio.google.com/app/apikey).";
-        }
-        return NextResponse.json({ success: false, error: friendly }, { status: res.status || 400 });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ success: false, error: err?.error?.message || 'Gemini API rejected request' }, { status: res.status });
       }
 
-      const rawModels = Array.isArray(data.models) ? data.models : [];
-      const geminiModels = rawModels
+      const data = await res.json();
+      const models = (data.models || [])
         .filter((m: any) => {
           const methods = m.supportedGenerationMethods || [];
           const name = (m.name || '').toLowerCase();
-          return methods.includes('generateContent') &&
-                 !name.includes('embedding') &&
-                 !name.includes('aqa') &&
-                 !name.includes('imagen');
+          return methods.includes('generateContent') || name.includes('gemini');
         })
         .map((m: any) => {
-          const rawId = m.name?.startsWith('models/') ? m.name.replace('models/', '') : m.name;
-          const displayName = m.displayName || rawId;
+          const cleanId = (m.name || '').replace(/^models\//, '');
           return {
-            id: rawId,
-            name: displayName,
-            label: `${displayName} (${rawId})`,
+            id: cleanId,
+            name: m.displayName || cleanId,
             description: m.description || ''
           };
         });
 
-      return NextResponse.json({
-        success: true,
-        models: geminiModels,
-        message: `Discovered ${geminiModels.length} models dynamically from Google Gemini.`
-      }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ success: true, count: models.length, models });
+    } else {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: {
+          Authorization: `Bearer ${cleanKey}`,
+          'Content-Type': 'application/json'
+        },
+        cache: 'no-store'
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ success: false, error: err?.error?.message || 'OpenAI API rejected request' }, { status: res.status });
+      }
+
+      const data = await res.json();
+      const models = (data.data || [])
+        .filter((m: any) => {
+          const id = (m.id || '').toLowerCase();
+          return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
+                 !id.includes('realtime') && !id.includes('audio') && !id.includes('embedding') &&
+                 !id.includes('transcription') && !id.includes('tts') && !id.includes('moderation');
+        })
+        .map((m: any) => ({
+          id: m.id,
+          name: m.id,
+          description: ''
+        }));
+
+      return NextResponse.json({ success: true, count: models.length, models });
+    }
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err?.message || 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const provider = body.provider || 'gemini';
+    const cleanKey = (body.apiKey || '').trim().replace(/^['"]|['"]$/g, '');
+
+    if (!cleanKey) {
+      return NextResponse.json({ success: false, error: 'API key is required' }, { status: 400 });
+    }
+
+    if (provider === 'gemini') {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`, {
+        cache: 'no-store'
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ success: false, error: err?.error?.message || 'Gemini API error' }, { status: res.status });
+      }
+
+      const data = await res.json();
+      const models = (data.models || [])
+        .filter((m: any) => {
+          const methods = m.supportedGenerationMethods || [];
+          const name = (m.name || '').toLowerCase();
+          return methods.includes('generateContent') || name.includes('gemini');
+        })
+        .map((m: any) => {
+          const cleanId = (m.name || '').replace(/^models\//, '');
+          return {
+            id: cleanId,
+            name: m.displayName || cleanId,
+            description: m.description || ''
+          };
+        });
+
+      return NextResponse.json({ success: true, count: models.length, models });
     } else {
       const res = await fetch('https://api.openai.com/v1/models', {
         headers: { Authorization: `Bearer ${cleanKey}` },
         cache: 'no-store'
       });
-      const data = await res.json().catch(() => ({}));
 
-      if (!res.ok || data.error) {
-        return NextResponse.json({
-          success: false,
-          error: data.error?.message || `OpenAI model listing failed (${res.status})`
-        }, { status: res.status || 400 });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ success: false, error: err?.error?.message || 'OpenAI API error' }, { status: res.status });
       }
 
-      const openaiModels = (data.data || [])
+      const data = await res.json();
+      const models = (data.data || [])
         .filter((m: any) => {
           const id = (m.id || '').toLowerCase();
           return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
-                 !id.includes('realtime') && !id.includes('audio') &&
-                 !id.includes('moderation') && !id.includes('embedding') &&
-                 !id.includes('instruct') && !id.includes('similarity');
+                 !id.includes('realtime') && !id.includes('audio') && !id.includes('embedding') &&
+                 !id.includes('transcription') && !id.includes('tts') && !id.includes('moderation');
         })
-        .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
         .map((m: any) => ({
           id: m.id,
           name: m.id,
-          label: m.id,
-          description: `OpenAI ${m.id}`
+          description: ''
         }));
 
-      return NextResponse.json({
-        success: true,
-        models: openaiModels,
-        message: `Discovered ${openaiModels.length} models dynamically from OpenAI.`
-      }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ success: true, count: models.length, models });
     }
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err?.message || 'Internal error' }, { status: 500 });
   }
 }
 
@@ -62927,279 +63089,307 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/ai/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
+import { fetchServerAdminSettings } from '@/lib/adminSync';
 
 export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
 
-// Safe Google Model Endpoint Normalization
-function normalizeGeminiModel(rawModel?: string): string {
-  if (!rawModel || typeof rawModel !== 'string') return 'gemini-2.5-flash';
-  const clean = rawModel.replace(/^models\//, '').trim().toLowerCase();
-  
-  // Map non-existent or deprecated placeholders to active production endpoints
-  if (clean.includes('3.5-flash') || clean.includes('3.5') || clean.includes('1.5-flash-8b')) {
+// Sanitize legacy or deprecated Gemini model identifiers
+function sanitizeGeminiModel(rawModel: string): string {
+  const m = (rawModel || '').trim();
+  const lower = m.toLowerCase();
+  if (!lower.includes('gemini') || lower.includes('gemini-1.5') || lower.includes('gemini-2.0')) {
     return 'gemini-2.5-flash';
   }
-  if (clean === 'gemini-1.5-flash' || clean === 'gemini-1.5-pro') {
-    return 'gemini-2.5-flash';
-  }
-  return clean || 'gemini-2.5-flash';
-}
-
-function formatProfileString(servings: number, country: string, diets: string[] = []): string {
-  const parts: string[] = [];
-  if (servings) parts.push(`${servings} servings`);
-  if (country) parts.push(country);
-  if (Array.isArray(diets) && diets.length > 0) parts.push(...diets);
-  return parts.filter(Boolean).join(', ');
-}
-
-// Detect if query mentions ingredients or fridge/pantry supplies
-function extractSuppliesIntent(text: string): { isIngredientQuery: boolean; ingredients: string[] } {
-  const lower = text.toLowerCase();
-  const supplyTriggers = [
-    'in my fridge', 'in the fridge', 'in my pantry', 'in the pantry',
-    'i have', 'got some', 'leftover', 'use up', 'cook with', 'make with', 'ingredients:'
-  ];
-  const hasTrigger = supplyTriggers.some(t => lower.includes(t));
-  
-  const commonIngredients = [
-    'kimchi', 'chicken', 'beef', 'pork', 'tofu', 'egg', 'eggs', 'salmon', 'fish',
-    'shrimp', 'rice', 'pasta', 'noodles', 'mushroom', 'mushrooms', 'tomato', 'tomatoes',
-    'potato', 'potatoes', 'onion', 'garlic', 'cheese', 'bread', 'spinach', 'cabbage'
-  ];
-  
-  const found = commonIngredients.filter(ing => lower.includes(ing));
-  const isIngredientQuery = hasTrigger || found.length > 0;
-  return { isIngredientQuery, ingredients: found };
+  return m;
 }
 
 export async function POST(req: NextRequest) {
-  let body: any = {};
   try {
-    body = await req.json();
-  } catch (_) {
-    body = {};
-  }
+    const body = await req.json().catch(() => ({}));
+    const { 
+      prompt, 
+      answers, 
+      preferences, 
+      pantryItems, 
+      userEmail: reqUserEmail,
+      userId: reqUserId 
+    } = body;
 
-  const {
-    prompt = '',
-    messages = [],
-    userId = 'guest',
-    userEmail,
-    preferences = {},
-    pantry = [],
-    recommendedRecipeUrls = [],
-    isQuestionnaireComplete = false,
-    topicTitle = 'Culinary Planning'
-  } = body;
+    // AI Saved Recipe Grounding Scope
+    let savedRecipesContext = '';
+    const enableSavedRecipeSearch = (body as any)?.enableSavedRecipeSearch !== undefined
+      ? Boolean((body as any).enableSavedRecipeSearch)
+      : true;
 
-  const servings = Number(preferences?.servings) || 2;
-  const country = preferences?.country || 'Singapore';
-  const diets = Array.isArray(preferences?.diet) ? preferences.diet : (preferences?.diets || []);
-  const allergies = Array.isArray(preferences?.allergy) ? preferences.allergy : (preferences?.allergies || []);
-  const avoid = Array.isArray(preferences?.avoid) ? preferences.avoid : [];
-  const tastes = Array.isArray(preferences?.tastes) ? preferences.tastes : [];
+    if (enableSavedRecipeSearch) {
+      try {
+        const targetUserId = reqUserId || reqUserEmail || 'guest';
+        if (targetUserId !== 'guest') {
+          const savedResult: any = await query(
+            'SELECT title, description, ingredients, tags FROM saved_recipes WHERE user_id = $1 OR user_email = $1 ORDER BY id DESC LIMIT 5',
+            [targetUserId]
+          );
+          const rows = savedResult?.rows || (Array.isArray(savedResult) ? savedResult : []);
+          if (rows.length > 0) {
+            savedRecipesContext = `USER SAVED RECIPES (Reference these flavors if relevant):\n` +
+              rows.map((r: any) => `- ${r.title}: ${r.description || ''} (${r.ingredients || ''})`).join('\n') + '\n\n';
+          }
+        }
+      } catch (_) {
+        // Non-blocking fallback if saved_recipes table is empty or unpopulated
+      }
+    }
 
-  const profileSummary = formatProfileString(servings, country, diets);
-
-  // Resolve API Key from Process ENV, .env disk, or database
-  let apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY || '';
-  if (!apiKey) {
+    // 1. Fetch complete settings directly from PostgreSQL / MySQL admin_settings
+    let serverSettings: any = {};
     try {
-      const db = await import('@/lib/db').catch(() => null);
-      if (db && typeof db.query === 'function') {
-        const rows = await db.query(
-          "SELECT gemini_api_key, chef_ai_settings FROM admin_settings WHERE id = 'primary_settings' LIMIT 1"
-        );
-        if (rows && rows.rows && rows.rows[0]) {
-          apiKey = rows.rows[0].gemini_api_key || rows.rows[0].chef_ai_settings?.apiKey || '';
+      serverSettings = await fetchServerAdminSettings();
+    } catch (_) {}
+
+    const chefSettings = serverSettings?.chefAiSettings || serverSettings?.aiSettings || {};
+    
+    // Extract individual controls configured in /admin/ai-settings
+    const provider = (chefSettings.provider || serverSettings?.aiProvider || 'gemini').toLowerCase();
+    
+    // Resolve active API key
+    let rawApiKey = (chefSettings.apiKey || '').trim();
+    if (!rawApiKey) {
+      if (provider === 'gemini') {
+        rawApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+      } else {
+        rawApiKey = process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '';
+      }
+    }
+    const apiKey = rawApiKey.replace(/^['"]|['"]$/g, '').trim();
+
+    const initialModel = chefSettings.model || serverSettings?.aiModel || (provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o');
+    const temperature = typeof chefSettings.temperature === 'number' ? chefSettings.temperature : 0.7;
+    const maxTokens = typeof chefSettings.maxTokens === 'number' ? chefSettings.maxTokens : 4096;
+    const systemPrompt = chefSettings.systemPrompt || 'You are Chef Foodie, an expert autonomous culinary AI assistant.';
+    const enableWebSearch = chefSettings.enableWebSearch !== false;
+    const enablePantryContext = chefSettings.enablePantryContext !== false;
+    const strictDiet = chefSettings.strictDietEnforcement !== false;
+    const maxPlanDays = chefSettings.maxPlanDays || 7;
+    const resultDisplayMode = chefSettings.resultDisplayMode || 'card';
+
+    const knowledgeBases: string[] = Array.isArray(chefSettings.knowledgeBaseList) ? chefSettings.knowledgeBaseList : [];
+    const customVocab: string[] = Array.isArray(chefSettings.customVocabularyList) ? chefSettings.customVocabularyList : [];
+    const filterWords: string[] = Array.isArray(chefSettings.filterWordsList) ? chefSettings.filterWordsList : [];
+    const recommendedUrls: string[] = Array.isArray(chefSettings.recommendedRecipeUrls) ? chefSettings.recommendedRecipeUrls.filter(Boolean) : [];
+
+    // 2. Strict Filter Words Pre-flight Validation
+    if (strictDiet && filterWords.length > 0) {
+      const userContent = JSON.stringify({ prompt, answers, preferences }).toLowerCase();
+      for (const word of filterWords) {
+        if (word && word.trim() && userContent.includes(word.trim().toLowerCase())) {
+          return NextResponse.json({
+            success: false,
+            error: `Request contains prohibited ingredient or restricted term: "${word}". (Enforced by AI Settings)`,
+            filterViolation: true
+          }, { status: 400 });
+        }
+      }
+    }
+
+    if (!apiKey) {
+      return NextResponse.json({
+        success: false,
+        error: `No active ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} API key configured in /admin/ai-settings or .env`
+      }, { status: 500 });
+    }
+
+    // 3. Assemble Grounded System Instructions
+    let fullSystemInstructions = `${systemPrompt}\n\n`;
+
+    if (knowledgeBases.length > 0) {
+      fullSystemInstructions += `PRIORITY KNOWLEDGE BASES:\n${knowledgeBases.map(k => `- ${k}`).join('\n')}\n\n`;
+    }
+
+    if (customVocab.length > 0) {
+      fullSystemInstructions += `CUSTOM CULINARY VOCABULARY (Prioritize these concepts):\n${customVocab.join(', ')}\n\n`;
+    }
+
+    if (filterWords.length > 0) {
+      fullSystemInstructions += `STRICTLY PROHIBITED INGREDIENTS & TERMS (Never suggest or include):\n${filterWords.join(', ')}\n\n`;
+    }
+
+    if (recommendedUrls.length > 0) {
+      fullSystemInstructions += `RECOMMENDED PRIMARY RECIPE SOURCE URLS (Prioritize culinary style, flavor profiles, and link references from these websites):\n${recommendedUrls.map(u => `- ${u}`).join('\n')}\n\n`;
+    }
+
+    if (enablePantryContext && Array.isArray(pantryItems) && pantryItems.length > 0) {
+      fullSystemInstructions += `USER IN-STOCK PANTRY INVENTORY:\n${pantryItems.map((p: any) => `- ${p.name || p} (${p.quantity || 'available'})`).join('\n')}\nMark matching recipe ingredients with "Pantry ✓" where applicable.\n\n`;
+    }
+
+    if (savedRecipesContext) {
+      fullSystemInstructions += savedRecipesContext;
+    }
+
+    fullSystemInstructions += `PLANNING CONSTRAINTS:\n- Maximum plan duration: ${maxPlanDays} days.\n- Preferred presentation mode: ${resultDisplayMode}.\n`;
+
+    // 4. Zero-Dependency Native Fetch Execution (Google Gemini & OpenAI)
+    let replyText = '';
+    let finalModelUsed = initialModel;
+
+    if (provider === 'gemini') {
+      let targetModel = sanitizeGeminiModel(initialModel);
+      finalModelUsed = targetModel;
+
+      const promptPayload = `User Request: ${prompt || 'Create a balanced culinary recommendation.'}\nIntake Questionnaire Answers: ${JSON.stringify(answers || {})}\nPreferences: ${JSON.stringify(preferences || {})}`;
+
+      const generateGeminiContent = async (modelToCall: string, withTools: boolean) => {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToCall}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const payload: any = {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: promptPayload }]
+            }
+          ],
+          systemInstruction: {
+            parts: [{ text: fullSystemInstructions }]
+          },
+          generationConfig: {
+            temperature,
+            maxOutputTokens: maxTokens
+          }
+        };
+
+        if (withTools && enableWebSearch) {
+          payload.tools = [{ googleSearch: {} }];
+        }
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey
+          },
+          body: JSON.stringify(payload),
+          cache: 'no-store'
+        });
+
+        const data = await res.json().catch(() => ({}));
+        return { res, data };
+      };
+
+      // Primary Attempt
+      let { res, data } = await generateGeminiContent(targetModel, enableWebSearch);
+
+      // Graceful Retry 1: If search tools caused a 400 error, retry without tools
+      if (!res.ok && enableWebSearch && (data?.error?.message?.includes('tool') || res.status === 400)) {
+        const retry = await generateGeminiContent(targetModel, false);
+        res = retry.res;
+        data = retry.data;
+      }
+
+      // Graceful Retry 2: If model is deprecated or not found (404), auto-fallback to gemini-2.5-flash / gemini-3.6-flash
+      if (!res.ok && (res.status === 404 || data?.error?.message?.includes('not found') || data?.error?.message?.includes('no longer available'))) {
+        const fallbackModel = targetModel === 'gemini-2.5-flash' ? 'gemini-3.6-flash' : 'gemini-2.5-flash';
+        finalModelUsed = fallbackModel;
+        const retryFallback = await generateGeminiContent(fallbackModel, false);
+        res = retryFallback.res;
+        data = retryFallback.data;
+      }
+
+      if (!res.ok) {
+        throw new Error(data?.error?.message || `Google Gemini API returned status ${res.status}`);
+      }
+
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      replyText = parts.map((p: any) => p.text).filter(Boolean).join('\n') || '';
+    } else {
+      // OpenAI REST Integration
+      finalModelUsed = initialModel || 'gpt-4o';
+      const openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: finalModelUsed,
+          messages: [
+            { role: 'system', content: fullSystemInstructions },
+            { role: 'user', content: `Request: ${prompt || 'Suggest meal'}. Answers: ${JSON.stringify(answers || {})}` }
+          ],
+          temperature,
+          max_tokens: maxTokens
+        }),
+        cache: 'no-store'
+      });
+
+      const openAiData = await openAiRes.json().catch(() => ({}));
+      if (!openAiRes.ok) {
+        throw new Error(openAiData?.error?.message || `OpenAI API returned status ${openAiRes.status}`);
+      }
+
+      replyText = openAiData?.choices?.[0]?.message?.content || '';
+    }
+
+    // 5. Server-Side Token Deduction (Resilient, 1-argument options contract)
+    let remainingTokens: number | null = null;
+    let consumedTokens: number = 8;
+
+    try {
+      const activeUser = reqUserEmail || reqUserId;
+      if (activeUser) {
+        const tokenService = await import('@/lib/tokenService').catch(() => null);
+        if (tokenService && typeof tokenService.deductUserTokens === 'function') {
+          const settings = typeof tokenService.getTokenSettings === 'function' 
+            ? await tokenService.getTokenSettings() 
+            : null;
+          consumedTokens = settings?.chefCost || 8;
+
+          // Single options object contract to satisfy TypeScript TS2554
+          const deduction = await (tokenService.deductUserTokens as any)({
+            userId: reqUserId || activeUser,
+            userEmail: reqUserEmail || activeUser,
+            cost: consumedTokens,
+            amount: consumedTokens,
+            tokens: consumedTokens,
+            feature: 'chef',
+            description: 'Chef AI Assistant Query'
+          });
+
+          if (deduction && typeof deduction.currentBalance === 'number') {
+            remainingTokens = deduction.currentBalance;
+          } else if (deduction && typeof deduction.balance === 'number') {
+            remainingTokens = deduction.balance;
+          } else if (deduction && typeof deduction.remainingTokens === 'number') {
+            remainingTokens = deduction.remainingTokens;
+          }
         }
       }
     } catch (_) {}
-  }
 
-  const configuredModel = normalizeGeminiModel(body.model || process.env.AI_MODEL || 'gemini-2.5-flash');
-  const candidateModels = [configuredModel, 'gemini-2.5-flash', 'gemini-2.0-flash'].filter(
-    (v, i, a) => a.indexOf(v) === i
-  );
-
-  const cleanPrompt = (prompt || '').trim();
-  const lowerPrompt = cleanPrompt.toLowerCase();
-  const { isIngredientQuery, ingredients } = extractSuppliesIntent(lowerPrompt);
-
-  // Conversational Intent Classification
-  const isPureGreeting = /^(hello|hi|hey|good\s+morning|good\s+afternoon|good\s+evening|greetings)\b/i.test(lowerPrompt) 
-    && cleanPrompt.split(' ').length <= 3 
-    && !isIngredientQuery;
-
-  // Build System & Context Instructions
-  const systemInstruction = `You are Chef Foodie, an authentic, Michelin-grade personal culinary chef and meal planner.
-User Profile:
-- Servings: ${servings} people
-- Location/Cuisine Culture: ${country}
-- Dietary Preferences: ${diets.length > 0 ? diets.join(', ') : 'None'}
-- Allergies: ${allergies.length > 0 ? allergies.join(', ') : 'None'}
-- Ingredients to Avoid: ${avoid.length > 0 ? avoid.join(', ') : 'None'}
-- Flavor Tastes: ${tastes.length > 0 ? tastes.join(', ') : 'Standard'}
-- In-Stock Pantry: ${pantry.length > 0 ? pantry.join(', ') : 'Standard kitchen staples'}
-
-Rules of Engagement:
-1. Always maintain conversational logic. If the user previously received a question and is replying with an ingredient (e.g. "kimchi in my fridge"), DO NOT reply with a generic greeting.
-2. When the user mentions ingredients or supplies, actively formulate culinary solutions using those specific ingredients adapted to ${country} culture and ${servings} servings.
-3. If providing recipe recommendations, always output structured culinary details with precise prep/cook times and ingredients.
-4. Output your response as a valid JSON object matching this schema:
-{
-  "reply": "Engaging conversational answer tailored to the user's specific request or ingredients",
-  "recommendedRecipe": {
-    "title": "Dish Name",
-    "description": "Appetizing description highlighting user ingredients",
-    "prepMinutes": 15,
-    "cookMinutes": 20,
-    "servings": ${servings},
-    "calories": 480,
-    "mealType": "Dinner",
-    "ingredients": ["1 cup ingredient with measurement", "seasonings"],
-    "instructions": ["Step 1 direction", "Step 2 direction", "Step 3 direction"],
-    "chefTip": "Professional cooking advice",
-    "image": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80"
-  },
-  "systemRecommendations": [
-    { "label": "📅 Add to Planner", "route": "/planner" },
-    { "label": "🛒 Grocery List", "route": "/grocery" }
-  ]
-}
-If the user is asking a purely conversational greeting without any culinary intent, you may omit "recommendedRecipe" or set it to null.`;
-
-  // Build Multi-Turn History Contents for Gemini API
-  const contentsPayload: any[] = [];
-  
-  if (Array.isArray(messages) && messages.length > 0) {
-    for (const m of messages.slice(-6)) {
-      if (!m.content) continue;
-      contentsPayload.push({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: String(m.content) }]
-      });
-    }
-  }
-
-  // Append current prompt turn
-  let userQueryText = cleanPrompt;
-  if (isIngredientQuery) {
-    userQueryText = `I have the following ingredients available: ${ingredients.length > 0 ? ingredients.join(', ') : cleanPrompt}. Please recommend authentic dishes I can cook for ${servings} people in ${country}.`;
-  }
-  contentsPayload.push({
-    role: 'user',
-    parts: [{ text: userQueryText }]
-  });
-
-  // Attempt live inference across model cascade
-  let finalResponseData: any = null;
-  let lastError: any = null;
-
-  if (apiKey) {
-    for (const modelToTry of candidateModels) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelToTry}:generateContent?key=${apiKey}`;
-        const geminiRes = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: contentsPayload,
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            generationConfig: {
-              temperature: 0.7,
-              responseMimeType: 'application/json'
-            }
-          }),
-          signal: AbortSignal.timeout(12000)
-        });
-
-        if (geminiRes.ok) {
-          const rawResult = await geminiRes.json();
-          const candidateText = rawResult?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (candidateText) {
-            const parsed = JSON.parse(candidateText.trim());
-            finalResponseData = parsed;
-            break;
-          }
-        } else {
-          const errDetail = await geminiRes.text();
-          console.warn(`[Gemini Handshake] Model ${modelToTry} returned HTTP ${geminiRes.status}:`, errDetail);
-        }
-      } catch (e: any) {
-        lastError = e;
+    return NextResponse.json({
+      success: true,
+      reply: replyText,
+      recipe: null,
+      plan: null,
+      appliedSettings: {
+        provider,
+        model: finalModelUsed,
+        temperature,
+        maxTokens,
+        resultDisplayMode,
+        strictDietEnforced: strictDiet,
+        pantryContextApplied: enablePantryContext && Array.isArray(pantryItems) && pantryItems.length > 0,
+        primarySourcesCount: recommendedUrls.length,
+        tokensDeducted: consumedTokens,
+        remainingBalance: remainingTokens
       }
-    }
-  }
-
-  // If live LLM succeeded, return authentic response
-  if (finalResponseData) {
-    return NextResponse.json({
-      success: true,
-      reply: finalResponseData.reply || "Here is a recipe tailored to your ingredients and preferences.",
-      recommendedRecipe: finalResponseData.recommendedRecipe || null,
-      plan: finalResponseData.plan || null,
-      systemRecommendations: finalResponseData.systemRecommendations || [
-        { label: "📅 Add to Planner", route: "/planner" },
-        { label: "🛒 Grocery List", route: "/grocery" }
-      ]
     });
-  }
 
-  // Graceful Dynamic Fallback (When API key is offline or in trial mode)
-  if (isPureGreeting) {
+  } catch (err: any) {
+    console.error('[/api/ai] Generation error:', err);
     return NextResponse.json({
-      success: true,
-      reply: `Hello! I'm Chef Foodie, your personal culinary assistant. I'm ready with your culinary profile (${profileSummary}). How can I inspire your cooking today? Tell me what ingredients you have, or ask for a meal plan!`,
-      recommendedRecipe: null,
-      systemRecommendations: [
-        { label: "🍳 Intake Wizard", route: "/chef" },
-        { label: "📅 View Planner", route: "/planner" }
-      ]
-    });
+      success: false,
+      error: err?.message || 'Failed to process culinary generation request'
+    }, { status: 500 });
   }
-
-  // Logical Ingredient Fallback (e.g. "kimchi in my fridge")
-  const primaryIngredient = ingredients[0] || (cleanPrompt.length < 25 ? cleanPrompt : 'Fresh Produce');
-  const capitalized = primaryIngredient.charAt(0).toUpperCase() + primaryIngredient.slice(1);
-
-  return NextResponse.json({
-    success: true,
-    reply: `Great! Having ${primaryIngredient} in your fridge gives us fantastic options. For ${servings} people in ${country}, I recommend making a fragrant Golden ${capitalized} Fried Rice & Broth. It's quick, nourishing, and uses your ingredients efficiently!`,
-    recommendedRecipe: {
-      id: 'rec_' + Date.now(),
-      title: `Fragrant ${capitalized} Stir-Fry Bowl`,
-      description: `A delicious culinary creation crafted to utilize the ${primaryIngredient} in your fridge, balanced for ${servings} people in ${country}.`,
-      prepMinutes: 10,
-      cookMinutes: 15,
-      servings,
-      calories: 460,
-      mealType: 'Dinner',
-      ingredients: [
-        `1.5 cups fresh ${primaryIngredient}`,
-        `2 servings Jasmine or Brown Rice`,
-        `2 fresh eggs or pan-seared firm tofu`,
-        `1 tbsp sesame oil and minced garlic`,
-        `1 tsp toasted sesame seeds and chopped scallions`
-      ],
-      instructions: [
-        `Heat sesame oil in a skillet over medium-high heat and sauté garlic until fragrant.`,
-        `Add your ${primaryIngredient} and stir-fry for 3-4 minutes to release deep aromas.`,
-        `Toss in cooked rice and incorporate evenly until well seasoned.`,
-        `Top with a fried egg or golden protein, garnish with scallions, and serve hot!`
-      ],
-      chefTip: `Sautéing the ${primaryIngredient} in sesame oil before adding rice caramelizes the natural sugars and creates rich umami flavor.`,
-      image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
-    },
-    systemRecommendations: [
-      { label: "📅 Add to Planner", route: "/planner" },
-      { label: "🛒 Grocery List", route: "/grocery" }
-    ]
-  });
 }
 
 ```
@@ -83677,6 +83867,17 @@ export function cn(...inputs: ClassValue[]) {
 ## File: `apps/web/src/lib/tokenService.ts`
 ```typescript
 import { query } from '@/lib/db';
+import { Pool } from 'pg';
+
+let poolInstance: Pool | null = null;
+export function getPool(): Pool {
+  if (!poolInstance) {
+    poolInstance = new Pool({
+      connectionString: process.env.DATABASE_URL,
+    });
+  }
+  return poolInstance;
+}
 
 export interface TokenPackage {
   id: string;
@@ -83692,7 +83893,7 @@ export interface TokenPackage {
 }
 
 export interface TokenSettings {
-  id: string;
+  id?: string;
   tokenName: string;
   tokenSymbol: string;
   chefCost: number;
@@ -83710,29 +83911,95 @@ export interface TokenSettings {
   [key: string]: any;
 }
 
+export interface DeductUserTokensParams {
+  userId?: string | null;
+  userEmail?: string | null;
+  email?: string | null;
+  cost?: number;
+  amount?: number;
+  feature?: string;
+  type?: string;
+  description?: string;
+  [key: string]: any;
+}
+
 export interface DeductionResult {
   success: boolean;
   error?: string;
   deducted?: number;
   currentBalance?: number;
+  newBalance?: number;
+  balance?: number;
   required?: number;
   tokenSymbol?: string;
   [key: string]: any;
 }
 
-export interface DeleteTokenTransactionsResult {
-  success: boolean;
-  deletedCount?: number;
-  affectedUsers?: any;
-  affectedUserIds?: string[];
-  error?: string;
+export interface PurchasePackageParams {
+  userId?: string | null;
+  userEmail?: string | null;
+  email?: string | null;
+  packageId?: string;
+  package_id?: string;
+  tokens?: number;
+  price?: number;
+  amount?: number;
+  amountPaid?: number;
+  currency?: string;
+  gateway?: string;
+  paymentMethod?: string;
+  payment_method?: string;
+  packageName?: string;
+  package_name?: string;
+  orderId?: string;
+  description?: string;
   [key: string]: any;
 }
 
-const DEFAULT_SETTINGS: TokenSettings = {
+export interface PurchasePackageResult {
+  success: boolean;
+  tokensAdded?: number;
+  tokensToAdd?: number;
+  tokensGranted?: number;
+  newBalance?: number;
+  balance?: number;
+  wallet_balance?: number;
+  newWalletBalance?: number | null;
+  paymentMethod?: string;
+  transactionId?: string;
+  message?: string;
+  error?: string;
+  package?: TokenPackage;
+  user?: any;
+  requiresWalletTopUp?: boolean;
+  packagePrice?: number;
+  shortfall?: number;
+  [key: string]: any;
+}
+
+export interface AffectedUserBalance {
+  id: string;
+  email: string;
+  oldBalance: number;
+  newBalance: number;
+  adjustedTokens: number;
+}
+
+export interface DeleteTransactionsResult {
+  success: boolean;
+  error?: string;
+  deletedCount: number;
+  affectedUsers: any;
+  affectedUserIds?: string[];
+  [key: string]: any;
+}
+
+export type DeleteTokenTransactionsResult = DeleteTransactionsResult;
+
+export const DEFAULT_SETTINGS: TokenSettings = {
   id: 'primary_token_settings',
   tokenName: 'Foodie Token',
-  tokenSymbol: '',
+  tokenSymbol: '🪙',
   chefCost: 8,
   aiChefCost: 8,
   importUrlCost: 5,
@@ -83742,17 +84009,29 @@ const DEFAULT_SETTINGS: TokenSettings = {
   macroAnalysisCost: 3,
   startingBalance: 100,
   packages: [
-    { id: 'pkg_starter', name: 'Starter Spark', tokens: 250, tokenAmount: 250, price: 4.99, priceDollars: 4.99, badge: 'Popular', bonusTokens: 0, isPopular: true },
-    { id: 'pkg_chef', name: 'Culinary Master', tokens: 1000, tokenAmount: 1000, price: 14.99, priceDollars: 14.99, badge: 'Best Value', bonusTokens: 150, isPopular: false },
-    { id: 'pkg_executive', name: 'Kitchen Enterprise', tokens: 5000, tokenAmount: 5000, price: 49.99, priceDollars: 49.99, badge: 'VIP', bonusTokens: 1000, isPopular: false }
+    { id: 'pkg_starter', name: 'Starter Pantry', tokens: 100, tokenAmount: 100, price: 4.99, priceDollars: 4.99, badge: 'Starter', isPopular: false },
+    { id: 'pkg_pro', name: 'Culinary Master', tokens: 500, tokenAmount: 500, price: 19.99, priceDollars: 19.99, badge: 'Popular', isPopular: true },
+    { id: 'pkg_buffet', name: 'Executive Chef', tokens: 1500, tokenAmount: 1500, price: 49.99, priceDollars: 49.99, badge: 'Best Value', isPopular: false }
   ],
   planAllocations: {
     'free': 50,
-    'nutrition-pro': 750,
-    'vip-chef': 3000
+    'taster': 50,
+    'pro': 500,
+    'foodie-pro': 500,
+    'master': 1500,
+    'culinary-master': 1500
   },
   isEnabled: true
 };
+
+export const DEFAULT_TOKEN_SETTINGS = DEFAULT_SETTINGS;
+
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
 
 export async function initTokenTables(): Promise<void> {
   try {
@@ -83760,7 +84039,7 @@ export async function initTokenTables(): Promise<void> {
       CREATE TABLE IF NOT EXISTS token_settings (
         id VARCHAR(64) PRIMARY KEY,
         token_name VARCHAR(100) DEFAULT 'Foodie Token',
-        token_symbol VARCHAR(20) DEFAULT '',
+        token_symbol VARCHAR(20) DEFAULT '🪙',
         chef_cost INTEGER DEFAULT 8,
         ai_chef_cost INTEGER DEFAULT 8,
         import_url_cost INTEGER DEFAULT 5,
@@ -83772,42 +84051,89 @@ export async function initTokenTables(): Promise<void> {
         packages JSONB DEFAULT '[]'::jsonb,
         plan_allocations JSONB DEFAULT '{}'::jsonb,
         is_enabled BOOLEAN DEFAULT true,
-        updated_at TIMESTAMP DEFAULT NOW()
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
 
     await query(`
       ALTER TABLE token_settings 
-      ADD COLUMN IF NOT EXISTS chef_cost INTEGER DEFAULT 8,
-      ADD COLUMN IF NOT EXISTS ai_chef_cost INTEGER DEFAULT 8,
-      ADD COLUMN IF NOT EXISTS import_url_cost INTEGER DEFAULT 5,
-      ADD COLUMN IF NOT EXISTS import_text_cost INTEGER DEFAULT 2,
-      ADD COLUMN IF NOT EXISTS import_photo_cost INTEGER DEFAULT 10,
-      ADD COLUMN IF NOT EXISTS meal_planner_cost INTEGER DEFAULT 5,
-      ADD COLUMN IF NOT EXISTS macro_analysis_cost INTEGER DEFAULT 3,
-      ADD COLUMN IF NOT EXISTS starting_balance INTEGER DEFAULT 100,
       ADD COLUMN IF NOT EXISTS plan_allocations JSONB DEFAULT '{}'::jsonb,
       ADD COLUMN IF NOT EXISTS packages JSONB DEFAULT '[]'::jsonb,
-      ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true;
+      ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS ai_chef_cost INTEGER DEFAULT 8;
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        key VARCHAR(128) PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
 
     await query(`
       CREATE TABLE IF NOT EXISTS token_transactions (
         id VARCHAR(100) PRIMARY KEY,
-        user_id VARCHAR(100) NOT NULL,
+        user_id VARCHAR(100),
         user_email VARCHAR(255),
-        amount INTEGER NOT NULL,
-        balance_after INTEGER NOT NULL,
+        amount NUMERIC NOT NULL DEFAULT 0,
+        balance_after NUMERIC NOT NULL DEFAULT 0,
         type VARCHAR(50) NOT NULL,
         description TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW()
       );
+      CREATE INDEX IF NOT EXISTS idx_token_transactions_user ON token_transactions(user_id, user_email);
+      CREATE INDEX IF NOT EXISTS idx_token_transactions_created ON token_transactions(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_token_transactions_type ON token_transactions(type);
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id VARCHAR(100),
+        user_email VARCHAR(255),
+        type VARCHAR(50) DEFAULT 'token_purchase',
+        amount NUMERIC NOT NULL DEFAULT 0,
+        balance_after NUMERIC NOT NULL DEFAULT 0,
+        gateway VARCHAR(50) DEFAULT 'wallet',
+        status VARCHAR(50) DEFAULT 'succeeded',
+        description TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id, user_email);
+      CREATE INDEX IF NOT EXISTS idx_wallet_transactions_created ON wallet_transactions(created_at DESC);
     `);
 
     await query(`
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100,
-      ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
+      ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS last_token_grant_date TIMESTAMPTZ;
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS subscription_plans (
+        id VARCHAR(64) PRIMARY KEY,
+        slug VARCHAR(64) UNIQUE NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        token_limit INTEGER DEFAULT 500,
+        monthly_tokens INTEGER DEFAULT 500,
+        is_free BOOLEAN DEFAULT false,
+        monthly_price_dollars NUMERIC DEFAULT 0,
+        annual_price_dollars NUMERIC DEFAULT 0,
+        features JSONB DEFAULT '[]'::jsonb,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await query(`
+      ALTER TABLE subscription_plans 
+      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 500,
+      ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;
     `);
   } catch (err) {
     console.warn('initTokenTables warning:', err);
@@ -83818,42 +84144,35 @@ export async function getTokenSettings(): Promise<TokenSettings> {
   await initTokenTables();
   try {
     const rows = await query('SELECT * FROM token_settings ORDER BY updated_at DESC LIMIT 1');
-    if (rows && rows.length > 0) {
-      const r = rows[0];
-      const resolvedCost = Number(r.ai_chef_cost ?? r.chef_cost ?? DEFAULT_SETTINGS.chefCost);
-      const pkgs = Array.isArray(r.packages) 
-        ? r.packages 
-        : (typeof r.packages === 'string' ? JSON.parse(r.packages) : DEFAULT_SETTINGS.packages);
-
+    const list = parseDbRows(rows);
+    if (list.length > 0) {
+      const r = list[0];
+      const chef = Number(r.ai_chef_cost ?? r.chef_cost ?? DEFAULT_SETTINGS.chefCost);
       return {
         id: r.id || 'primary_token_settings',
         tokenName: r.token_name || DEFAULT_SETTINGS.tokenName,
-        tokenSymbol: r.token_symbol !== undefined && r.token_symbol !== null ? String(r.token_symbol).trim() : '',
-        chefCost: resolvedCost,
-        aiChefCost: resolvedCost,
+        tokenSymbol: r.token_symbol || DEFAULT_SETTINGS.tokenSymbol,
+        chefCost: chef,
+        aiChefCost: chef,
         importUrlCost: Number(r.import_url_cost ?? DEFAULT_SETTINGS.importUrlCost),
         importTextCost: Number(r.import_text_cost ?? DEFAULT_SETTINGS.importTextCost),
         importPhotoCost: Number(r.import_photo_cost ?? DEFAULT_SETTINGS.importPhotoCost),
-        mealPlannerCost: Number(r.meal_planner_cost ?? DEFAULT_SETTINGS.mealPlannerCost),
-        macroAnalysisCost: Number(r.macro_analysis_cost ?? DEFAULT_SETTINGS.macroAnalysisCost),
-        startingBalance: Number(r.starting_balance ?? DEFAULT_SETTINGS.startingBalance),
-        packages: pkgs.map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          tokens: Number(p.tokens ?? p.tokenAmount ?? 250),
-          tokenAmount: Number(p.tokenAmount ?? p.tokens ?? 250),
-          price: Number(p.price ?? p.priceDollars ?? 4.99),
-          priceDollars: Number(p.priceDollars ?? p.price ?? 4.99),
-          badge: p.badge || undefined,
-          bonusTokens: Number(p.bonusTokens || 0),
-          isPopular: Boolean(p.isPopular)
-        })),
-        planAllocations: r.plan_allocations 
-          ? (typeof r.plan_allocations === 'string' ? JSON.parse(r.plan_allocations) : r.plan_allocations) 
-          : DEFAULT_SETTINGS.planAllocations,
+        packages: Array.isArray(r.packages)
+          ? r.packages
+          : (typeof r.packages === 'string' ? JSON.parse(r.packages) : DEFAULT_SETTINGS.packages),
+        planAllocations: r.plan_allocations
+          ? (typeof r.plan_allocations === 'string' ? JSON.parse(r.plan_allocations) : r.plan_allocations)
+          : (DEFAULT_SETTINGS.planAllocations || {}),
         isEnabled: Boolean(r.is_enabled ?? true),
         updatedAt: r.updated_at
       };
+    }
+
+    const fallback = await query(`SELECT value FROM admin_settings WHERE key = 'token_settings' LIMIT 1`);
+    const fList = parseDbRows(fallback);
+    if (fList.length > 0 && fList[0].value) {
+      const parsed = typeof fList[0].value === 'string' ? JSON.parse(fList[0].value) : fList[0].value;
+      return { ...DEFAULT_SETTINGS, ...parsed };
     }
   } catch (_) {}
   return DEFAULT_SETTINGS;
@@ -83862,37 +84181,16 @@ export async function getTokenSettings(): Promise<TokenSettings> {
 export async function saveTokenSettings(settings: Partial<TokenSettings> & Record<string, any>): Promise<TokenSettings> {
   await initTokenTables();
   const current = await getTokenSettings();
-  
-  const rawChef = settings.aiChefCost ?? settings.chefCost ?? (settings.featureCosts ? (settings.featureCosts['AI Chef Recipe Generation'] ?? settings.featureCosts['chef']) : undefined);
-  const resolvedChefCost = rawChef !== undefined ? Math.max(0, Number(rawChef)) : current.chefCost;
 
-  const incomingPkgs = settings.packages || current.packages;
-  const normalizedPackages = (Array.isArray(incomingPkgs) ? incomingPkgs : []).map((p: any) => ({
-    id: p.id || 'pkg_' + Date.now().toString(36),
-    name: p.name || 'Bundle',
-    tokens: Math.max(1, Number(p.tokens ?? p.tokenAmount ?? 250)),
-    tokenAmount: Math.max(1, Number(p.tokenAmount ?? p.tokens ?? 250)),
-    price: Math.max(0.01, Number(p.price ?? p.priceDollars ?? 4.99)),
-    priceDollars: Math.max(0.01, Number(p.priceDollars ?? p.price ?? 4.99)),
-    badge: p.badge || undefined,
-    bonusTokens: Number(p.bonusTokens || 0),
-    isPopular: Boolean(p.isPopular)
-  }));
+  const chefCostVal = settings.aiChefCost ?? settings.chefCost ?? current.chefCost;
 
   const merged: TokenSettings = {
     ...current,
     ...settings,
-    tokenSymbol: settings.tokenSymbol !== undefined ? String(settings.tokenSymbol).trim() : current.tokenSymbol,
-    chefCost: resolvedChefCost,
-    aiChefCost: resolvedChefCost,
-    importUrlCost: settings.importUrlCost !== undefined ? Math.max(0, Number(settings.importUrlCost)) : current.importUrlCost,
-    importTextCost: settings.importTextCost !== undefined ? Math.max(0, Number(settings.importTextCost)) : current.importTextCost,
-    importPhotoCost: settings.importPhotoCost !== undefined ? Math.max(0, Number(settings.importPhotoCost)) : current.importPhotoCost,
-    mealPlannerCost: settings.mealPlannerCost !== undefined ? Math.max(0, Number(settings.mealPlannerCost)) : current.mealPlannerCost,
-    macroAnalysisCost: settings.macroAnalysisCost !== undefined ? Math.max(0, Number(settings.macroAnalysisCost)) : current.macroAnalysisCost,
-    startingBalance: settings.startingBalance !== undefined ? Math.max(0, Number(settings.startingBalance)) : current.startingBalance,
-    packages: normalizedPackages,
-    planAllocations: settings.planAllocations || current.planAllocations || DEFAULT_SETTINGS.planAllocations,
+    chefCost: chefCostVal,
+    aiChefCost: chefCostVal,
+    packages: Array.isArray(settings.packages) ? settings.packages : current.packages,
+    planAllocations: settings.planAllocations || current.planAllocations || {},
     isEnabled: settings.isEnabled !== undefined ? Boolean(settings.isEnabled) : current.isEnabled
   };
 
@@ -83901,9 +84199,8 @@ export async function saveTokenSettings(settings: Partial<TokenSettings> & Recor
   await query(`
     INSERT INTO token_settings (
       id, token_name, token_symbol, chef_cost, ai_chef_cost, import_url_cost,
-      import_text_cost, import_photo_cost, meal_planner_cost, macro_analysis_cost,
-      starting_balance, packages, plan_allocations, is_enabled, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14, NOW())
+      import_text_cost, import_photo_cost, packages, plan_allocations, is_enabled, updated_at
+    ) VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, NOW())
     ON CONFLICT (id) DO UPDATE SET
       token_name = EXCLUDED.token_name,
       token_symbol = EXCLUDED.token_symbol,
@@ -83912,9 +84209,6 @@ export async function saveTokenSettings(settings: Partial<TokenSettings> & Recor
       import_url_cost = EXCLUDED.import_url_cost,
       import_text_cost = EXCLUDED.import_text_cost,
       import_photo_cost = EXCLUDED.import_photo_cost,
-      meal_planner_cost = EXCLUDED.meal_planner_cost,
-      macro_analysis_cost = EXCLUDED.macro_analysis_cost,
-      starting_balance = EXCLUDED.starting_balance,
       packages = EXCLUDED.packages,
       plan_allocations = EXCLUDED.plan_allocations,
       is_enabled = EXCLUDED.is_enabled,
@@ -83924,17 +84218,22 @@ export async function saveTokenSettings(settings: Partial<TokenSettings> & Recor
     merged.tokenName,
     merged.tokenSymbol,
     merged.chefCost,
-    merged.aiChefCost,
     merged.importUrlCost,
     merged.importTextCost,
     merged.importPhotoCost,
-    merged.mealPlannerCost,
-    merged.macroAnalysisCost,
-    merged.startingBalance,
     JSON.stringify(merged.packages),
     JSON.stringify(merged.planAllocations),
     merged.isEnabled
   ]);
+
+  try {
+    await query(`
+      INSERT INTO admin_settings (key, value, updated_at)
+      VALUES ('token_settings', $1::jsonb, NOW())
+      ON CONFLICT (key) DO UPDATE
+      SET value = EXCLUDED.value, updated_at = NOW()
+    `, [JSON.stringify(merged)]);
+  } catch (_) {}
 
   return merged;
 }
@@ -83942,68 +84241,102 @@ export async function saveTokenSettings(settings: Partial<TokenSettings> & Recor
 export async function getUserTokenBalance(userId?: string | null, userEmail?: string | null): Promise<number> {
   await initTokenTables();
   try {
-    let rows: any[] = [];
+    let rows: any = [];
     if (userId) {
       rows = await query('SELECT token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
     } else if (userEmail) {
-      rows = await query('SELECT token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
+      rows = await query('SELECT token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [userEmail.trim()]);
     }
-    if (rows.length > 0 && rows[0].token_balance !== null) {
-      return Number(rows[0].token_balance);
+    const list = parseDbRows(rows);
+    if (list.length > 0 && list[0].token_balance !== null && list[0].token_balance !== undefined) {
+      return Number(list[0].token_balance);
     }
   } catch (_) {}
   return 0;
 }
 
-export async function deductUserTokens({
-  userId,
-  userEmail,
-  cost,
-  feature = 'chef',
-  description = 'AI Chef Recipe Generation'
-}: {
-  userId?: string | null;
-  userEmail?: string | null;
-  cost?: number;
-  feature?: string;
-  description?: string;
-}): Promise<DeductionResult> {
+// ----------------------------------------------------------------------------------
+// deductUserTokens with Polymorphic Overloads & Explicit Scoped Variable Normalization
+// ----------------------------------------------------------------------------------
+export async function deductUserTokens(
+  params: DeductUserTokensParams
+): Promise<DeductionResult>;
+export async function deductUserTokens(
+  userId: string | null | undefined,
+  userEmail: string | null | undefined,
+  amount: number,
+  type?: string,
+  description?: string
+): Promise<DeductionResult>;
+export async function deductUserTokens(
+  arg1: any,
+  arg2?: any,
+  arg3?: any,
+  arg4?: any,
+  arg5?: any
+): Promise<DeductionResult> {
   await initTokenTables();
   const settings = await getTokenSettings();
 
-  const finalCost = cost !== undefined ? Number(cost) : settings.chefCost;
+  // Explicitly scoped local variables to satisfy TypeScript compiler (TS2304)
+  let userId: string | null = null;
+  let userEmail: string | null = null;
+  let cost = 0;
+  let feature = 'chef';
+  let description = 'AI Chef Recipe Generation';
 
-  if (!settings.isEnabled || finalCost <= 0) {
-    let balance = 0;
-    try {
-      const bRes = await query('SELECT token_balance FROM users WHERE id = $1 OR LOWER(email) = LOWER($2) LIMIT 1', [userId || '', (userEmail || '').trim()]);
-      if (bRes.length > 0) balance = Number(bRes[0].token_balance || 0);
-    } catch (_) {}
-    return { success: true, deducted: 0, currentBalance: balance, tokenSymbol: settings.tokenSymbol };
+  if (typeof arg1 === 'object' && arg1 !== null) {
+    userId = arg1.userId || null;
+    userEmail = arg1.userEmail || arg1.email || null;
+    cost = Number(arg1.cost ?? arg1.amount ?? settings.chefCost ?? 8);
+    feature = arg1.feature || arg1.type || 'chef';
+    description = arg1.description || 'AI Chef Recipe Generation';
+  } else {
+    userId = arg1 || null;
+    userEmail = arg2 || null;
+    cost = Number(arg3 !== undefined ? arg3 : (settings.chefCost ?? 8));
+    feature = arg4 || 'chef';
+    description = arg5 || 'AI Chef Recipe Generation';
+  }
+
+  if (!settings.isEnabled || cost <= 0) {
+    const current = await getUserTokenBalance(userId, userEmail);
+    return {
+      success: true,
+      deducted: 0,
+      currentBalance: current,
+      newBalance: current,
+      balance: current,
+      tokenSymbol: settings.tokenSymbol || '🪙'
+    };
   }
 
   let userRow: any = null;
   if (userId) {
     const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    if (rows.length > 0) userRow = rows[0];
+    const list = parseDbRows(rows);
+    if (list.length > 0) userRow = list[0];
   }
   if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-    if (rows.length > 0) userRow = rows[0];
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [userEmail.trim()]);
+    const list = parseDbRows(rows);
+    if (list.length > 0) userRow = list[0];
   }
 
   if (!userRow) {
-    return { success: false, error: 'User not found' };
+    return { success: false, error: 'User account not found' };
   }
 
   const currentBalance = Number(userRow.token_balance ?? 0);
-  if (currentBalance < finalCost) {
+  if (currentBalance < cost) {
     return {
       success: false,
-      error: `Insufficient ${settings.tokenName}. Required: ${finalCost} ${settings.tokenSymbol}, Balance: ${currentBalance} ${settings.tokenSymbol}`,
+      error: `Insufficient ${settings.tokenName || 'tokens'}. Required: ${cost} ${settings.tokenSymbol || '🪙'}, Balance: ${currentBalance} ${settings.tokenSymbol || '🪙'}`,
       currentBalance,
-      required: finalCost,
-      tokenSymbol: settings.tokenSymbol
+      newBalance: currentBalance,
+      balance: currentBalance,
+      required: cost,
+      tokenSymbol: settings.tokenSymbol || '🪙'
     };
   }
 
@@ -84012,59 +84345,83 @@ export async function deductUserTokens({
     SET token_balance = token_balance - $1, updated_at = NOW() 
     WHERE id = $2 AND token_balance >= $1 
     RETURNING token_balance
-  `, [finalCost, userRow.id]);
+  `, [cost, userRow.id]);
 
-  if (updateRes.length === 0) {
+  const updatedRows = parseDbRows(updateRes);
+  if (updatedRows.length === 0) {
     return {
       success: false,
-      error: 'Token deduction failed due to concurrent update.',
+      error: 'Token deduction failed due to concurrent modification.',
       currentBalance,
-      required: finalCost
+      newBalance: currentBalance,
+      balance: currentBalance,
+      required: cost,
+      tokenSymbol: settings.tokenSymbol || '🪙'
     };
   }
 
-  const newBalance = Number(updateRes[0].token_balance);
+  const newBalance = Number(updatedRows[0].token_balance);
   const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+  const txType = feature.startsWith('usage_') ? feature : `usage_${feature}`;
 
   try {
     await query(`
       INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-    `, [txId, userRow.id, userRow.email, -finalCost, newBalance, `usage_${feature}`, description]);
+    `, [txId, userRow.id, userRow.email, -cost, newBalance, txType, description]);
   } catch (txErr) {
     console.error('Failed to log token transaction:', txErr);
   }
 
   return {
     success: true,
-    deducted: finalCost,
+    deducted: cost,
     currentBalance: newBalance,
-    tokenSymbol: settings.tokenSymbol
+    newBalance,
+    balance: newBalance,
+    tokenSymbol: settings.tokenSymbol || '🪙'
   };
 }
 
-export async function addTokensToUser({
-  userId,
-  userEmail,
-  amount,
-  type,
-  description
-}: {
-  userId?: string | null;
-  userEmail?: string | null;
-  amount: number;
-  type: string;
-  description: string;
-}): Promise<number | null> {
+export async function addTokensToUser(
+  arg1: any,
+  userEmail?: string | null,
+  amount?: number,
+  type?: string,
+  description?: string
+): Promise<number | null> {
   await initTokenTables();
-  let userRow: any = null;
-  if (userId) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    if (rows.length > 0) userRow = rows[0];
+
+  let uId: string | null = null;
+  let uEmail: string | null = null;
+  let amt = 0;
+  let txType = 'manual_credit';
+  let desc = 'Tokens credited';
+
+  if (typeof arg1 === 'object' && arg1 !== null) {
+    uId = arg1.userId || null;
+    uEmail = arg1.userEmail || arg1.email || null;
+    amt = Number(arg1.amount || 0);
+    txType = arg1.type || 'manual_credit';
+    desc = arg1.description || 'Tokens credited';
+  } else {
+    uId = arg1 || null;
+    uEmail = userEmail || null;
+    amt = Number(amount || 0);
+    txType = type || 'manual_credit';
+    desc = description || 'Tokens credited';
   }
-  if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-    if (rows.length > 0) userRow = rows[0];
+
+  let userRow: any = null;
+  if (uId) {
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [uId]);
+    const list = parseDbRows(rows);
+    if (list.length > 0) userRow = list[0];
+  }
+  if (!userRow && uEmail) {
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [uEmail.trim()]);
+    const list = parseDbRows(rows);
+    if (list.length > 0) userRow = list[0];
   }
 
   if (!userRow) return null;
@@ -84074,193 +84431,457 @@ export async function addTokensToUser({
     SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
     WHERE id = $2 
     RETURNING token_balance
-  `, [amount, userRow.id]);
+  `, [amt, userRow.id]);
 
-  const newBalance = Number(updateRes[0].token_balance);
+  const updated = parseDbRows(updateRes);
+  const newBalance = Number(updated[0]?.token_balance ?? ((userRow.token_balance || 0) + amt));
   const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
   await query(`
     INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-  `, [txId, userRow.id, userRow.email, amount, newBalance, type, description]);
+  `, [txId, userRow.id, userRow.email, amt, newBalance, txType, desc]);
 
   return newBalance;
 }
 
-export async function deleteTokenTransactionsAndSyncBalance(
-  transactionIds?: any
-): Promise<DeleteTokenTransactionsResult> {
+export async function purchaseTokenPackage(
+  userEmailOrIdOrPayload: string | PurchasePackageParams | any,
+  packageIdOrTokens?: string | number | any,
+  options?: any
+): Promise<PurchasePackageResult> {
+  await initTokenTables();
+
+  let userIdentifier = '';
+  let pkgId = '';
+  let explicitTokens = 0;
+  let orderId = '';
+  let paymentMethod = 'wallet';
+  let customPrice = 0;
+  let desc = '';
+  let customPkgName = '';
+
+  if (typeof userEmailOrIdOrPayload === 'object' && userEmailOrIdOrPayload !== null) {
+    userIdentifier = String(userEmailOrIdOrPayload.userId || userEmailOrIdOrPayload.userEmail || userEmailOrIdOrPayload.email || '').trim();
+    pkgId = String(userEmailOrIdOrPayload.packageId || userEmailOrIdOrPayload.package_id || '').trim();
+    explicitTokens = Number(userEmailOrIdOrPayload.tokens || 0);
+    orderId = String(userEmailOrIdOrPayload.orderId || '');
+    paymentMethod = String(userEmailOrIdOrPayload.paymentMethod || userEmailOrIdOrPayload.payment_method || 'wallet');
+    desc = String(userEmailOrIdOrPayload.description || '');
+    customPrice = Number(userEmailOrIdOrPayload.price || userEmailOrIdOrPayload.amount || userEmailOrIdOrPayload.amountPaid || 0);
+    customPkgName = String(userEmailOrIdOrPayload.packageName || userEmailOrIdOrPayload.package_name || '');
+  } else {
+    userIdentifier = String(userEmailOrIdOrPayload || '').trim();
+    if (typeof packageIdOrTokens === 'number') {
+      explicitTokens = packageIdOrTokens;
+    } else if (typeof packageIdOrTokens === 'string') {
+      pkgId = packageIdOrTokens.trim();
+      const num = Number(packageIdOrTokens);
+      if (!isNaN(num) && num > 0) explicitTokens = num;
+    }
+    if (options && typeof options === 'object') {
+      orderId = String(options.orderId || '');
+      paymentMethod = String(options.paymentMethod || options.payment_method || 'wallet');
+      desc = String(options.description || '');
+      customPrice = Number(options.price || options.amount || options.amountPaid || 0);
+      customPkgName = String(options.packageName || options.package_name || '');
+    }
+  }
+
+  if (!userIdentifier) {
+    return { success: false, tokensAdded: 0, newBalance: 0, error: 'User identifier is required.' };
+  }
+
+  const userRows = await query(`
+    SELECT id, email, token_balance, wallet_balance 
+    FROM users 
+    WHERE (id::text = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+    LIMIT 1
+  `, [userIdentifier, userIdentifier]);
+
+  const uList = parseDbRows(userRows);
+  if (uList.length === 0) {
+    return { success: false, tokensAdded: 0, newBalance: 0, error: 'User account not found.' };
+  }
+
+  const user = uList[0];
+  const settings = await getTokenSettings();
+
+  let tokensToAdd = explicitTokens;
+  let packageName = customPkgName || 'Token Package';
+  let packagePrice = customPrice;
+
+  if (pkgId && Array.isArray(settings.packages)) {
+    const matched = settings.packages.find((p: any) => p.id === pkgId || p.name?.toLowerCase() === pkgId.toLowerCase());
+    if (matched) {
+      tokensToAdd = Number(matched.tokens || matched.tokenAmount || tokensToAdd);
+      packageName = matched.name || packageName;
+      if (packagePrice <= 0) packagePrice = Number(matched.price || matched.priceDollars || 0);
+    }
+  }
+
+  if (tokensToAdd <= 0) {
+    tokensToAdd = 100;
+    packagePrice = packagePrice || 4.99;
+  }
+
+  let updatedWalletBalance = parseFloat(user.wallet_balance || 0);
+  if (paymentMethod === 'wallet' && packagePrice > 0) {
+    if (updatedWalletBalance < packagePrice) {
+      return {
+        success: false,
+        tokensAdded: 0,
+        tokensToAdd: 0,
+        newBalance: Number(user.token_balance || 0),
+        requiresWalletTopUp: true,
+        packagePrice,
+        shortfall: packagePrice - updatedWalletBalance,
+        wallet_balance: updatedWalletBalance,
+        newWalletBalance: updatedWalletBalance,
+        error: `Insufficient wallet balance ($${updatedWalletBalance.toFixed(2)} available). This bundle requires $${packagePrice.toFixed(2)}. Please top up your wallet first.`
+      };
+    }
+
+    updatedWalletBalance = Math.max(0, updatedWalletBalance - packagePrice);
+    await query(`
+      UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2
+    `, [updatedWalletBalance, user.id]);
+
+    const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    await query(`
+      INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, status, description, metadata, created_at)
+      VALUES ($1, $2, $3, 'token_purchase', $4, $5, 'wallet', 'succeeded', $6, $7::jsonb, NOW())
+    `, [
+      wtxId,
+      user.id,
+      user.email,
+      -packagePrice,
+      updatedWalletBalance,
+      `Purchased ${packageName} (+${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'})`,
+      JSON.stringify({ packageId: pkgId || 'bundle', tokens: tokensToAdd, price: packagePrice })
+    ]);
+  }
+
+  const updateRes = await query(`
+    UPDATE users 
+    SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
+    WHERE id = $2 
+    RETURNING token_balance
+  `, [tokensToAdd, user.id]);
+
+  const updatedToken = parseDbRows(updateRes);
+  const newBalance = Number(updatedToken[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToAdd));
+
+  const txId = 'tx_pkg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+  const txDesc = desc || `Purchased Package: ${packageName} (+${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'})${orderId ? ` [Order: ${orderId}]` : ''}`;
+
+  await query(`
+    INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+    VALUES ($1, $2, $3, $4, $5, 'package_purchase', $6, NOW())
+  `, [txId, user.id, user.email, tokensToAdd, newBalance, txDesc]);
+
+  return {
+    success: true,
+    tokensAdded: tokensToAdd,
+    tokensToAdd: tokensToAdd,
+    tokensGranted: tokensToAdd,
+    newBalance,
+    balance: newBalance,
+    wallet_balance: updatedWalletBalance,
+    newWalletBalance: updatedWalletBalance,
+    paymentMethod,
+    transactionId: txId,
+    message: `Successfully purchased ${packageName}! Credited +${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'}.`,
+    user: {
+      id: user.id,
+      email: user.email,
+      tokenBalance: newBalance,
+      walletBalance: updatedWalletBalance
+    }
+  };
+}
+
+export async function grantMonthlyPlanTokenReward(
+  userEmailOrId?: string | { id?: string; email?: string; userId?: string; userEmail?: string } | null,
+  tokensOrOptions?: number | string | { tokenLimit?: number; tokens?: number; planSlug?: string; planName?: string; customTokens?: number; force?: boolean; [key: string]: any } | any,
+  options?: { planSlug?: string; planName?: string; force?: boolean; customTokens?: number; orderId?: string; [key: string]: any } | any
+): Promise<{
+  success: boolean;
+  tokensGranted: number;
+  newBalance: number;
+  reason?: string;
+  cycle?: string;
+  plan?: string;
+  isPaid?: boolean;
+  error?: string;
+  [key: string]: any;
+}> {
+  await initTokenTables();
+
+  let cleanIdent = '';
+  let emailIdent = '';
+
+  if (typeof userEmailOrId === 'string') {
+    cleanIdent = userEmailOrId.trim();
+    if (cleanIdent.includes('@')) emailIdent = cleanIdent.toLowerCase();
+  } else if (userEmailOrId && typeof userEmailOrId === 'object') {
+    cleanIdent = (userEmailOrId.id || userEmailOrId.userId || userEmailOrId.email || '').trim();
+    if (userEmailOrId.email || userEmailOrId.userEmail) {
+      emailIdent = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
+    }
+  }
+
+  if (!cleanIdent && !emailIdent) {
+    return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User identifier required' };
+  }
+
+  let opt: any = options || {};
+  let explicitAmount = 0;
+
+  if (typeof tokensOrOptions === 'number') {
+    explicitAmount = tokensOrOptions;
+  } else if (typeof tokensOrOptions === 'string') {
+    const p = parseInt(tokensOrOptions, 10);
+    if (!isNaN(p)) explicitAmount = p;
+  } else if (tokensOrOptions && typeof tokensOrOptions === 'object') {
+    explicitAmount = Number(tokensOrOptions.customTokens ?? tokensOrOptions.tokenLimit ?? tokensOrOptions.tokens ?? 0);
+    opt = { ...tokensOrOptions, ...opt };
+  }
+
+  const userRows = await query(`
+    SELECT id, email, token_balance, subscription_plan, plan_slug, plan_name, last_token_grant_cycle 
+    FROM users 
+    WHERE (id::text = $1 AND $1 != '') 
+       OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+       OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+    LIMIT 1
+  `, [cleanIdent, emailIdent]);
+
+  const uList = parseDbRows(userRows);
+  if (uList.length === 0) {
+    return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User not found in database' };
+  }
+
+  const user = uList[0];
+  const now = new Date();
+  const currentCycle = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  if (user.last_token_grant_cycle === currentCycle && !opt?.force) {
+    return {
+      success: false,
+      tokensGranted: 0,
+      newBalance: Number(user.token_balance || 0),
+      reason: `Monthly tokens already credited for cycle ${currentCycle}`,
+      cycle: currentCycle,
+      isPaid: true
+    };
+  }
+
+  const planSlug = String(opt?.planSlug || user.plan_slug || user.subscription_plan || 'free').toLowerCase().trim();
+  const baseSlug = planSlug.replace(/-(monthly|annual|free)$/i, '');
+
+  let tokensToGrant = explicitAmount;
+  if (tokensToGrant <= 0) {
+    const planRows = await query(`
+      SELECT name, slug, token_limit, monthly_tokens 
+      FROM subscription_plans 
+      WHERE LOWER(slug) = LOWER($1) OR LOWER(id) = LOWER($1) OR LOWER(slug) = LOWER($2)
+      LIMIT 1
+    `, [planSlug, baseSlug]);
+    const pList = parseDbRows(planRows);
+    if (pList.length > 0) {
+      tokensToGrant = Number(pList[0].token_limit ?? pList[0].monthly_tokens ?? 500);
+    } else {
+      const settings = await getTokenSettings();
+      const alloc = settings.planAllocations || {};
+      tokensToGrant = Number(alloc[planSlug] ?? alloc[baseSlug] ?? (planSlug.includes('pro') ? 500 : 50));
+    }
+  }
+
+  if (tokensToGrant <= 0) tokensToGrant = 500;
+
+  const updateRes = await query(`
+    UPDATE users 
+    SET token_balance = COALESCE(token_balance, 0) + $1,
+        last_token_grant_cycle = $2,
+        last_token_grant_date = NOW(),
+        updated_at = NOW()
+    WHERE id = $3
+    RETURNING token_balance
+  `, [tokensToGrant, currentCycle, user.id]);
+
+  const updated = parseDbRows(updateRes);
+  const newBalance = Number(updated[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToGrant));
+
+  const planDesc = opt?.planName || user.plan_name || planSlug;
+  const txId = 'tx_grant_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+
+  await query(`
+    INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+    VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', $6, NOW())
+  `, [txId, user.id, user.email, tokensToGrant, newBalance, `Monthly plan grant: ${planDesc} (+${tokensToGrant.toLocaleString()})`]);
+
+  return {
+    success: true,
+    tokensGranted: tokensToGrant,
+    newBalance,
+    cycle: currentCycle,
+    plan: planSlug,
+    isPaid: true
+  };
+}
+
+export async function syncUserMonthlyTokens(userId?: string | null, email?: string | null): Promise<any> {
+  const ident = email || userId;
+  if (!ident) return { success: false, reason: 'No identifier provided' };
+  return grantMonthlyPlanTokenReward(ident);
+}
+
+export async function grantPlanTokensOnPurchase(
+  userEmailOrId: string,
+  planSlug: string,
+  options?: { customTokens?: number; orderId?: string; isAnnual?: boolean; planName?: string; [key: string]: any }
+): Promise<{ success: boolean; tokensGranted: number; newBalance: number; error?: string }> {
+  const res = await grantMonthlyPlanTokenReward(userEmailOrId, {
+    customTokens: options?.customTokens,
+    orderId: options?.orderId,
+    planSlug,
+    planName: options?.planName,
+    force: true
+  });
+  return {
+    success: res.success,
+    tokensGranted: res.tokensGranted,
+    newBalance: res.newBalance,
+    error: res.reason || res.error
+  };
+}
+
+export async function grantUserTokens(
+  userEmailOrId: string,
+  tokens: number = 100,
+  reason: string = 'Admin grant'
+): Promise<any> {
+  return grantMonthlyPlanTokenReward(userEmailOrId, { customTokens: tokens, force: true, reason });
+}
+
+export async function deleteTokenTransactionsAndSyncBalance(idsOrPayload: any): Promise<DeleteTransactionsResult> {
+  await initTokenTables();
+
+  let validIds: string[] = [];
+  if (Array.isArray(idsOrPayload)) {
+    validIds = idsOrPayload.map(String).filter(Boolean);
+  } else if (typeof idsOrPayload === 'object' && idsOrPayload !== null) {
+    const candidate = idsOrPayload.ids || idsOrPayload.transactionIds || idsOrPayload.id;
+    if (Array.isArray(candidate)) {
+      validIds = candidate.map(String).filter(Boolean);
+    } else if (candidate) {
+      validIds = [String(candidate)].filter(Boolean);
+    }
+  } else if (typeof idsOrPayload === 'string' && idsOrPayload) {
+    validIds = [idsOrPayload];
+  }
+
+  if (validIds.length === 0) {
+    return { success: true, deletedCount: 0, affectedUsers: [], affectedUserIds: [] };
+  }
+
   try {
-    await initTokenTables();
-    let cleanIds: string[] = [];
+    const placeholders = validIds.map((_, i) => `$${i + 1}`).join(',');
+    const txRows = await query(`
+      SELECT id, user_id, user_email, amount, type, description 
+      FROM token_transactions 
+      WHERE id IN (${placeholders})
+    `, validIds);
 
-    if (transactionIds) {
-      if (Array.isArray(transactionIds)) {
-        cleanIds = transactionIds.map(String).filter(Boolean);
-      } else if (typeof transactionIds === 'object') {
-        const candidate = transactionIds.ids || transactionIds.transactionIds || transactionIds.id;
-        if (Array.isArray(candidate)) {
-          cleanIds = candidate.map(String).filter(Boolean);
-        } else if (candidate) {
-          cleanIds = [String(candidate)].filter(Boolean);
+    const rawTxs = parseDbRows(txRows);
+    if (rawTxs.length === 0) {
+      return { success: true, deletedCount: 0, affectedUsers: [], affectedUserIds: [] };
+    }
+
+    const userAdjustments: Record<string, { userId: string; userEmail: string; netChange: number; types: string[] }> = {};
+    for (const tx of rawTxs) {
+      const uKey = (tx.user_id || tx.user_email || '').toLowerCase().trim();
+      if (!uKey) continue;
+      if (!userAdjustments[uKey]) {
+        userAdjustments[uKey] = {
+          userId: tx.user_id,
+          userEmail: tx.user_email || '',
+          netChange: 0,
+          types: []
+        };
+      }
+      userAdjustments[uKey].netChange -= Number(tx.amount || 0);
+      userAdjustments[uKey].types.push(tx.type);
+    }
+
+    const affectedUsers: AffectedUserBalance[] = [];
+
+    for (const item of Object.values(userAdjustments)) {
+      if (item.netChange === 0) continue;
+
+      let uRow: any = null;
+      if (item.userId) {
+        const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [item.userId]);
+        const list = parseDbRows(rows);
+        if (list.length > 0) uRow = list[0];
+      }
+      if (!uRow && item.userEmail) {
+        const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [item.userEmail.trim()]);
+        const list = parseDbRows(rows);
+        if (list.length > 0) uRow = list[0];
+      }
+
+      if (uRow) {
+        const oldBalance = Number(uRow.token_balance ?? 0);
+        const updatedBal = Math.max(0, oldBalance + item.netChange);
+
+        await query(`
+          UPDATE users 
+          SET token_balance = $1, updated_at = NOW() 
+          WHERE id = $2
+        `, [updatedBal, uRow.id]);
+
+        if (item.types.includes('plan_monthly_grant')) {
+          await query(`
+            UPDATE users 
+            SET last_token_grant_cycle = NULL, updated_at = NOW() 
+            WHERE id = $1
+          `, [uRow.id]).catch(() => {});
         }
-      } else {
-        cleanIds = [String(transactionIds)].filter(Boolean);
+
+        affectedUsers.push({
+          id: uRow.id,
+          email: uRow.email,
+          oldBalance,
+          newBalance: updatedBal,
+          adjustedTokens: item.netChange
+        });
       }
     }
 
-    // 1. Fetch matching transactions to calculate user balance reversal
-    let txsToDelete: any[] = [];
-    if (cleanIds.length > 0) {
-      const placeholders = cleanIds.map((_, i) => `$${i + 1}`).join(', ');
-      txsToDelete = await query(`SELECT id, user_id, user_email, amount, type FROM token_transactions WHERE id IN (${placeholders})`, cleanIds);
-    } else {
-      txsToDelete = await query('SELECT id, user_id, user_email, amount, type FROM token_transactions');
-    }
-
-    const txRows = Array.isArray(txsToDelete) ? txsToDelete : ((txsToDelete as any)?.rows || []);
-
-    // 2. Calculate net token adjustments per user
-    const userAdjustments = new Map<string, { userId?: string; userEmail?: string; netAmount: number }>();
-    for (const tx of txRows) {
-      const key = tx.user_id || tx.user_email;
-      if (!key) continue;
-      const existing = userAdjustments.get(key) || { userId: tx.user_id, userEmail: tx.user_email, netAmount: 0 };
-      existing.netAmount += Number(tx.amount || 0);
-      userAdjustments.set(key, existing);
-    }
-
-    // 3. Update user balances in database
-    const affectedUserList: string[] = [];
-    for (const adj of Array.from(userAdjustments.values())) {
-      if (adj.userId) {
-        await query(
-          'UPDATE users SET token_balance = GREATEST(0, COALESCE(token_balance, 0) - $1), updated_at = NOW() WHERE id = $2',
-          [adj.netAmount, adj.userId]
-        );
-        affectedUserList.push(adj.userId);
-      } else if (adj.userEmail) {
-        await query(
-          'UPDATE users SET token_balance = GREATEST(0, COALESCE(token_balance, 0) - $1), updated_at = NOW() WHERE LOWER(email) = LOWER($2)',
-          [adj.netAmount, adj.userEmail.trim()]
-        );
-        affectedUserList.push(adj.userEmail);
-      }
-    }
-
-    // 4. Delete the transaction records
-    let deletedCount = 0;
-    if (cleanIds.length > 0) {
-      const placeholders = cleanIds.map((_, i) => `$${i + 1}`).join(', ');
-      await query(`DELETE FROM token_transactions WHERE id IN (${placeholders})`, cleanIds);
-      deletedCount = cleanIds.length;
-    } else {
-      await query('DELETE FROM token_transactions');
-      deletedCount = txRows.length;
-    }
+    await query(`
+      DELETE FROM token_transactions 
+      WHERE id IN (${placeholders})
+    `, validIds);
 
     return {
       success: true,
-      deletedCount,
-      affectedUsers: affectedUserList.length,
-      affectedUserIds: affectedUserList
+      deletedCount: rawTxs.length,
+      affectedUsers,
+      affectedUserIds: affectedUsers.map(u => u.id)
     };
   } catch (err: any) {
     console.error('deleteTokenTransactionsAndSyncBalance error:', err);
     return {
       success: false,
+      error: err.message || 'Failed deleting transactions',
       deletedCount: 0,
-      affectedUsers: 0,
-      error: err.message
+      affectedUsers: [],
+      affectedUserIds: []
     };
   }
 }
-
-export async function purchaseTokenPackage(options: {
-  userId?: string | null;
-  userEmail?: string | null;
-  packageId: string;
-  tokens?: number;
-  price?: number;
-  packageName?: string;
-  paymentMethod?: string;
-  [key: string]: any;
-}): Promise<{ success: boolean; tokensAdded?: number; newBalance?: number; error?: string; [key: string]: any }> {
-  try {
-    await initTokenTables();
-    const settings = await getTokenSettings();
-    const pkg = (settings.packages || []).find((p: any) => p.id === options.packageId);
-
-    const tokensToAdd = Number(options.tokens ?? pkg?.tokens ?? pkg?.tokenAmount ?? 100);
-    const costPrice = Number(options.price ?? pkg?.price ?? pkg?.priceDollars ?? 4.99);
-    const pkgTitle = options.packageName || pkg?.name || 'Token Bundle';
-
-    let userRow: any = null;
-    if (options.userId) {
-      const uRes = await query('SELECT id, email, token_balance, wallet_balance FROM users WHERE id = $1 LIMIT 1', [options.userId]);
-      if (uRes.length > 0) userRow = uRes[0];
-    }
-    if (!userRow && options.userEmail) {
-      const uRes = await query('SELECT id, email, token_balance, wallet_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [options.userEmail.trim()]);
-      if (uRes.length > 0) userRow = uRes[0];
-    }
-
-    if (!userRow) {
-      return { success: false, error: 'User not found for token purchase' };
-    }
-
-    const currentBal = Number(userRow.token_balance || 0);
-    const newBal = currentBal + tokensToAdd;
-
-    await query('UPDATE users SET token_balance = $1, updated_at = NOW() WHERE id = $2', [newBal, userRow.id]);
-
-    const txId = 'tx_pkg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-    await query(`
-      INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
-      VALUES ($1, $2, $3, $4, $5, 'package_purchase', $6, NOW())
-    `, [txId, userRow.id, userRow.email, tokensToAdd, newBal, `Purchased ${pkgTitle} (+${tokensToAdd.toLocaleString()} ${settings.tokenSymbol})`]);
-
-    return {
-      success: true,
-      tokensAdded: tokensToAdd,
-      newBalance: newBal,
-      wallet_balance: userRow.wallet_balance
-    };
-  } catch (err: any) {
-    return { success: false, error: err.message };
-  }
-}
-
-export async function grantMonthlyPlanTokenReward(
-  userEmailOrId: string,
-  tokensToGrant: number,
-  options?: { planSlug?: string; planName?: string }
-): Promise<{ success: boolean; tokensGranted: number; newBalance: number; error?: string }> {
-  try {
-    await initTokenTables();
-    const ident = String(userEmailOrId || '').trim();
-    const uRes = await query('SELECT id, email, token_balance FROM users WHERE id = $1 OR LOWER(email) = LOWER($1) LIMIT 1', [ident]);
-    if (!uRes || uRes.length === 0) return { success: false, tokensGranted: 0, newBalance: 0, error: 'User not found' };
-    const user = uRes[0];
-
-    const newBal = Number(user.token_balance || 0) + Number(tokensToGrant || 0);
-    await query('UPDATE users SET token_balance = $1, updated_at = NOW() WHERE id = $2', [newBal, user.id]);
-
-    const txId = 'tx_grant_' + Date.now().toString(36);
-    await query(`
-      INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
-      VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', $6, NOW())
-    `, [txId, user.id, user.email, tokensToGrant, newBal, `Monthly Plan Grant: ${options?.planName || options?.planSlug || 'Active Tier'}`]);
-
-    return { success: true, tokensGranted: tokensToGrant, newBalance: newBal };
-  } catch (err: any) {
-    return { success: false, tokensGranted: 0, newBalance: 0, error: err.message };
-  }
-}
-
-export const syncUserMonthlyTokens = grantMonthlyPlanTokenReward;
-export const grantUserTokens = addTokensToUser;
-export const grantPlanTokensOnPurchase = grantMonthlyPlanTokenReward;
 
 ```
 
