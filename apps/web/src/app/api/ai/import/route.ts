@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
+import { logAiUsageTelemetry } from '@/lib/aiUsageLogger';
 import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 import { scrapeRecipeFromUrl } from '@/lib/recipeScraper';
 import { downloadAndSaveImage, downloadAndSaveScrapedImage } from '@/lib/imageDownloader';

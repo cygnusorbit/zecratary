@@ -100,7 +100,7 @@
   "updatedAt": "2026-10-28T18:32:59.612Z",
   "chefAiSettings": {
     "provider": "gemini",
-    "apiKey": "AQ.Ab8RN6JHJi_RTGFBqkb_5cvfp6EO19tMePFfijwHV8e8NACX5A",
+    "apiKey": "",
     "model": "gemini-3.6-flash",
     "availableModels": [
       {
@@ -451,7 +451,7 @@
         ]
       }
     ],
-    "updatedAt": "2026-10-31T07:03:08.625Z"
+    "updatedAt": "2026-10-31T07:21:36.565Z"
   },
   "chefQuestionnaire": [],
   "ingredientCategories": [

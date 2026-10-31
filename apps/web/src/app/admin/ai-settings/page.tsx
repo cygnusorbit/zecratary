@@ -279,6 +279,11 @@ export default function ChefAISettingsPage() {
       applySavedTheme(detail);
     };
 
+    const handleLiveUsageUpdate = () => {
+      loadUsageMetrics(usageTimeframe);
+    };
+
+    window.addEventListener('zecratary_ai_usage_updated', handleLiveUsageUpdate);
     window.addEventListener('zecratary_theme_updated', handleThemeEvent);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeEvent);
     window.addEventListener('zecratary_theme_changed', handleThemeEvent);
@@ -286,6 +291,7 @@ export default function ChefAISettingsPage() {
     window.addEventListener('storage', handleThemeEvent);
 
     return () => {
+      window.removeEventListener('zecratary_ai_usage_updated', handleLiveUsageUpdate);
       window.removeEventListener('zecratary_theme_updated', handleThemeEvent);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeEvent);
       window.removeEventListener('zecratary_theme_changed', handleThemeEvent);
@@ -338,7 +344,10 @@ export default function ChefAISettingsPage() {
   const loadUsageMetrics = useCallback(async (timeframe: '24h' | '7d' | '30d') => {
     setIsLoadingUsage(true);
     try {
-      const res = await fetch(`/api/admin/ai/usage?timeframe=${timeframe}`, { cache: 'no-store' });
+      const res = await fetch(`/api/admin/ai/usage?timeframe=${timeframe}&provider=${encodeURIComponent(provider)}&t=${Date.now()}`, { 
+        cache: 'no-store',
+        headers: { 'Pragma': 'no-cache' }
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data?.points) && data.points.length > 0) {
@@ -352,7 +361,7 @@ export default function ChefAISettingsPage() {
     } finally {
       setIsLoadingUsage(false);
     }
-  }, [generateRealisticUsageData]);
+  }, [provider, generateRealisticUsageData]);
 
   useEffect(() => {
     loadUsageMetrics(usageTimeframe);
@@ -1519,12 +1528,25 @@ export default function ChefAISettingsPage() {
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h2 
-                    className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <BarChart3 className="h-4 w-4" /> {t('aiUsageChartTitle', 'AI Engine Usage & Token Consumption Analytics')}
-                  </h2>
+                  <div className="flex items-center gap-2">
+                    <h2 
+                      className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      <BarChart3 className="h-4 w-4" /> {t('aiUsageChartTitle', 'AI Engine Usage & Token Consumption Analytics')}
+                    </h2>
+                    <span 
+                      className="text-[9px] font-extrabold px-2 py-0.5 rounded-full border flex items-center gap-1 shadow-2xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      {t('liveGeminiSyncBadge', 'Live Gemini Sync')}
+                    </span>
+                  </div>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('aiUsageChartSubtitle', 'Real-time monitoring of prompt tokens, completions, request frequency, and estimated consumption.')}
                   </p>
