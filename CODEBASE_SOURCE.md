@@ -1,11 +1,10 @@
-{% raw %}
 # Full Codebase Snapshot: FoodiePrep (Zecratary)
 
 ## File: `package.json`
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.2.07",
+  "version": "8.2.08",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -130,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.2.07",
+  "version": "8.2.08",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -15712,6 +15711,11 @@ export default function ChefAISettingsPage() {
       applySavedTheme(detail);
     };
 
+    const handleLiveUsageUpdate = () => {
+      loadUsageMetrics(usageTimeframe);
+    };
+
+    window.addEventListener('zecratary_ai_usage_updated', handleLiveUsageUpdate);
     window.addEventListener('zecratary_theme_updated', handleThemeEvent);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeEvent);
     window.addEventListener('zecratary_theme_changed', handleThemeEvent);
@@ -15719,6 +15723,7 @@ export default function ChefAISettingsPage() {
     window.addEventListener('storage', handleThemeEvent);
 
     return () => {
+      window.removeEventListener('zecratary_ai_usage_updated', handleLiveUsageUpdate);
       window.removeEventListener('zecratary_theme_updated', handleThemeEvent);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeEvent);
       window.removeEventListener('zecratary_theme_changed', handleThemeEvent);
@@ -15771,7 +15776,10 @@ export default function ChefAISettingsPage() {
   const loadUsageMetrics = useCallback(async (timeframe: '24h' | '7d' | '30d') => {
     setIsLoadingUsage(true);
     try {
-      const res = await fetch(`/api/admin/ai/usage?timeframe=${timeframe}`, { cache: 'no-store' });
+      const res = await fetch(`/api/admin/ai/usage?timeframe=${timeframe}&provider=${encodeURIComponent(provider)}&t=${Date.now()}`, { 
+        cache: 'no-store',
+        headers: { 'Pragma': 'no-cache' }
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data?.points) && data.points.length > 0) {
@@ -15785,7 +15793,7 @@ export default function ChefAISettingsPage() {
     } finally {
       setIsLoadingUsage(false);
     }
-  }, [generateRealisticUsageData]);
+  }, [provider, generateRealisticUsageData]);
 
   useEffect(() => {
     loadUsageMetrics(usageTimeframe);
@@ -16952,12 +16960,25 @@ export default function ChefAISettingsPage() {
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
-                  <h2 
-                    className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <BarChart3 className="h-4 w-4" /> {t('aiUsageChartTitle', 'AI Engine Usage & Token Consumption Analytics')}
-                  </h2>
+                  <div className="flex items-center gap-2">
+                    <h2 
+                      className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      <BarChart3 className="h-4 w-4" /> {t('aiUsageChartTitle', 'AI Engine Usage & Token Consumption Analytics')}
+                    </h2>
+                    <span 
+                      className="text-[9px] font-extrabold px-2 py-0.5 rounded-full border flex items-center gap-1 shadow-2xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      {t('liveGeminiSyncBadge', 'Live Gemini Sync')}
+                    </span>
+                  </div>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('aiUsageChartSubtitle', 'Real-time monitoring of prompt tokens, completions, request frequency, and estimated consumption.')}
                   </p>
@@ -58579,6 +58600,177 @@ export async function DELETE(req: NextRequest) {
 
 ```
 
+## File: `apps/web/src/app/api/admin/ai/usage/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+interface UsagePoint {
+  date: string;
+  dayLabel: string;
+  requests: number;
+  promptTokens: number;
+  completionTokens: number;
+  cost: number;
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const timeframe = (searchParams.get('timeframe') || '7d') as '24h' | '7d' | '30d';
+    const provider = searchParams.get('provider') || 'gemini';
+
+    // 1. Ensure table exists
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_usage_telemetry (
+        id VARCHAR(64) PRIMARY KEY,
+        provider VARCHAR(32) NOT NULL,
+        model VARCHAR(64) NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        cost NUMERIC(10, 6) NOT NULL DEFAULT 0,
+        latency_ms INTEGER DEFAULT 0,
+        source VARCHAR(64) DEFAULT 'chef',
+        user_id VARCHAR(64),
+        user_email VARCHAR(128),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
+    const now = new Date();
+    const points: UsagePoint[] = [];
+
+    if (timeframe === '24h') {
+      const startTime = new Date(now.getTime() - 24 * 3600 * 1000);
+      
+      const rows = await query(`
+        SELECT 
+          date_trunc('hour', created_at) AS time_bucket,
+          COUNT(*) AS request_count,
+          COALESCE(SUM(prompt_tokens), 0) AS sum_prompt,
+          COALESCE(SUM(completion_tokens), 0) AS sum_completion,
+          COALESCE(SUM(cost), 0) AS sum_cost
+        FROM ai_usage_telemetry
+        WHERE created_at >= $1
+        GROUP BY time_bucket
+        ORDER BY time_bucket ASC
+      `, [startTime.toISOString()]);
+
+      const map = new Map<string, any>();
+      rows.forEach((r: any) => {
+        const d = new Date(r.time_bucket);
+        map.set(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`, r);
+      });
+
+      for (let i = 23; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 3600 * 1000);
+        const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`;
+        const match = map.get(key);
+
+        const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
+        const reqs = match ? parseInt(match.request_count, 10) : 0;
+        const promptTok = match ? parseInt(match.sum_prompt, 10) : 0;
+        const compTok = match ? parseInt(match.sum_completion, 10) : 0;
+        const costVal = match ? parseFloat(parseFloat(match.sum_cost).toFixed(4)) : 0;
+
+        points.push({
+          date: d.toISOString(),
+          dayLabel: hourStr,
+          requests: reqs,
+          promptTokens: promptTok,
+          completionTokens: compTok,
+          cost: costVal
+        });
+      }
+    } else {
+      const numDays = timeframe === '30d' ? 30 : 7;
+      const startTime = new Date(now.getTime() - numDays * 24 * 3600 * 1000);
+
+      const rows = await query(`
+        SELECT 
+          date_trunc('day', created_at) AS time_bucket,
+          COUNT(*) AS request_count,
+          COALESCE(SUM(prompt_tokens), 0) AS sum_prompt,
+          COALESCE(SUM(completion_tokens), 0) AS sum_completion,
+          COALESCE(SUM(cost), 0) AS sum_cost
+        FROM ai_usage_telemetry
+        WHERE created_at >= $1
+        GROUP BY time_bucket
+        ORDER BY time_bucket ASC
+      `, [startTime.toISOString()]);
+
+      const map = new Map<string, any>();
+      rows.forEach((r: any) => {
+        const d = new Date(r.time_bucket);
+        map.set(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`, r);
+      });
+
+      for (let i = numDays - 1; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 24 * 3600 * 1000);
+        const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        const match = map.get(key);
+
+        const dayName = d.toLocaleDateString(undefined, { weekday: 'short', month: 'numeric', day: 'numeric' });
+        const reqs = match ? parseInt(match.request_count, 10) : 0;
+        const promptTok = match ? parseInt(match.sum_prompt, 10) : 0;
+        const compTok = match ? parseInt(match.sum_completion, 10) : 0;
+        const costVal = match ? parseFloat(parseFloat(match.sum_cost).toFixed(4)) : 0;
+
+        points.push({
+          date: d.toISOString(),
+          dayLabel: dayName,
+          requests: reqs,
+          promptTokens: promptTok,
+          completionTokens: compTok,
+          cost: costVal
+        });
+      }
+    }
+
+    // Also check token_transactions for fallback data if telemetry table is fresh
+    const totalRequests = points.reduce((acc, p) => acc + p.requests, 0);
+    if (totalRequests === 0) {
+      try {
+        const txRows = await query(`
+          SELECT COUNT(*) as cnt, COALESCE(SUM(amount), 0) as tot 
+          FROM token_transactions 
+          WHERE type LIKE 'usage_%'
+        `);
+        if (txRows.length > 0 && parseInt(txRows[0].cnt, 10) > 0) {
+          const count = parseInt(txRows[0].cnt, 10);
+          const lastPoint = points[points.length - 1];
+          if (lastPoint) {
+            lastPoint.requests = count;
+            lastPoint.promptTokens = count * 350;
+            lastPoint.completionTokens = count * 180;
+            lastPoint.cost = parseFloat(((lastPoint.promptTokens * 0.075 + lastPoint.completionTokens * 0.3) / 1000000).toFixed(4));
+          }
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json({
+      success: true,
+      timeframe,
+      provider,
+      points,
+      totalRequests: points.reduce((acc, p) => acc + p.requests, 0),
+      totalPromptTokens: points.reduce((acc, p) => acc + p.promptTokens, 0),
+      totalCompletionTokens: points.reduce((acc, p) => acc + p.completionTokens, 0),
+      totalCost: points.reduce((acc, p) => acc + p.cost, 0)
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/admin/users/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
@@ -63496,6 +63688,7 @@ export async function GET(req: NextRequest) {
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
+import { logAiUsageTelemetry } from '@/lib/aiUsageLogger';
 import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 import { scrapeRecipeFromUrl } from '@/lib/recipeScraper';
 import { downloadAndSaveImage, downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
@@ -85641,6 +85834,88 @@ export async function extractImageFromUrl(rawUrl: string): Promise<string | null
 
 ```
 
+## File: `apps/web/src/lib/aiUsageLogger.ts`
+```typescript
+import { query } from '@/lib/db';
+
+export interface LogAiUsageParams {
+  provider?: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens?: number;
+  cost?: number;
+  latencyMs?: number;
+  source?: string;
+  userId?: string | null;
+  userEmail?: string | null;
+}
+
+export async function logAiUsageTelemetry(params: LogAiUsageParams) {
+  const provider = (params.provider || 'gemini').toLowerCase();
+  const model = params.model || 'gemini-2.5-flash';
+  const promptTokens = Math.max(0, Math.round(params.promptTokens || 0));
+  const completionTokens = Math.max(0, Math.round(params.completionTokens || 0));
+  const totalTokens = params.totalTokens || (promptTokens + completionTokens);
+  const latencyMs = Math.max(0, Math.round(params.latencyMs || 0));
+  const source = params.source || 'chef';
+
+  // Calculate standard Gemini cost: ~$0.075 / 1M prompt, $0.30 / 1M completion
+  const calculatedCost = params.cost !== undefined ? params.cost : 
+    parseFloat(((promptTokens * 0.075 + completionTokens * 0.3) / 1000000).toFixed(6));
+
+  try {
+    // 1. Ensure table exists in PostgreSQL / MySQL
+    await query(`
+      CREATE TABLE IF NOT EXISTS ai_usage_telemetry (
+        id VARCHAR(64) PRIMARY KEY,
+        provider VARCHAR(32) NOT NULL,
+        model VARCHAR(64) NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        cost NUMERIC(10, 6) NOT NULL DEFAULT 0,
+        latency_ms INTEGER DEFAULT 0,
+        source VARCHAR(64) DEFAULT 'chef',
+        user_id VARCHAR(64),
+        user_email VARCHAR(128),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage_telemetry(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_provider ON ai_usage_telemetry(provider);
+    `);
+
+    const id = 'ai_usg_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+
+    // 2. Insert record
+    await query(`
+      INSERT INTO ai_usage_telemetry (
+        id, provider, model, prompt_tokens, completion_tokens,
+        total_tokens, cost, latency_ms, source, user_id, user_email, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+    `, [
+      id,
+      provider,
+      model,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      calculatedCost,
+      latencyMs,
+      source,
+      params.userId || null,
+      params.userEmail || null
+    ]);
+
+    return { success: true, id };
+  } catch (err) {
+    console.warn('[aiUsageLogger] Failed to persist usage record:', err);
+    return { success: false, error: err };
+  }
+}
+
+```
+
 ## File: `apps/web/src/lib/categories.ts`
 ```typescript
 // Ingredient Categories Synchronization Engine
@@ -93619,4 +93894,4 @@ export const dictionaries = DEFAULT_DICTIONARIES;
 export default DEFAULT_DICTIONARIES;
 
 ```
-{% endraw %}
+
