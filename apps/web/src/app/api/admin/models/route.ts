@@ -1,120 +1,146 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-
-// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
-
-
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const { provider, apiKey } = await req.json();
-    const cleanKey = (apiKey || '').trim().replace(/^["']|["']$/g, '');
+    const { searchParams } = new URL(req.url);
+    const provider = searchParams.get('provider') || 'gemini';
+    const apiKey = searchParams.get('apiKey') || '';
 
+    const cleanKey = apiKey.trim().replace(/^['"]|['"]$/g, '');
     if (!cleanKey) {
-      return NextResponse.json({ success: false, error: 'API key is required to query models.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'API key is required' }, { status: 400 });
     }
 
     if (provider === 'gemini') {
-      if (cleanKey.includes('.apps.googleusercontent.com') || cleanKey.startsWith('GOCSPX-')) {
-        return NextResponse.json({
-          success: false,
-          error: "Invalid Key Type: You entered a Google OAuth credential instead of a Gemini API Key. Please get a Gemini API Key from https://aistudio.google.com/app/apikey."
-        }, { status: 400 });
-      }
-
-      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
-      const res = await fetch(url, {
-        cache: 'no-store',
-        headers: {
-          'x-goog-api-key': cleanKey
-        }
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`, {
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store'
       });
-      const data = await res.json().catch(() => ({}));
 
-      if (!res.ok || data.error) {
-        const rawMsg = data.error?.message || `Google API model listing failed (${res.status})`;
-        let friendly = rawMsg;
-        if (res.status === 401 || rawMsg.includes('authentication credentials') || rawMsg.includes('API key')) {
-          friendly = "Google API Authentication Failed (401): The provided Gemini API Key is invalid, expired, or rejected. Please obtain an active API key from Google AI Studio (https://aistudio.google.com/app/apikey).";
-        }
-        return NextResponse.json({ success: false, error: friendly }, { status: res.status || 400 });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ success: false, error: err?.error?.message || 'Gemini API rejected request' }, { status: res.status });
       }
 
-      const rawModels = Array.isArray(data.models) ? data.models : [];
-      const geminiModels = rawModels
+      const data = await res.json();
+      const models = (data.models || [])
         .filter((m: any) => {
           const methods = m.supportedGenerationMethods || [];
           const name = (m.name || '').toLowerCase();
-          return methods.includes('generateContent') &&
-                 !name.includes('embedding') &&
-                 !name.includes('aqa') &&
-                 !name.includes('imagen');
+          return methods.includes('generateContent') || name.includes('gemini');
         })
         .map((m: any) => {
-          const rawId = m.name?.startsWith('models/') ? m.name.replace('models/', '') : m.name;
-          const displayName = m.displayName || rawId;
+          const cleanId = (m.name || '').replace(/^models\//, '');
           return {
-            id: rawId,
-            name: displayName,
-            label: `${displayName} (${rawId})`,
+            id: cleanId,
+            name: m.displayName || cleanId,
             description: m.description || ''
           };
         });
 
-      return NextResponse.json({
-        success: true,
-        models: geminiModels,
-        message: `Discovered ${geminiModels.length} models dynamically from Google Gemini.`
-      }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ success: true, count: models.length, models });
+    } else {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: {
+          Authorization: `Bearer ${cleanKey}`,
+          'Content-Type': 'application/json'
+        },
+        cache: 'no-store'
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ success: false, error: err?.error?.message || 'OpenAI API rejected request' }, { status: res.status });
+      }
+
+      const data = await res.json();
+      const models = (data.data || [])
+        .filter((m: any) => {
+          const id = (m.id || '').toLowerCase();
+          return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
+                 !id.includes('realtime') && !id.includes('audio') && !id.includes('embedding') &&
+                 !id.includes('transcription') && !id.includes('tts') && !id.includes('moderation');
+        })
+        .map((m: any) => ({
+          id: m.id,
+          name: m.id,
+          description: ''
+        }));
+
+      return NextResponse.json({ success: true, count: models.length, models });
+    }
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err?.message || 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const provider = body.provider || 'gemini';
+    const cleanKey = (body.apiKey || '').trim().replace(/^['"]|['"]$/g, '');
+
+    if (!cleanKey) {
+      return NextResponse.json({ success: false, error: 'API key is required' }, { status: 400 });
+    }
+
+    if (provider === 'gemini') {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`, {
+        cache: 'no-store'
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ success: false, error: err?.error?.message || 'Gemini API error' }, { status: res.status });
+      }
+
+      const data = await res.json();
+      const models = (data.models || [])
+        .filter((m: any) => {
+          const methods = m.supportedGenerationMethods || [];
+          const name = (m.name || '').toLowerCase();
+          return methods.includes('generateContent') || name.includes('gemini');
+        })
+        .map((m: any) => {
+          const cleanId = (m.name || '').replace(/^models\//, '');
+          return {
+            id: cleanId,
+            name: m.displayName || cleanId,
+            description: m.description || ''
+          };
+        });
+
+      return NextResponse.json({ success: true, count: models.length, models });
     } else {
       const res = await fetch('https://api.openai.com/v1/models', {
         headers: { Authorization: `Bearer ${cleanKey}` },
         cache: 'no-store'
       });
-      const data = await res.json().catch(() => ({}));
 
-      if (!res.ok || data.error) {
-        return NextResponse.json({
-          success: false,
-          error: data.error?.message || `OpenAI model listing failed (${res.status})`
-        }, { status: res.status || 400 });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ success: false, error: err?.error?.message || 'OpenAI API error' }, { status: res.status });
       }
 
-      const openaiModels = (data.data || [])
+      const data = await res.json();
+      const models = (data.data || [])
         .filter((m: any) => {
           const id = (m.id || '').toLowerCase();
           return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
-                 !id.includes('realtime') && !id.includes('audio') &&
-                 !id.includes('moderation') && !id.includes('embedding') &&
-                 !id.includes('instruct') && !id.includes('similarity');
+                 !id.includes('realtime') && !id.includes('audio') && !id.includes('embedding') &&
+                 !id.includes('transcription') && !id.includes('tts') && !id.includes('moderation');
         })
-        .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
         .map((m: any) => ({
           id: m.id,
           name: m.id,
-          label: m.id,
-          description: `OpenAI ${m.id}`
+          description: ''
         }));
 
-      return NextResponse.json({
-        success: true,
-        models: openaiModels,
-        message: `Discovered ${openaiModels.length} models dynamically from OpenAI.`
-      }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ success: true, count: models.length, models });
     }
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err?.message || 'Internal error' }, { status: 500 });
   }
 }

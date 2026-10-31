@@ -1,468 +1,303 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { recordTokenUsage } from '@/lib/tokenUsage';
-import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
-import { resolveAndScrapeBestRecipe, extractImageFromUrl } from '@/lib/recipeScraper';
+import { fetchServerAdminSettings } from '@/lib/adminSync';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-function cleanJsonString(raw: string): string {
-  if (!raw) return '';
-  const match = raw.match(/```json\s*([\s\S]*?)\s*```/) || raw.match(/\{[\s\S]*\}/);
-  return match ? (match[1] || match[0]).trim() : raw.trim();
+// Sanitize legacy or deprecated Gemini model identifiers
+function sanitizeGeminiModel(rawModel: string): string {
+  const m = (rawModel || '').trim();
+  const lower = m.toLowerCase();
+  if (!lower.includes('gemini') || lower.includes('gemini-1.5') || lower.includes('gemini-2.0')) {
+    return 'gemini-2.5-flash';
+  }
+  return m;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    let body: any = {};
-    try {
-      body = await req.json();
-    } catch (_) {
-      return NextResponse.json({ success: false, error: 'Malformed JSON payload' }, { status: 400 });
-    }
+    const body = await req.json().catch(() => ({}));
+    const { 
+      prompt, 
+      answers, 
+      preferences, 
+      pantryItems, 
+      userEmail: reqUserEmail,
+      userId: reqUserId 
+    } = body;
 
-    const prompt = (body.prompt || '').trim();
-    const isQuestionnaire = Boolean(body.isQuestionnaireComplete);
-    const topicTitle = body.topicTitle || 'Culinary Meal Plan';
-    const qaList: any[] = Array.isArray(body.questionnaireSummary) ? body.questionnaireSummary : [];
-    const answersMap: Record<string, any> = body.questionnaireAnswers || {};
-    const prefs = body.preferences || {};
-    const pantryItems = Array.isArray(body.pantry) ? body.pantry : [];
-    let referenceUrls: string[] = Array.isArray(body.recommendedRecipeUrls) 
-      ? body.recommendedRecipeUrls.filter(Boolean) 
-      : [];
+    // AI Saved Recipe Grounding Scope
+    let savedRecipesContext = '';
+    const enableSavedRecipeSearch = (body as any)?.enableSavedRecipeSearch !== undefined
+      ? Boolean((body as any).enableSavedRecipeSearch)
+      : true;
 
-    let userId = String(body.userId || '').trim();
-    let userEmail = String(body.userEmail || body.email || '').toLowerCase().trim();
-
-    if (!userId || !userEmail) {
-      const cookieHeader = req.cookies.get('zecratary_session')?.value;
-      if (cookieHeader) {
-        try {
-          const parsed = JSON.parse(decodeURIComponent(cookieHeader));
-          userId = userId || String(parsed.id || '').trim();
-          userEmail = userEmail || String(parsed.email || '').toLowerCase().trim();
-        } catch (_) {}
+    if (enableSavedRecipeSearch) {
+      try {
+        const targetUserId = reqUserId || reqUserEmail || 'guest';
+        if (targetUserId !== 'guest') {
+          const savedResult: any = await query(
+            'SELECT title, description, ingredients, tags FROM saved_recipes WHERE user_id = $1 OR user_email = $1 ORDER BY id DESC LIMIT 5',
+            [targetUserId]
+          );
+          const rows = savedResult?.rows || (Array.isArray(savedResult) ? savedResult : []);
+          if (rows.length > 0) {
+            savedRecipesContext = `USER SAVED RECIPES (Reference these flavors if relevant):\n` +
+              rows.map((r: any) => `- ${r.title}: ${r.description || ''} (${r.ingredients || ''})`).join('\n') + '\n\n';
+          }
+        }
+      } catch (_) {
+        // Non-blocking fallback if saved_recipes table is empty or unpopulated
       }
     }
 
-    if (!prompt && !isQuestionnaire) {
-      return NextResponse.json({ success: false, error: 'Prompt or questionnaire completion is required' }, { status: 400 });
+    // 1. Fetch complete settings directly from PostgreSQL / MySQL admin_settings
+    let serverSettings: any = {};
+    try {
+      serverSettings = await fetchServerAdminSettings();
+    } catch (_) {}
+
+    const chefSettings = serverSettings?.chefAiSettings || serverSettings?.aiSettings || {};
+    
+    // Extract individual controls configured in /admin/ai-settings
+    const provider = (chefSettings.provider || serverSettings?.aiProvider || 'gemini').toLowerCase();
+    
+    // Resolve active API key
+    let rawApiKey = (chefSettings.apiKey || '').trim();
+    if (!rawApiKey) {
+      if (provider === 'gemini') {
+        rawApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+      } else {
+        rawApiKey = process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '';
+      }
+    }
+    const apiKey = rawApiKey.replace(/^['"]|['"]$/g, '').trim();
+
+    const initialModel = chefSettings.model || serverSettings?.aiModel || (provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o');
+    const temperature = typeof chefSettings.temperature === 'number' ? chefSettings.temperature : 0.7;
+    const maxTokens = typeof chefSettings.maxTokens === 'number' ? chefSettings.maxTokens : 4096;
+    const systemPrompt = chefSettings.systemPrompt || 'You are Chef Foodie, an expert autonomous culinary AI assistant.';
+    const enableWebSearch = chefSettings.enableWebSearch !== false;
+    const enablePantryContext = chefSettings.enablePantryContext !== false;
+    const strictDiet = chefSettings.strictDietEnforcement !== false;
+    const maxPlanDays = chefSettings.maxPlanDays || 7;
+    const resultDisplayMode = chefSettings.resultDisplayMode || 'card';
+
+    const knowledgeBases: string[] = Array.isArray(chefSettings.knowledgeBaseList) ? chefSettings.knowledgeBaseList : [];
+    const customVocab: string[] = Array.isArray(chefSettings.customVocabularyList) ? chefSettings.customVocabularyList : [];
+    const filterWords: string[] = Array.isArray(chefSettings.filterWordsList) ? chefSettings.filterWordsList : [];
+    const recommendedUrls: string[] = Array.isArray(chefSettings.recommendedRecipeUrls) ? chefSettings.recommendedRecipeUrls.filter(Boolean) : [];
+
+    // 2. Strict Filter Words Pre-flight Validation
+    if (strictDiet && filterWords.length > 0) {
+      const userContent = JSON.stringify({ prompt, answers, preferences }).toLowerCase();
+      for (const word of filterWords) {
+        if (word && word.trim() && userContent.includes(word.trim().toLowerCase())) {
+          return NextResponse.json({
+            success: false,
+            error: `Request contains prohibited ingredient or restricted term: "${word}". (Enforced by AI Settings)`,
+            filterViolation: true
+          }, { status: 400 });
+        }
+      }
     }
 
-    // 1. Fetch AI Configurations from PostgreSQL / MySQL admin_settings
-    let activeModel = 'gemini-2.5-flash';
-    let provider = 'gemini';
-    let apiKey = '';
-    let temperature = 0.7;
-    let maxTokens = 4096;
-    let systemPrompt = 'You are Chef Foodie, an expert autonomous culinary AI assistant.';
-    let strictDietEnforcement = false;
-    let filterWordsList: string[] = [];
-    let customVocabularyList: string[] = [];
-    let maxPlanDays = 7;
-    let resultDisplayMode = 'card';
+    if (!apiKey) {
+      return NextResponse.json({
+        success: false,
+        error: `No active ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} API key configured in /admin/ai-settings or .env`
+      }, { status: 500 });
+    }
 
-    try {
-      const sRows: any = await query(`
-        SELECT chef_ai_settings, ai_model, ai_provider, value 
-        FROM admin_settings 
-        WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1'
-        LIMIT 1;
-      `);
-      const row = Array.isArray(sRows) ? sRows[0] : sRows?.rows?.[0];
-      if (row) {
-        let c = row.chef_ai_settings;
-        if (typeof c === 'string') {
-          try { c = JSON.parse(c); } catch (_) { c = {}; }
-        } else if (!c && row.value) {
-          c = typeof row.value === 'string' ? JSON.parse(row.value).chefAiSettings || {} : row.value.chefAiSettings || {};
+    // 3. Assemble Grounded System Instructions
+    let fullSystemInstructions = `${systemPrompt}\n\n`;
+
+    if (knowledgeBases.length > 0) {
+      fullSystemInstructions += `PRIORITY KNOWLEDGE BASES:\n${knowledgeBases.map(k => `- ${k}`).join('\n')}\n\n`;
+    }
+
+    if (customVocab.length > 0) {
+      fullSystemInstructions += `CUSTOM CULINARY VOCABULARY (Prioritize these concepts):\n${customVocab.join(', ')}\n\n`;
+    }
+
+    if (filterWords.length > 0) {
+      fullSystemInstructions += `STRICTLY PROHIBITED INGREDIENTS & TERMS (Never suggest or include):\n${filterWords.join(', ')}\n\n`;
+    }
+
+    if (recommendedUrls.length > 0) {
+      fullSystemInstructions += `RECOMMENDED PRIMARY RECIPE SOURCE URLS (Prioritize culinary style, flavor profiles, and link references from these websites):\n${recommendedUrls.map(u => `- ${u}`).join('\n')}\n\n`;
+    }
+
+    if (enablePantryContext && Array.isArray(pantryItems) && pantryItems.length > 0) {
+      fullSystemInstructions += `USER IN-STOCK PANTRY INVENTORY:\n${pantryItems.map((p: any) => `- ${p.name || p} (${p.quantity || 'available'})`).join('\n')}\nMark matching recipe ingredients with "Pantry ✓" where applicable.\n\n`;
+    }
+
+    if (savedRecipesContext) {
+      fullSystemInstructions += savedRecipesContext;
+    }
+
+    fullSystemInstructions += `PLANNING CONSTRAINTS:\n- Maximum plan duration: ${maxPlanDays} days.\n- Preferred presentation mode: ${resultDisplayMode}.\n`;
+
+    // 4. Zero-Dependency Native Fetch Execution (Google Gemini & OpenAI)
+    let replyText = '';
+    let finalModelUsed = initialModel;
+
+    if (provider === 'gemini') {
+      let targetModel = sanitizeGeminiModel(initialModel);
+      finalModelUsed = targetModel;
+
+      const promptPayload = `User Request: ${prompt || 'Create a balanced culinary recommendation.'}\nIntake Questionnaire Answers: ${JSON.stringify(answers || {})}\nPreferences: ${JSON.stringify(preferences || {})}`;
+
+      const generateGeminiContent = async (modelToCall: string, withTools: boolean) => {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToCall}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const payload: any = {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: promptPayload }]
+            }
+          ],
+          systemInstruction: {
+            parts: [{ text: fullSystemInstructions }]
+          },
+          generationConfig: {
+            temperature,
+            maxOutputTokens: maxTokens
+          }
+        };
+
+        if (withTools && enableWebSearch) {
+          payload.tools = [{ googleSearch: {} }];
         }
 
-        if (c) {
-          if (c.model || row.ai_model) activeModel = String(c.model || row.ai_model).replace(/^models\//, '');
-          if (c.provider || row.ai_provider) provider = c.provider || row.ai_provider;
-          if (c.apiKey) apiKey = c.apiKey;
-          if (c.temperature !== undefined) temperature = Number(c.temperature);
-          if (c.maxTokens !== undefined) maxTokens = Number(c.maxTokens);
-          if (c.systemPrompt) systemPrompt = c.systemPrompt;
-          if (c.strictDietEnforcement !== undefined) strictDietEnforcement = Boolean(c.strictDietEnforcement);
-          if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
-          if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
-          if (c.maxPlanDays !== undefined) maxPlanDays = Number(c.maxPlanDays) || 7;
-          if (c.resultDisplayMode) resultDisplayMode = c.resultDisplayMode;
-          if (referenceUrls.length === 0 && Array.isArray(c.recommendedRecipeUrls)) {
-            referenceUrls = c.recommendedRecipeUrls.filter(Boolean);
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey
+          },
+          body: JSON.stringify(payload),
+          cache: 'no-store'
+        });
+
+        const data = await res.json().catch(() => ({}));
+        return { res, data };
+      };
+
+      // Primary Attempt
+      let { res, data } = await generateGeminiContent(targetModel, enableWebSearch);
+
+      // Graceful Retry 1: If search tools caused a 400 error, retry without tools
+      if (!res.ok && enableWebSearch && (data?.error?.message?.includes('tool') || res.status === 400)) {
+        const retry = await generateGeminiContent(targetModel, false);
+        res = retry.res;
+        data = retry.data;
+      }
+
+      // Graceful Retry 2: If model is deprecated or not found (404), auto-fallback to gemini-2.5-flash / gemini-3.6-flash
+      if (!res.ok && (res.status === 404 || data?.error?.message?.includes('not found') || data?.error?.message?.includes('no longer available'))) {
+        const fallbackModel = targetModel === 'gemini-2.5-flash' ? 'gemini-3.6-flash' : 'gemini-2.5-flash';
+        finalModelUsed = fallbackModel;
+        const retryFallback = await generateGeminiContent(fallbackModel, false);
+        res = retryFallback.res;
+        data = retryFallback.data;
+      }
+
+      if (!res.ok) {
+        throw new Error(data?.error?.message || `Google Gemini API returned status ${res.status}`);
+      }
+
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      replyText = parts.map((p: any) => p.text).filter(Boolean).join('\n') || '';
+    } else {
+      // OpenAI REST Integration
+      finalModelUsed = initialModel || 'gpt-4o';
+      const openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: finalModelUsed,
+          messages: [
+            { role: 'system', content: fullSystemInstructions },
+            { role: 'user', content: `Request: ${prompt || 'Suggest meal'}. Answers: ${JSON.stringify(answers || {})}` }
+          ],
+          temperature,
+          max_tokens: maxTokens
+        }),
+        cache: 'no-store'
+      });
+
+      const openAiData = await openAiRes.json().catch(() => ({}));
+      if (!openAiRes.ok) {
+        throw new Error(openAiData?.error?.message || `OpenAI API returned status ${openAiRes.status}`);
+      }
+
+      replyText = openAiData?.choices?.[0]?.message?.content || '';
+    }
+
+    // 5. Server-Side Token Deduction (Resilient, 1-argument options contract)
+    let remainingTokens: number | null = null;
+    let consumedTokens: number = 8;
+
+    try {
+      const activeUser = reqUserEmail || reqUserId;
+      if (activeUser) {
+        const tokenService = await import('@/lib/tokenService').catch(() => null);
+        if (tokenService && typeof tokenService.deductUserTokens === 'function') {
+          const settings = typeof tokenService.getTokenSettings === 'function' 
+            ? await tokenService.getTokenSettings() 
+            : null;
+          consumedTokens = settings?.chefCost || 8;
+
+          // Single options object contract to satisfy TypeScript TS2554
+          const deduction = await (tokenService.deductUserTokens as any)({
+            userId: reqUserId || activeUser,
+            userEmail: reqUserEmail || activeUser,
+            cost: consumedTokens,
+            amount: consumedTokens,
+            tokens: consumedTokens,
+            feature: 'chef',
+            description: 'Chef AI Assistant Query'
+          });
+
+          if (deduction && typeof deduction.currentBalance === 'number') {
+            remainingTokens = deduction.currentBalance;
+          } else if (deduction && typeof deduction.balance === 'number') {
+            remainingTokens = deduction.balance;
+          } else if (deduction && typeof deduction.remainingTokens === 'number') {
+            remainingTokens = deduction.remainingTokens;
           }
         }
       }
     } catch (_) {}
 
-    if (!apiKey) {
-      try {
-        const kRows: any = await query(`
-          SELECT key_value FROM admin_api_keys 
-          WHERE (provider = $1::text OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) 
-            AND status = 'active' 
-          ORDER BY updated_at DESC LIMIT 1;
-        `, [provider]);
-        const kRow = Array.isArray(kRows) ? kRows[0] : kRows?.rows?.[0];
-        if (kRow?.key_value) apiKey = kRow.key_value;
-      } catch (_) {}
-    }
-    if (!apiKey) {
-      apiKey = provider === 'gemini' 
-        ? (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '')
-        : (process.env.OPENAI_API_KEY || '');
-    }
-
-    // 2. Enforce Strict Dietary Filters
-    if (strictDietEnforcement && filterWordsList.length > 0) {
-      const combinedCheck = `${prompt} ${JSON.stringify(answersMap)}`.toLowerCase();
-      const matched = filterWordsList.find((w: any) => {
-        const clean = String(w || '').trim().toLowerCase();
-        return clean.length > 1 && combinedCheck.includes(clean);
-      });
-      if (matched) {
-        return NextResponse.json({
-          success: false,
-          error: `Request blocked: Restricted ingredient or keyword "${matched}" detected under AI Strict Dietary Filters.`,
-          restrictionType: 'filter_word_violation'
-        }, { status: 422 });
-      }
-    }
-
-    // 3. Token Deduction Telemetry
-    const tokenSettings = await getTokenSettings();
-    const chefCost = tokenSettings.chefCost ?? 1;
-    let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
-
-    if (tokenSettings.isEnabled && chefCost > 0 && !body.isDecisionConfirmation) {
-      deduction = await deductUserTokens({
-        userId: userId || 'guest',
-        userEmail: userEmail || 'user@zecratary.com',
-        cost: chefCost,
-        feature: 'chef',
-        description: isQuestionnaire ? `Questionnaire plan: ${topicTitle}` : `Chef prompt: ${prompt.slice(0, 35)}...`
-      });
-
-      if (!deduction.success) {
-        return NextResponse.json({
-          success: false,
-          error: deduction.error,
-          insufficientTokens: true,
-          required: chefCost,
-          currentBalance: deduction.currentBalance,
-          tokenSymbol: tokenSettings.tokenSymbol
-        }, { status: 402 });
-      }
-    }
-
-    // 4. Parse Intake Questionnaire Variables
-    let parsedDays = body.requestedDays || 3;
-    let parsedMealTypes = body.requestedMealTypes || ['Dinner'];
-    let parsedStartDate = body.startDate || 'Today';
-    let parsedTheme = body.requestedTheme || (customVocabularyList[0] || 'High-Protein Wholesome');
-    let parsedBudget = body.requestedBudget || '$5 - $8 per serving';
-
-    for (const item of qaList) {
-      const q = String((item as any)?.question || '').toLowerCase();
-      const a = String((item as any)?.answer || '').trim();
-      if (/\b(how many days|duration|number of days)\b/i.test(q)) {
-        const m = a.match(/\d+/);
-        if (m) parsedDays = Math.min(14, Math.max(1, parseInt(m[0], 10)));
-      } else if (/\b(meal type|which meal|meals to include)\b/i.test(q)) {
-        if (/all meals \+ snack/i.test(a)) parsedMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
-        else if (/all meals/i.test(a)) parsedMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
-        else if (/breakfast & lunch/i.test(a)) parsedMealTypes = ['Breakfast', 'Lunch'];
-        else if (/breakfast & dinner/i.test(a)) parsedMealTypes = ['Breakfast', 'Dinner'];
-        else if (/lunch & dinner/i.test(a)) parsedMealTypes = ['Lunch', 'Dinner'];
-        else if (/dinner only/i.test(a)) parsedMealTypes = ['Dinner'];
-        else if (/lunch only/i.test(a)) parsedMealTypes = ['Lunch'];
-        else parsedMealTypes = [a];
-      } else if (/\b(when|start date|starting)\b/i.test(q)) {
-        parsedStartDate = a;
-      } else if (/\b(budget|cost|spend|price)\b/i.test(q)) {
-        parsedBudget = a;
-      } else if (/\b(theme|preference|flavor|cuisine)\b/i.test(q)) {
-        parsedTheme = a;
-      }
-    }
-
-    const servings = Number(prefs.servings || 2);
-    const country = prefs.country || 'Singapore';
-    const diets = Array.isArray(prefs.diet) ? prefs.diet : ['Vegetarian'];
-    const allergies = Array.isArray(prefs.allergy) ? prefs.allergy : ['Peanuts'];
-    const avoid = Array.isArray(prefs.avoid) ? prefs.avoid : ['Oily'];
-
-    // 5. Intelligent Two-Tier Reference URL Scraping & Crawling
-    let scrapedGrounding: any = null;
-    if (referenceUrls.length > 0) {
-      try {
-        const queryTerm = prompt || parsedTheme || topicTitle;
-        scrapedGrounding = await resolveAndScrapeBestRecipe(queryTerm, referenceUrls);
-      } catch (err) {
-        console.warn('[AI Route Scraper]:', err);
-      }
-    }
-
-    let responseText = '';
-    let generatedPlan: any = null;
-    let recommendedRecipe: any = null;
-
-    // 6. Execute AI Synthesis / Hybrid Adaptation
-    if (apiKey && apiKey.length > 10 && !apiKey.includes('sample')) {
-      const modelsToTry = [activeModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-      const uniqueModels = Array.from(new Set(modelsToTry));
-
-      // Explicitly typed callback parameters satisfying TypeScript strict noImplicitAny rules
-      const intakeContext = qaList.length > 0 
-        ? qaList.map((pair: any) => `Q: ${pair.question}\nA: ${pair.answer}`).join('\n')
-        : Object.entries(answersMap).map(([k, v]: [string, any]) => `Step ${k}: ${v}`).join('\n');
-
-      const scrapedGroundingPrompt = scrapedGrounding ? `
-PRIMARY AUTHENTIC SCRAPED RECIPE (FROM CURATED WEB REFERENCE):
-- Title: ${scrapedGrounding.title}
-- Source URL: ${scrapedGrounding.sourceUrl}
-- Domain: ${scrapedGrounding.sourceName}
-- Ingredients: ${(scrapedGrounding.ingredients || []).join(', ')}
-- Instructions: ${(scrapedGrounding.instructions || []).join(' ')}
-- Prep: ${scrapedGrounding.prepMinutes || 15}m | Cook: ${scrapedGrounding.cookMinutes || 20}m
-MANDATORY DIRECTIVE: Use this authentic human-tested dish as the ground truth for your Final Recommended Recipe. Adapt ingredient quantities to ${servings} servings and strictly omit all allergies: ${allergies.concat(avoid).join(', ') || 'None'}.` : '';
-
-      const fullPrompt = isQuestionnaire
-        ? `${systemPrompt}
-You are Chef Foodie. The user completed the intake questionnaire for "${topicTitle}".
-INTAKE SUMMARY:
-- Total Days: ${parsedDays}
-- Meal Types: ${parsedMealTypes.join(', ')}
-- Theme: ${parsedTheme}
-- Budget Target: ${parsedBudget}
-- Household Servings: ${servings} people (${country})
-- Dietary Rules: ${diets.join(', ') || 'Standard'}
-- Prohibited Allergies/Avoid: ${allergies.concat(avoid).join(', ') || 'None'}
-- Pantry In-Stock Items: ${pantryItems.length > 0 ? pantryItems.join(', ') : 'Standard kitchen essentials'}
-${scrapedGroundingPrompt}
-
-USER QUESTIONNAIRE RESPONSES:
-${intakeContext}
-
-Return ONLY valid JSON with this exact structure:
-{
-  "reply": "Warm culinary message detailing why this meal plan and recipe suit their questionnaire answers.",
-  "sourcingType": "${scrapedGrounding ? 'scraped_hybrid' : 'ai_generated'}",
-  "plan": {
-    "title": "${parsedDays}-Day ${parsedTheme} Plan",
-    "totalDays": ${parsedDays},
-    "theme": "${parsedTheme}",
-    "budgetPerServing": "${parsedBudget}",
-    "meals": [
-      {
-        "id": "meal_1",
-        "dayIndex": 1,
-        "dayLabel": "Day 1",
-        "dateStr": "${parsedStartDate}",
-        "mealType": "${parsedMealTypes[0] || 'Dinner'}",
-        "title": "Dish Title",
-        "description": "Short culinary summary",
-        "prepMinutes": 15,
-        "cookMinutes": 20,
-        "servings": ${servings},
-        "ingredients": ["item 1", "item 2"]
-      }
-    ]
-  },
-  "recommendedRecipe": {
-    "title": "${scrapedGrounding?.title || 'Signature Recommended Dish'}",
-    "description": "${scrapedGrounding?.description || 'Chef curated culinary specialty'}",
-    "sourceUrl": "${scrapedGrounding?.sourceUrl || ''}",
-    "sourceName": "${scrapedGrounding?.sourceName || ''}",
-    "prepMinutes": ${scrapedGrounding?.prepMinutes || 15},
-    "cookMinutes": ${scrapedGrounding?.cookMinutes || 20},
-    "servings": ${servings},
-    "calories": 480,
-    "mealType": "${parsedMealTypes[0] || 'Dinner'}",
-    "ingredients": ["ingredient 1", "ingredient 2"],
-    "instructions": ["Step 1", "Step 2", "Step 3"],
-    "chefTip": "Chef seasoning secret",
-    "isScraped": ${Boolean(scrapedGrounding)}
-  }
-}`
-        : `${systemPrompt}
-User Query: "${prompt}"
-Context: Cooking for ${servings} people in ${country}. Diet: ${diets.join(', ')}. Avoid: ${allergies.concat(avoid).join(', ')}. Pantry items: ${pantryItems.join(', ')}.
-${scrapedGroundingPrompt}
-
-Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
-
-      for (const mName of uniqueModels) {
-        try {
-          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${mName}:generateContent?key=${apiKey}`;
-          const gRes = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
-              generationConfig: { temperature, maxOutputTokens: maxTokens }
-            })
-          });
-
-          if (gRes.ok) {
-            const gData = await gRes.json();
-            const rawText = gData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const cleaned = cleanJsonString(rawText);
-            if (cleaned) {
-              try {
-                const parsed = JSON.parse(cleaned);
-                responseText = parsed.reply || rawText;
-                if (parsed.plan) generatedPlan = parsed.plan;
-                if (parsed.recommendedRecipe) recommendedRecipe = parsed.recommendedRecipe;
-                else if (parsed.recipe) recommendedRecipe = parsed.recipe;
-                break;
-              } catch (_) {
-                responseText = rawText;
-              }
-            } else {
-              responseText = rawText;
-            }
-            break;
-          }
-        } catch (_) {}
-      }
-    }
-
-    // 7. Resilient Fallback Synthesizer if LLM is Offline
-    if (!responseText) {
-      if (scrapedGrounding) {
-        recommendedRecipe = {
-          title: scrapedGrounding.title,
-          description: scrapedGrounding.description,
-          sourceUrl: scrapedGrounding.sourceUrl,
-          sourceName: scrapedGrounding.sourceName,
-          prepMinutes: scrapedGrounding.prepMinutes,
-          cookMinutes: scrapedGrounding.cookMinutes,
-          servings: servings,
-          calories: scrapedGrounding.calories || 490,
-          mealType: parsedMealTypes[0] || 'Dinner',
-          ingredients: scrapedGrounding.ingredients,
-          instructions: scrapedGrounding.instructions,
-          chefTip: 'Rest for 2 minutes before serving so aromas infuse completely.',
-          image: scrapedGrounding.image,
-          isScraped: true
-        };
-        responseText = `Here is your authentic recipe recommendation scraped from your curated web reference (${scrapedGrounding.sourceName || 'web source'}).`;
-      } else if (isQuestionnaire) {
-        const meals: any[] = [];
-        for (let dIdx = 0; dIdx < parsedDays; dIdx++) {
-          for (const mType of parsedMealTypes) {
-            meals.push({
-              id: `meal_${Date.now()}_${dIdx}_${mType}`,
-              dayIndex: dIdx + 1,
-              dayLabel: `Day ${dIdx + 1}`,
-              dateStr: `Schedule ${dIdx + 1}`,
-              mealType: mType,
-              title: `${country} Wholesome ${mType}`,
-              description: `Nutritious, chef-curated ${parsedTheme.toLowerCase()} selection.`,
-              prepMinutes: 15,
-              cookMinutes: 20,
-              servings,
-              ingredients: ['Olive Oil', 'Aromatics', 'Fresh Vegetables', 'Plant or Lean Protein'],
-              image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
-            });
-          }
-        }
-
-        generatedPlan = {
-          title: `${parsedDays}-Day ${parsedTheme} Plan`,
-          totalDays: parsedDays,
-          theme: parsedTheme,
-          budgetPerServing: parsedBudget,
-          meals
-        };
-
-        recommendedRecipe = {
-          title: `${country} Signature ${parsedTheme} Medley`,
-          description: `Formulated based on your ${topicTitle} answers. Balanced and avoids ${allergies.concat(avoid).join(', ') || 'unhealthy additives'}.`,
-          prepMinutes: 15,
-          cookMinutes: 25,
-          servings,
-          calories: 490,
-          mealType: parsedMealTypes[0] || 'Dinner',
-          ingredients: [
-            pantryItems[0] ? `In-Stock Pantry: ${pantryItems[0]}` : 'Crisp Tofu or Fresh Salmon Fillet',
-            '2 cups Fresh Leafy Greens (Spinach & Bok Choy)',
-            '1 cup Steamed Tri-Color Quinoa or Brown Rice',
-            '1 tbsp Cold-Pressed Sesame or Olive Oil',
-            'Fresh Ginger, Minced Garlic, and Low-Sodium Tamari'
-          ],
-          instructions: [
-            'Rinse and prep fresh produce and protein cleanly.',
-            'Warm oil in a skillet and gently sauté aromatics over medium heat.',
-            'Cook protein evenly until golden and crisp, then fold in greens.',
-            'Serve warm over fluffy grains with a citrus dressing.'
-          ],
-          chefTip: 'Rest the dish for 2 minutes before serving so flavors infuse completely.',
-          sourceUrl: referenceUrls[0] || '',
-          image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
-        };
-
-        responseText = `I have formulated your ${parsedDays}-day meal plan and signature recommended recipe based on your ${topicTitle} questionnaire!`;
-      } else {
-        responseText = `Hello! I'm Chef Foodie. I'm ready with your culinary profile (${servings} servings, ${country}, ${diets.join(', ')}). How can I inspire your cooking today?`;
-      }
-    }
-
-    // 8. Attach Authentic Photo & Resolve Image Fallbacks
-    if (recommendedRecipe) {
-      if (scrapedGrounding?.image && !recommendedRecipe.image) {
-        recommendedRecipe.image = scrapedGrounding.image;
-      }
-      if (scrapedGrounding?.sourceUrl && !recommendedRecipe.sourceUrl) {
-        recommendedRecipe.sourceUrl = scrapedGrounding.sourceUrl;
-        recommendedRecipe.sourceName = scrapedGrounding.sourceName;
-      }
-
-      const targetRecipeUrl = recommendedRecipe.sourceUrl || (referenceUrls.length > 0 ? referenceUrls[0] : null);
-      if (targetRecipeUrl && !recommendedRecipe.image) {
-        try {
-          const scrapedImg = await extractImageFromUrl(targetRecipeUrl);
-          if (scrapedImg) recommendedRecipe.image = scrapedImg;
-        } catch (_) {}
-      }
-    }
-
-    // 9. Record Usage Telemetry
-    const promptTokens = Math.max(25, Math.ceil((prompt.length + 150) / 4));
-    const completionTokens = Math.max(40, Math.ceil(responseText.length / 4) + (recommendedRecipe ? 100 : 0));
-
-    recordTokenUsage({
-      userId: userId || 'guest',
-      userEmail: userEmail || 'user@zecratary.com',
-      promptTokens,
-      completionTokens,
-      model: activeModel,
-      source: 'chef'
-    }).catch(() => {});
-
     return NextResponse.json({
       success: true,
-      reply: responseText,
-      plan: generatedPlan,
-      recommendedRecipe,
-      recipe: recommendedRecipe,
-      model: activeModel,
-      resultDisplayMode,
-      consumedSystemTokens: chefCost,
-      tokenSymbol: tokenSettings.tokenSymbol,
-      remainingBalance: deduction.currentBalance
-    }, { headers: { 'Cache-Control': 'no-store' } });
+      reply: replyText,
+      recipe: null,
+      plan: null,
+      appliedSettings: {
+        provider,
+        model: finalModelUsed,
+        temperature,
+        maxTokens,
+        resultDisplayMode,
+        strictDietEnforced: strictDiet,
+        pantryContextApplied: enablePantryContext && Array.isArray(pantryItems) && pantryItems.length > 0,
+        primarySourcesCount: recommendedUrls.length,
+        tokensDeducted: consumedTokens,
+        remainingBalance: remainingTokens
+      }
+    });
 
   } catch (err: any) {
-    console.error('[API /api/ai Error]:', err);
+    console.error('[/api/ai] Generation error:', err);
     return NextResponse.json({
       success: false,
-      error: err?.message || 'Chef AI encountered an internal error. Please retry.'
-    }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
+      error: err?.message || 'Failed to process culinary generation request'
+    }, { status: 500 });
   }
 }

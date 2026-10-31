@@ -1,6 +1,5 @@
-'use client';
-
 // Generated & Localized by AI Collaborator
+'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { 
@@ -37,6 +36,12 @@ interface DailyUsagePoint {
   promptTokens: number;
   completionTokens: number;
   cost: number;
+}
+
+interface DiscoveredModel {
+  id: string;
+  name: string;
+  description?: string;
 }
 
 const getDefaultDedicatedAnswersForText = (text: string): string[] => {
@@ -149,7 +154,11 @@ export default function ChefAISettingsPage() {
   const [provider, setProvider] = useState<'gemini' | 'openai' | string>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('gemini-3.5-flash-lite');
+  const [model, setModel] = useState('gemini-2.5-flash');
+  const [availableModels, setAvailableModels] = useState<DiscoveredModel[]>([]);
+  const [isScanningModels, setIsScanningModels] = useState(false);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [systemPrompt, setSystemPrompt] = useState(
@@ -380,7 +389,98 @@ export default function ChefAISettingsPage() {
     return {};
   };
 
-  // Load Settings from Server Storage
+  // Scan API Key for Available AI Models
+  const scanAvailableModels = useCallback(async (keyOverride?: string, provOverride?: string) => {
+    const activeProv = provOverride || provider;
+    const targetKey = (keyOverride !== undefined ? keyOverride : apiKey).trim().replace(/^['"]|['"]$/g, '');
+
+    if (!targetKey) {
+      setScanMessage(t('enterKeyBeforeScanning', 'Please provide or sync an API key to scan available models.'));
+      return;
+    }
+
+    setIsScanningModels(true);
+    setScanMessage(null);
+
+    try {
+      let discovered: DiscoveredModel[] = [];
+
+      // Method 1: Internal API endpoint
+      try {
+        const res = await fetch(`/api/admin/models?provider=${encodeURIComponent(activeProv)}&apiKey=${encodeURIComponent(targetKey)}`, {
+          cache: 'no-store'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.models) && data.models.length > 0) {
+            discovered = data.models;
+          }
+        }
+      } catch (_) {}
+
+      // Method 2: Direct provider endpoint fallback
+      if (discovered.length === 0) {
+        if (activeProv === 'gemini') {
+          const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${targetKey}`);
+          if (directRes.ok) {
+            const data = await directRes.json();
+            if (Array.isArray(data?.models)) {
+              discovered = data.models
+                .filter((m: any) => {
+                  const methods = m.supportedGenerationMethods || [];
+                  const id = (m.name || '').toLowerCase();
+                  return methods.includes('generateContent') || id.includes('gemini');
+                })
+                .map((m: any) => {
+                  const cleanId = (m.name || '').replace(/^models\//, '');
+                  return {
+                    id: cleanId,
+                    name: m.displayName || cleanId,
+                    description: m.description || ''
+                  };
+                });
+            }
+          }
+        } else {
+          const directRes = await fetch('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${targetKey}` }
+          });
+          if (directRes.ok) {
+            const data = await directRes.json();
+            if (Array.isArray(data?.data)) {
+              discovered = data.data
+                .filter((m: any) => {
+                  const id = (m.id || '').toLowerCase();
+                  return (id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')) &&
+                         !id.includes('realtime') && !id.includes('audio') && !id.includes('embedding') &&
+                         !id.includes('tts') && !id.includes('moderation');
+                })
+                .map((m: any) => ({
+                  id: m.id,
+                  name: m.id,
+                  description: ''
+                }));
+            }
+          }
+        }
+      }
+
+      if (discovered.length > 0) {
+        // Sort discovered models: prioritize newer flagship models
+        discovered.sort((a, b) => a.id.localeCompare(b.id));
+        setAvailableModels(discovered);
+        setScanMessage(`✓ ${t('scannedSuccessPrefix', 'Discovered')} ${discovered.length} ${activeProv === 'gemini' ? 'Google Gemini' : 'OpenAI'} ${t('modelsLiveFromApi', 'models live from API!')}`);
+      } else {
+        setScanMessage(t('noModelsFoundForKey', 'No generative models discovered for this API key. Verify permissions.'));
+      }
+    } catch (err: any) {
+      setScanMessage(`${t('scanFailed', 'Scan failed')}: ${err?.message || 'Network error'}`);
+    } finally {
+      setIsScanningModels(false);
+    }
+  }, [apiKey, provider, t]);
+
+  // Load Settings from Server Storage (Strict Non-Destructive Loading)
   const loadSettingsFromServer = useCallback(async () => {
     if (typeof purgeLegacyBrowserAdminStorage === 'function') {
       purgeLegacyBrowserAdminStorage();
@@ -395,6 +495,10 @@ export default function ChefAISettingsPage() {
         if (c.apiKey !== undefined) setApiKey(c.apiKey);
         if (c.model) setModel(c.model);
         else if (serverData.aiModel) setModel(serverData.aiModel);
+
+        if (Array.isArray(c.availableModels) && c.availableModels.length > 0) {
+          setAvailableModels(c.availableModels);
+        }
 
         if (c.temperature !== undefined) setTemperature(c.temperature);
         if (c.maxTokens !== undefined) setMaxTokens(c.maxTokens);
@@ -462,6 +566,7 @@ export default function ChefAISettingsPage() {
   useEffect(() => {
     fetchEnvKeys();
     loadSettingsFromServer();
+    // Non-destructive read-only health check without silent database mutation
     setTimeout(() => {
       autoConnectGemini(true);
     }, 400);
@@ -469,21 +574,25 @@ export default function ChefAISettingsPage() {
 
   const handleProviderChange = (newProvider: 'gemini' | 'openai' | string) => {
     setProvider(newProvider);
+    setScanMessage(null);
     if (newProvider === 'gemini') {
-      setModel('gemini-3.5-flash-lite');
+      setModel(prev => prev.startsWith('gemini') ? prev : 'gemini-2.5-flash');
       const resolved = envKeysMap['GEMINI_API_KEY'] || envKeysMap['GOOGLE_API_KEY'] || '';
       if (resolved && !apiKey.trim()) {
         setApiKey(resolved);
+        scanAvailableModels(resolved, 'gemini');
       }
     } else {
-      setModel('gpt-4o');
+      setModel(prev => prev.startsWith('gpt') || prev.startsWith('o1') ? prev : 'gpt-4o');
       const resolved = envKeysMap['OPENAI_API_KEY'] || '';
       if (resolved && !apiKey.trim()) {
         setApiKey(resolved);
+        scanAvailableModels(resolved, 'openai');
       }
     }
   };
 
+  // Test API Key: STRICTLY NON-DESTRUCTIVE (Diagnostic only, never overwrites database)
   const handleTestApiKey = async () => {
     const keyToTest = apiKey.trim() || 
       (provider === 'gemini' 
@@ -565,20 +674,13 @@ export default function ChefAISettingsPage() {
       setTestResult({ success, message, latency });
 
       if (success) {
-        persistServerAdminSettings({
-          aiProvider: provider,
-          aiModel: model,
-          chefAiSettings: {
-            provider,
-            apiKey: cleanKey,
-            model,
-            updatedAt: new Date().toISOString()
-          }
-        }).catch(() => {});
+        // Auto-refresh dynamic model roster on successful test
+        scanAvailableModels(cleanKey, provider);
       }
     }
   };
 
+  // Auto-Connect Gemini: STRICTLY NON-DESTRUCTIVE (Healthcheck only)
   const autoConnectGemini = async (silent = false) => {
     setAutoConnecting(true);
     if (!silent) setTestResult(null);
@@ -617,7 +719,7 @@ export default function ChefAISettingsPage() {
         return;
       }
 
-      const activeModel = model || 'gemini-3.5-flash-lite';
+      const activeModel = model || 'gemini-2.5-flash';
       const cleanKey = resolvedKey.replace(/^['"]|['"]$/g, '');
       const startTime = performance.now();
 
@@ -645,20 +747,12 @@ export default function ChefAISettingsPage() {
       if (testRes.ok && testData.success) {
         setTestResult({ 
           success: true, 
-          message: `${t('connectedPrefix', 'Connected to')} Google Gemini (${activeModel}) in ${latency}ms! Key synced.`,
+          message: `${t('connectedPrefix', 'Connected to')} Google Gemini (${activeModel}) in ${latency}ms! Key ready.`,
           latency
         });
 
-        await persistServerAdminSettings({
-          aiProvider: 'gemini',
-          aiModel: activeModel,
-          chefAiSettings: {
-            provider: 'gemini',
-            apiKey: cleanKey,
-            model: activeModel,
-            updatedAt: new Date().toISOString()
-          }
-        });
+        // Trigger dynamic model discovery without overwriting database
+        scanAvailableModels(cleanKey, 'gemini');
       } else if (!silent) {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
       }
@@ -669,6 +763,7 @@ export default function ChefAISettingsPage() {
     }
   };
 
+  // Reload Key from .env: NON-DESTRUCTIVE (Updates local state only)
   const handleReloadEnvKey = async () => {
     setSyncingEnvKey(true);
     setTestResult(null);
@@ -691,19 +786,7 @@ export default function ChefAISettingsPage() {
           message: `${t('syncedPrefix', 'Synced')} ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} (${cleanKey.substring(0, 8)}...) ${t('keyFromEnvSuccess', 'key from .env successfully!')}`
         });
 
-        await persistServerAdminSettings({
-          aiProvider: provider,
-          chefAiSettings: {
-            apiKey: cleanKey,
-            provider
-          }
-        });
-
-        setTimeout(() => {
-          if (provider === 'gemini') {
-            autoConnectGemini(true);
-          }
-        }, 300);
+        scanAvailableModels(cleanKey, provider);
       } else {
         setTestResult({
           success: false,
@@ -852,6 +935,7 @@ export default function ChefAISettingsPage() {
           provider,
           apiKey: apiKey.trim(),
           model,
+          availableModels,
           temperature,
           maxTokens,
           systemPrompt,
@@ -926,7 +1010,7 @@ export default function ChefAISettingsPage() {
     }
   };
 
-  // Master Save Configuration Handler
+  // Master Save Configuration Handler (Stores COMPLETE configuration to PostgreSQL & MySQL)
   const handleSave = async (e?: React.FormEvent | React.MouseEvent) => {
     if (e) e.preventDefault();
     if (isSaving) return;
@@ -937,6 +1021,7 @@ export default function ChefAISettingsPage() {
       provider,
       apiKey: cleanApiKey,
       model,
+      availableModels,
       temperature,
       maxTokens,
       systemPrompt,
@@ -1216,7 +1301,7 @@ export default function ChefAISettingsPage() {
                   <Bot className="h-5 w-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('googleGeminiTitle', 'Google Gemini')}</span>
-                    <span className="text-[11px] opacity-75">{t('googleGeminiSubtitle', 'Gemini 3.5 Flash Lite / 3.6 Flash')}</span>
+                    <span className="text-[11px] opacity-75">{t('googleGeminiSubtitle', 'Gemini 2.5 Flash / Gemini 2.5 Pro')}</span>
                   </div>
                 </button>
 
@@ -1233,7 +1318,7 @@ export default function ChefAISettingsPage() {
                   <Zap className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
                   <div>
                     <span className="block font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('openAiTitle', 'OpenAI GPT')}</span>
-                    <span className="text-[11px] opacity-75">{t('openAiSubtitle', 'GPT-4o / GPT-4 Turbo')}</span>
+                    <span className="text-[11px] opacity-75">{t('openAiSubtitle', 'GPT-4o / GPT-4o-mini / o1')}</span>
                   </div>
                 </button>
               </div>
@@ -1324,15 +1409,34 @@ export default function ChefAISettingsPage() {
                     </div>
                   )}
                   <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('persistedServerSyncNotice', 'Persisted directly to server storage and synced to disk environment.')}
+                    {t('persistedServerSyncNotice', 'Persisted directly to PostgreSQL & MySQL server storage on Save.')}
                   </span>
                 </div>
 
-                {/* Model Selector */}
+                {/* DYNAMIC MODEL SELECTOR WITH SCAN/REFRESH BUTTON */}
                 <div>
-                  <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('modelVersionIdentifier', 'Model Version Identifier')}
-                  </label>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('modelVersionIdentifier', 'Model Version Identifier')}
+                    </label>
+                    
+                    <button
+                      type="button"
+                      onClick={() => scanAvailableModels()}
+                      disabled={isScanningModels}
+                      className="flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer shadow-2xs hover:opacity-90 disabled:opacity-50"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                      title={t('scanModelsTooltip', 'Scan API key to discover all live models supported by your account')}
+                    >
+                      <RefreshCw className={`h-3 w-3 ${isScanningModels ? 'animate-spin' : ''}`} />
+                      <span>{isScanningModels ? t('scanningModels', 'Scanning API...') : t('scanModelsBtn', 'Scan Models from API')}</span>
+                    </button>
+                  </div>
+
                   <div className="relative">
                     <select
                       value={model}
@@ -1350,24 +1454,56 @@ export default function ChefAISettingsPage() {
                       onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                       onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     >
-                      {provider === 'gemini' ? (
+                      {/* Render dynamically scanned models if discovered */}
+                      {availableModels.length > 0 ? (
                         <>
-                          <option value="gemini-3.6-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption36', 'Gemini 3.6 Flash (Latest Recommended)')}</option>
-                          <option value="gemini-3.5-flash-lite" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption35', 'Gemini 3.5 Flash Lite (Lightweight & Fast)')}</option>
-                          <option value="gemini-2.5-pro" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('geminiOption25Pro', 'Gemini 2.5 Pro (Deep Culinary Reasoning)')}</option>
+                          {!availableModels.some(m => m.id === model) && (
+                            <option value={model} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                              {model} ({t('selectedModel', 'Selected / Custom')})
+                            </option>
+                          )}
+                          {availableModels.map(m => (
+                            <option key={m.id} value={m.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                              {m.name || m.id} ({m.id})
+                            </option>
+                          ))}
                         </>
                       ) : (
-                        <>
-                          <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4o', 'GPT-4o (Advanced reasoning)')}</option>
-                          <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption4Turbo', 'GPT-4 Turbo')}</option>
-                          <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('openaiOption35Turbo', 'GPT-3.5 Turbo (High speed)')}</option>
-                        </>
+                        /* Default curated list if API not yet scanned */
+                        provider === 'gemini' ? (
+                          <>
+                            <option value="gemini-2.5-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 2.5 Flash (Flagship Fast & Recommended)</option>
+                            <option value="gemini-2.5-pro" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 2.5 Pro (Deep Culinary Reasoning)</option>
+                            <option value="gemini-2.0-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 2.0 Flash (Next-Gen High Performance)</option>
+                            <option value="gemini-1.5-flash" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 1.5 Flash (Lightweight Baseline)</option>
+                            <option value="gemini-1.5-pro" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Gemini 1.5 Pro (Balanced Reasoning)</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="gpt-4o" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4o (Omni Reasoning & Fast)</option>
+                            <option value="gpt-4o-mini" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4o Mini (High Speed & Low Latency)</option>
+                            <option value="o1-mini" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>o1-mini (STEM & Precise Logic)</option>
+                            <option value="gpt-4-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-4 Turbo</option>
+                            <option value="gpt-3.5-turbo" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>GPT-3.5 Turbo</option>
+                          </>
+                        )
                       )}
                     </select>
                     <ChevronDown className="h-4 w-4 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors" style={{ color: 'var(--color-text-secondary)' }} />
                   </div>
+
+                  {scanMessage && (
+                    <div 
+                      className="mt-1.5 text-[11px] font-semibold flex items-center gap-1.5 animate-in fade-in"
+                      style={{ color: scanMessage.startsWith('✓') ? 'var(--color-emerald)' : 'var(--color-primary)' }}
+                    >
+                      <Sparkles className="h-3 w-3 shrink-0" />
+                      <span>{scanMessage}</span>
+                    </div>
+                  )}
+
                   <span className="text-[10px] mt-1 block" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation.')}
+                    {t('activeModelEndpointDesc', 'Active model endpoint used during AI prompt generation. Click "Scan Models from API" to fetch live available endpoints.')}
                   </span>
                 </div>
               </div>

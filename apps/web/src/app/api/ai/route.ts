@@ -1,275 +1,303 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
+import { fetchServerAdminSettings } from '@/lib/adminSync';
 
 export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
 
-// Safe Google Model Endpoint Normalization
-function normalizeGeminiModel(rawModel?: string): string {
-  if (!rawModel || typeof rawModel !== 'string') return 'gemini-2.5-flash';
-  const clean = rawModel.replace(/^models\//, '').trim().toLowerCase();
-  
-  // Map non-existent or deprecated placeholders to active production endpoints
-  if (clean.includes('3.5-flash') || clean.includes('3.5') || clean.includes('1.5-flash-8b')) {
+// Sanitize legacy or deprecated Gemini model identifiers
+function sanitizeGeminiModel(rawModel: string): string {
+  const m = (rawModel || '').trim();
+  const lower = m.toLowerCase();
+  if (!lower.includes('gemini') || lower.includes('gemini-1.5') || lower.includes('gemini-2.0')) {
     return 'gemini-2.5-flash';
   }
-  if (clean === 'gemini-1.5-flash' || clean === 'gemini-1.5-pro') {
-    return 'gemini-2.5-flash';
-  }
-  return clean || 'gemini-2.5-flash';
-}
-
-function formatProfileString(servings: number, country: string, diets: string[] = []): string {
-  const parts: string[] = [];
-  if (servings) parts.push(`${servings} servings`);
-  if (country) parts.push(country);
-  if (Array.isArray(diets) && diets.length > 0) parts.push(...diets);
-  return parts.filter(Boolean).join(', ');
-}
-
-// Detect if query mentions ingredients or fridge/pantry supplies
-function extractSuppliesIntent(text: string): { isIngredientQuery: boolean; ingredients: string[] } {
-  const lower = text.toLowerCase();
-  const supplyTriggers = [
-    'in my fridge', 'in the fridge', 'in my pantry', 'in the pantry',
-    'i have', 'got some', 'leftover', 'use up', 'cook with', 'make with', 'ingredients:'
-  ];
-  const hasTrigger = supplyTriggers.some(t => lower.includes(t));
-  
-  const commonIngredients = [
-    'kimchi', 'chicken', 'beef', 'pork', 'tofu', 'egg', 'eggs', 'salmon', 'fish',
-    'shrimp', 'rice', 'pasta', 'noodles', 'mushroom', 'mushrooms', 'tomato', 'tomatoes',
-    'potato', 'potatoes', 'onion', 'garlic', 'cheese', 'bread', 'spinach', 'cabbage'
-  ];
-  
-  const found = commonIngredients.filter(ing => lower.includes(ing));
-  const isIngredientQuery = hasTrigger || found.length > 0;
-  return { isIngredientQuery, ingredients: found };
+  return m;
 }
 
 export async function POST(req: NextRequest) {
-  let body: any = {};
   try {
-    body = await req.json();
-  } catch (_) {
-    body = {};
-  }
+    const body = await req.json().catch(() => ({}));
+    const { 
+      prompt, 
+      answers, 
+      preferences, 
+      pantryItems, 
+      userEmail: reqUserEmail,
+      userId: reqUserId 
+    } = body;
 
-  const {
-    prompt = '',
-    messages = [],
-    userId = 'guest',
-    userEmail,
-    preferences = {},
-    pantry = [],
-    recommendedRecipeUrls = [],
-    isQuestionnaireComplete = false,
-    topicTitle = 'Culinary Planning'
-  } = body;
+    // AI Saved Recipe Grounding Scope
+    let savedRecipesContext = '';
+    const enableSavedRecipeSearch = (body as any)?.enableSavedRecipeSearch !== undefined
+      ? Boolean((body as any).enableSavedRecipeSearch)
+      : true;
 
-  const servings = Number(preferences?.servings) || 2;
-  const country = preferences?.country || 'Singapore';
-  const diets = Array.isArray(preferences?.diet) ? preferences.diet : (preferences?.diets || []);
-  const allergies = Array.isArray(preferences?.allergy) ? preferences.allergy : (preferences?.allergies || []);
-  const avoid = Array.isArray(preferences?.avoid) ? preferences.avoid : [];
-  const tastes = Array.isArray(preferences?.tastes) ? preferences.tastes : [];
+    if (enableSavedRecipeSearch) {
+      try {
+        const targetUserId = reqUserId || reqUserEmail || 'guest';
+        if (targetUserId !== 'guest') {
+          const savedResult: any = await query(
+            'SELECT title, description, ingredients, tags FROM saved_recipes WHERE user_id = $1 OR user_email = $1 ORDER BY id DESC LIMIT 5',
+            [targetUserId]
+          );
+          const rows = savedResult?.rows || (Array.isArray(savedResult) ? savedResult : []);
+          if (rows.length > 0) {
+            savedRecipesContext = `USER SAVED RECIPES (Reference these flavors if relevant):\n` +
+              rows.map((r: any) => `- ${r.title}: ${r.description || ''} (${r.ingredients || ''})`).join('\n') + '\n\n';
+          }
+        }
+      } catch (_) {
+        // Non-blocking fallback if saved_recipes table is empty or unpopulated
+      }
+    }
 
-  const profileSummary = formatProfileString(servings, country, diets);
-
-  // Resolve API Key from Process ENV, .env disk, or database
-  let apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY || '';
-  if (!apiKey) {
+    // 1. Fetch complete settings directly from PostgreSQL / MySQL admin_settings
+    let serverSettings: any = {};
     try {
-      const db = await import('@/lib/db').catch(() => null);
-      if (db && typeof db.query === 'function') {
-        const rows = await db.query(
-          "SELECT gemini_api_key, chef_ai_settings FROM admin_settings WHERE id = 'primary_settings' LIMIT 1"
-        );
-        if (rows && rows.rows && rows.rows[0]) {
-          apiKey = rows.rows[0].gemini_api_key || rows.rows[0].chef_ai_settings?.apiKey || '';
+      serverSettings = await fetchServerAdminSettings();
+    } catch (_) {}
+
+    const chefSettings = serverSettings?.chefAiSettings || serverSettings?.aiSettings || {};
+    
+    // Extract individual controls configured in /admin/ai-settings
+    const provider = (chefSettings.provider || serverSettings?.aiProvider || 'gemini').toLowerCase();
+    
+    // Resolve active API key
+    let rawApiKey = (chefSettings.apiKey || '').trim();
+    if (!rawApiKey) {
+      if (provider === 'gemini') {
+        rawApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+      } else {
+        rawApiKey = process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '';
+      }
+    }
+    const apiKey = rawApiKey.replace(/^['"]|['"]$/g, '').trim();
+
+    const initialModel = chefSettings.model || serverSettings?.aiModel || (provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o');
+    const temperature = typeof chefSettings.temperature === 'number' ? chefSettings.temperature : 0.7;
+    const maxTokens = typeof chefSettings.maxTokens === 'number' ? chefSettings.maxTokens : 4096;
+    const systemPrompt = chefSettings.systemPrompt || 'You are Chef Foodie, an expert autonomous culinary AI assistant.';
+    const enableWebSearch = chefSettings.enableWebSearch !== false;
+    const enablePantryContext = chefSettings.enablePantryContext !== false;
+    const strictDiet = chefSettings.strictDietEnforcement !== false;
+    const maxPlanDays = chefSettings.maxPlanDays || 7;
+    const resultDisplayMode = chefSettings.resultDisplayMode || 'card';
+
+    const knowledgeBases: string[] = Array.isArray(chefSettings.knowledgeBaseList) ? chefSettings.knowledgeBaseList : [];
+    const customVocab: string[] = Array.isArray(chefSettings.customVocabularyList) ? chefSettings.customVocabularyList : [];
+    const filterWords: string[] = Array.isArray(chefSettings.filterWordsList) ? chefSettings.filterWordsList : [];
+    const recommendedUrls: string[] = Array.isArray(chefSettings.recommendedRecipeUrls) ? chefSettings.recommendedRecipeUrls.filter(Boolean) : [];
+
+    // 2. Strict Filter Words Pre-flight Validation
+    if (strictDiet && filterWords.length > 0) {
+      const userContent = JSON.stringify({ prompt, answers, preferences }).toLowerCase();
+      for (const word of filterWords) {
+        if (word && word.trim() && userContent.includes(word.trim().toLowerCase())) {
+          return NextResponse.json({
+            success: false,
+            error: `Request contains prohibited ingredient or restricted term: "${word}". (Enforced by AI Settings)`,
+            filterViolation: true
+          }, { status: 400 });
+        }
+      }
+    }
+
+    if (!apiKey) {
+      return NextResponse.json({
+        success: false,
+        error: `No active ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} API key configured in /admin/ai-settings or .env`
+      }, { status: 500 });
+    }
+
+    // 3. Assemble Grounded System Instructions
+    let fullSystemInstructions = `${systemPrompt}\n\n`;
+
+    if (knowledgeBases.length > 0) {
+      fullSystemInstructions += `PRIORITY KNOWLEDGE BASES:\n${knowledgeBases.map(k => `- ${k}`).join('\n')}\n\n`;
+    }
+
+    if (customVocab.length > 0) {
+      fullSystemInstructions += `CUSTOM CULINARY VOCABULARY (Prioritize these concepts):\n${customVocab.join(', ')}\n\n`;
+    }
+
+    if (filterWords.length > 0) {
+      fullSystemInstructions += `STRICTLY PROHIBITED INGREDIENTS & TERMS (Never suggest or include):\n${filterWords.join(', ')}\n\n`;
+    }
+
+    if (recommendedUrls.length > 0) {
+      fullSystemInstructions += `RECOMMENDED PRIMARY RECIPE SOURCE URLS (Prioritize culinary style, flavor profiles, and link references from these websites):\n${recommendedUrls.map(u => `- ${u}`).join('\n')}\n\n`;
+    }
+
+    if (enablePantryContext && Array.isArray(pantryItems) && pantryItems.length > 0) {
+      fullSystemInstructions += `USER IN-STOCK PANTRY INVENTORY:\n${pantryItems.map((p: any) => `- ${p.name || p} (${p.quantity || 'available'})`).join('\n')}\nMark matching recipe ingredients with "Pantry ✓" where applicable.\n\n`;
+    }
+
+    if (savedRecipesContext) {
+      fullSystemInstructions += savedRecipesContext;
+    }
+
+    fullSystemInstructions += `PLANNING CONSTRAINTS:\n- Maximum plan duration: ${maxPlanDays} days.\n- Preferred presentation mode: ${resultDisplayMode}.\n`;
+
+    // 4. Zero-Dependency Native Fetch Execution (Google Gemini & OpenAI)
+    let replyText = '';
+    let finalModelUsed = initialModel;
+
+    if (provider === 'gemini') {
+      let targetModel = sanitizeGeminiModel(initialModel);
+      finalModelUsed = targetModel;
+
+      const promptPayload = `User Request: ${prompt || 'Create a balanced culinary recommendation.'}\nIntake Questionnaire Answers: ${JSON.stringify(answers || {})}\nPreferences: ${JSON.stringify(preferences || {})}`;
+
+      const generateGeminiContent = async (modelToCall: string, withTools: boolean) => {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToCall}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const payload: any = {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: promptPayload }]
+            }
+          ],
+          systemInstruction: {
+            parts: [{ text: fullSystemInstructions }]
+          },
+          generationConfig: {
+            temperature,
+            maxOutputTokens: maxTokens
+          }
+        };
+
+        if (withTools && enableWebSearch) {
+          payload.tools = [{ googleSearch: {} }];
+        }
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey
+          },
+          body: JSON.stringify(payload),
+          cache: 'no-store'
+        });
+
+        const data = await res.json().catch(() => ({}));
+        return { res, data };
+      };
+
+      // Primary Attempt
+      let { res, data } = await generateGeminiContent(targetModel, enableWebSearch);
+
+      // Graceful Retry 1: If search tools caused a 400 error, retry without tools
+      if (!res.ok && enableWebSearch && (data?.error?.message?.includes('tool') || res.status === 400)) {
+        const retry = await generateGeminiContent(targetModel, false);
+        res = retry.res;
+        data = retry.data;
+      }
+
+      // Graceful Retry 2: If model is deprecated or not found (404), auto-fallback to gemini-2.5-flash / gemini-3.6-flash
+      if (!res.ok && (res.status === 404 || data?.error?.message?.includes('not found') || data?.error?.message?.includes('no longer available'))) {
+        const fallbackModel = targetModel === 'gemini-2.5-flash' ? 'gemini-3.6-flash' : 'gemini-2.5-flash';
+        finalModelUsed = fallbackModel;
+        const retryFallback = await generateGeminiContent(fallbackModel, false);
+        res = retryFallback.res;
+        data = retryFallback.data;
+      }
+
+      if (!res.ok) {
+        throw new Error(data?.error?.message || `Google Gemini API returned status ${res.status}`);
+      }
+
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      replyText = parts.map((p: any) => p.text).filter(Boolean).join('\n') || '';
+    } else {
+      // OpenAI REST Integration
+      finalModelUsed = initialModel || 'gpt-4o';
+      const openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: finalModelUsed,
+          messages: [
+            { role: 'system', content: fullSystemInstructions },
+            { role: 'user', content: `Request: ${prompt || 'Suggest meal'}. Answers: ${JSON.stringify(answers || {})}` }
+          ],
+          temperature,
+          max_tokens: maxTokens
+        }),
+        cache: 'no-store'
+      });
+
+      const openAiData = await openAiRes.json().catch(() => ({}));
+      if (!openAiRes.ok) {
+        throw new Error(openAiData?.error?.message || `OpenAI API returned status ${openAiRes.status}`);
+      }
+
+      replyText = openAiData?.choices?.[0]?.message?.content || '';
+    }
+
+    // 5. Server-Side Token Deduction (Resilient, 1-argument options contract)
+    let remainingTokens: number | null = null;
+    let consumedTokens: number = 8;
+
+    try {
+      const activeUser = reqUserEmail || reqUserId;
+      if (activeUser) {
+        const tokenService = await import('@/lib/tokenService').catch(() => null);
+        if (tokenService && typeof tokenService.deductUserTokens === 'function') {
+          const settings = typeof tokenService.getTokenSettings === 'function' 
+            ? await tokenService.getTokenSettings() 
+            : null;
+          consumedTokens = settings?.chefCost || 8;
+
+          // Single options object contract to satisfy TypeScript TS2554
+          const deduction = await (tokenService.deductUserTokens as any)({
+            userId: reqUserId || activeUser,
+            userEmail: reqUserEmail || activeUser,
+            cost: consumedTokens,
+            amount: consumedTokens,
+            tokens: consumedTokens,
+            feature: 'chef',
+            description: 'Chef AI Assistant Query'
+          });
+
+          if (deduction && typeof deduction.currentBalance === 'number') {
+            remainingTokens = deduction.currentBalance;
+          } else if (deduction && typeof deduction.balance === 'number') {
+            remainingTokens = deduction.balance;
+          } else if (deduction && typeof deduction.remainingTokens === 'number') {
+            remainingTokens = deduction.remainingTokens;
+          }
         }
       }
     } catch (_) {}
-  }
 
-  const configuredModel = normalizeGeminiModel(body.model || process.env.AI_MODEL || 'gemini-2.5-flash');
-  const candidateModels = [configuredModel, 'gemini-2.5-flash', 'gemini-2.0-flash'].filter(
-    (v, i, a) => a.indexOf(v) === i
-  );
-
-  const cleanPrompt = (prompt || '').trim();
-  const lowerPrompt = cleanPrompt.toLowerCase();
-  const { isIngredientQuery, ingredients } = extractSuppliesIntent(lowerPrompt);
-
-  // Conversational Intent Classification
-  const isPureGreeting = /^(hello|hi|hey|good\s+morning|good\s+afternoon|good\s+evening|greetings)\b/i.test(lowerPrompt) 
-    && cleanPrompt.split(' ').length <= 3 
-    && !isIngredientQuery;
-
-  // Build System & Context Instructions
-  const systemInstruction = `You are Chef Foodie, an authentic, Michelin-grade personal culinary chef and meal planner.
-User Profile:
-- Servings: ${servings} people
-- Location/Cuisine Culture: ${country}
-- Dietary Preferences: ${diets.length > 0 ? diets.join(', ') : 'None'}
-- Allergies: ${allergies.length > 0 ? allergies.join(', ') : 'None'}
-- Ingredients to Avoid: ${avoid.length > 0 ? avoid.join(', ') : 'None'}
-- Flavor Tastes: ${tastes.length > 0 ? tastes.join(', ') : 'Standard'}
-- In-Stock Pantry: ${pantry.length > 0 ? pantry.join(', ') : 'Standard kitchen staples'}
-
-Rules of Engagement:
-1. Always maintain conversational logic. If the user previously received a question and is replying with an ingredient (e.g. "kimchi in my fridge"), DO NOT reply with a generic greeting.
-2. When the user mentions ingredients or supplies, actively formulate culinary solutions using those specific ingredients adapted to ${country} culture and ${servings} servings.
-3. If providing recipe recommendations, always output structured culinary details with precise prep/cook times and ingredients.
-4. Output your response as a valid JSON object matching this schema:
-{
-  "reply": "Engaging conversational answer tailored to the user's specific request or ingredients",
-  "recommendedRecipe": {
-    "title": "Dish Name",
-    "description": "Appetizing description highlighting user ingredients",
-    "prepMinutes": 15,
-    "cookMinutes": 20,
-    "servings": ${servings},
-    "calories": 480,
-    "mealType": "Dinner",
-    "ingredients": ["1 cup ingredient with measurement", "seasonings"],
-    "instructions": ["Step 1 direction", "Step 2 direction", "Step 3 direction"],
-    "chefTip": "Professional cooking advice",
-    "image": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80"
-  },
-  "systemRecommendations": [
-    { "label": "📅 Add to Planner", "route": "/planner" },
-    { "label": "🛒 Grocery List", "route": "/grocery" }
-  ]
-}
-If the user is asking a purely conversational greeting without any culinary intent, you may omit "recommendedRecipe" or set it to null.`;
-
-  // Build Multi-Turn History Contents for Gemini API
-  const contentsPayload: any[] = [];
-  
-  if (Array.isArray(messages) && messages.length > 0) {
-    for (const m of messages.slice(-6)) {
-      if (!m.content) continue;
-      contentsPayload.push({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: String(m.content) }]
-      });
-    }
-  }
-
-  // Append current prompt turn
-  let userQueryText = cleanPrompt;
-  if (isIngredientQuery) {
-    userQueryText = `I have the following ingredients available: ${ingredients.length > 0 ? ingredients.join(', ') : cleanPrompt}. Please recommend authentic dishes I can cook for ${servings} people in ${country}.`;
-  }
-  contentsPayload.push({
-    role: 'user',
-    parts: [{ text: userQueryText }]
-  });
-
-  // Attempt live inference across model cascade
-  let finalResponseData: any = null;
-  let lastError: any = null;
-
-  if (apiKey) {
-    for (const modelToTry of candidateModels) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelToTry}:generateContent?key=${apiKey}`;
-        const geminiRes = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: contentsPayload,
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            generationConfig: {
-              temperature: 0.7,
-              responseMimeType: 'application/json'
-            }
-          }),
-          signal: AbortSignal.timeout(12000)
-        });
-
-        if (geminiRes.ok) {
-          const rawResult = await geminiRes.json();
-          const candidateText = rawResult?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (candidateText) {
-            const parsed = JSON.parse(candidateText.trim());
-            finalResponseData = parsed;
-            break;
-          }
-        } else {
-          const errDetail = await geminiRes.text();
-          console.warn(`[Gemini Handshake] Model ${modelToTry} returned HTTP ${geminiRes.status}:`, errDetail);
-        }
-      } catch (e: any) {
-        lastError = e;
+    return NextResponse.json({
+      success: true,
+      reply: replyText,
+      recipe: null,
+      plan: null,
+      appliedSettings: {
+        provider,
+        model: finalModelUsed,
+        temperature,
+        maxTokens,
+        resultDisplayMode,
+        strictDietEnforced: strictDiet,
+        pantryContextApplied: enablePantryContext && Array.isArray(pantryItems) && pantryItems.length > 0,
+        primarySourcesCount: recommendedUrls.length,
+        tokensDeducted: consumedTokens,
+        remainingBalance: remainingTokens
       }
-    }
-  }
-
-  // If live LLM succeeded, return authentic response
-  if (finalResponseData) {
-    return NextResponse.json({
-      success: true,
-      reply: finalResponseData.reply || "Here is a recipe tailored to your ingredients and preferences.",
-      recommendedRecipe: finalResponseData.recommendedRecipe || null,
-      plan: finalResponseData.plan || null,
-      systemRecommendations: finalResponseData.systemRecommendations || [
-        { label: "📅 Add to Planner", route: "/planner" },
-        { label: "🛒 Grocery List", route: "/grocery" }
-      ]
     });
-  }
 
-  // Graceful Dynamic Fallback (When API key is offline or in trial mode)
-  if (isPureGreeting) {
+  } catch (err: any) {
+    console.error('[/api/ai] Generation error:', err);
     return NextResponse.json({
-      success: true,
-      reply: `Hello! I'm Chef Foodie, your personal culinary assistant. I'm ready with your culinary profile (${profileSummary}). How can I inspire your cooking today? Tell me what ingredients you have, or ask for a meal plan!`,
-      recommendedRecipe: null,
-      systemRecommendations: [
-        { label: "🍳 Intake Wizard", route: "/chef" },
-        { label: "📅 View Planner", route: "/planner" }
-      ]
-    });
+      success: false,
+      error: err?.message || 'Failed to process culinary generation request'
+    }, { status: 500 });
   }
-
-  // Logical Ingredient Fallback (e.g. "kimchi in my fridge")
-  const primaryIngredient = ingredients[0] || (cleanPrompt.length < 25 ? cleanPrompt : 'Fresh Produce');
-  const capitalized = primaryIngredient.charAt(0).toUpperCase() + primaryIngredient.slice(1);
-
-  return NextResponse.json({
-    success: true,
-    reply: `Great! Having ${primaryIngredient} in your fridge gives us fantastic options. For ${servings} people in ${country}, I recommend making a fragrant Golden ${capitalized} Fried Rice & Broth. It's quick, nourishing, and uses your ingredients efficiently!`,
-    recommendedRecipe: {
-      id: 'rec_' + Date.now(),
-      title: `Fragrant ${capitalized} Stir-Fry Bowl`,
-      description: `A delicious culinary creation crafted to utilize the ${primaryIngredient} in your fridge, balanced for ${servings} people in ${country}.`,
-      prepMinutes: 10,
-      cookMinutes: 15,
-      servings,
-      calories: 460,
-      mealType: 'Dinner',
-      ingredients: [
-        `1.5 cups fresh ${primaryIngredient}`,
-        `2 servings Jasmine or Brown Rice`,
-        `2 fresh eggs or pan-seared firm tofu`,
-        `1 tbsp sesame oil and minced garlic`,
-        `1 tsp toasted sesame seeds and chopped scallions`
-      ],
-      instructions: [
-        `Heat sesame oil in a skillet over medium-high heat and sauté garlic until fragrant.`,
-        `Add your ${primaryIngredient} and stir-fry for 3-4 minutes to release deep aromas.`,
-        `Toss in cooked rice and incorporate evenly until well seasoned.`,
-        `Top with a fried egg or golden protein, garnish with scallions, and serve hot!`
-      ],
-      chefTip: `Sautéing the ${primaryIngredient} in sesame oil before adding rice caramelizes the natural sugars and creates rich umami flavor.`,
-      image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
-    },
-    systemRecommendations: [
-      { label: "📅 Add to Planner", route: "/planner" },
-      { label: "🛒 Grocery List", route: "/grocery" }
-    ]
-  });
 }
