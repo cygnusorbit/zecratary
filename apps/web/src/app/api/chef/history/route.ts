@@ -1,315 +1,385 @@
-// Generated / Updated by AI Collaborator
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-
-
-// Module-scoped type-safe database row extractors (unexported to prevent Next.js TS2344)
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
-
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-// Polymorphic Database Query Adapter (Strictly typed without TS2774 function conditional)
-async function queryDb(text: string, params: any[] = []): Promise<{ rows: any[] }> {
-  try {
-    const res: any = await (query as any)(text, params);
-    if (Array.isArray(res)) {
-      return { rows: res };
-    }
-    if (res && Array.isArray(res.rows)) {
-      return { rows: res.rows };
-    }
-    return { rows: [] };
-  } catch (err) {
-    console.error('[chef/history] queryDb error:', err);
-    return { rows: [] };
-  }
+// Local disk fallback store
+function getLocalFallbackFile(): string {
+  const dir = path.join(process.cwd(), 'data');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+  return path.join(dir, 'chef_chat_history.json');
 }
 
-let tablesInitialized = false;
-
-async function ensureHistoryTables(): Promise<void> {
-  if (tablesInitialized) return;
+function readFallbackData(): { sessions: any[]; categories: any[] } {
   try {
-    await queryDb(`
-      CREATE TABLE IF NOT EXISTS chef_chat_categories (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255) NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        icon VARCHAR(64) DEFAULT 'Utensils',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+    const filePath = getLocalFallbackFile();
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch (_) {}
+  return { sessions: [], categories: [] };
+}
 
-    await queryDb(`
-      CREATE TABLE IF NOT EXISTS chef_chat_sessions (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255) NOT NULL,
-        category_id VARCHAR(255),
-        title VARCHAR(255) DEFAULT 'New Culinary Consultation',
-        messages JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+function writeFallbackData(data: { sessions: any[]; categories: any[] }) {
+  try {
+    const filePath = getLocalFallbackFile();
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (_) {}
+}
 
-    await queryDb(`
-      ALTER TABLE chef_chat_sessions 
-      ADD COLUMN IF NOT EXISTS category_id VARCHAR(255);
-    `);
-
-    await queryDb(`
-      ALTER TABLE chef_chat_sessions 
-      ADD COLUMN IF NOT EXISTS title VARCHAR(255) DEFAULT 'New Culinary Consultation';
-    `);
-
-    tablesInitialized = true;
-  } catch (err) {
-    console.warn('[chef/history] Table initialization warning:', err);
-  }
+async function getDb() {
+  try {
+    const dbModule = await import('@/lib/db').catch(() => null);
+    if (dbModule && typeof dbModule.query === 'function') {
+      return dbModule;
+    }
+  } catch (_) {}
+  return null;
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureHistoryTables();
     const { searchParams } = new URL(req.url);
-    const userId = (searchParams.get('userId') || searchParams.get('email') || '').trim();
-
-    if (!userId) {
-      return NextResponse.json({
-        success: true,
-        sessions: [],
-        categories: [],
-        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 }
-      });
-    }
-
+    const userId = searchParams.get('userId') || 'guest';
     const categoryId = searchParams.get('categoryId') || 'all';
+    const sessionId = searchParams.get('sessionId') || searchParams.get('id');
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const limit = Math.max(1, Math.min(100, parseInt(searchParams.get('limit') || '20', 10)));
+    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
     const offset = (page - 1) * limit;
-    const search = (searchParams.get('search') || '').trim();
 
-    // 1. Fetch categories
-    const categoriesRes = await queryDb(
-      `SELECT id, user_id, name, icon, created_at 
-       FROM chef_chat_categories 
-       WHERE user_id = $1 
-       ORDER BY name ASC`,
-      [userId]
-    );
-    const categories = categoriesRes.rows || [];
+    const db = await getDb();
 
-    // 2. Query sessions
-    const whereClauses: string[] = ['user_id = $1'];
-    const queryParams: any[] = [userId];
+    // 1. Single Session Retrieval
+    if (sessionId) {
+      if (db) {
+        try {
+          const res = await db.query(
+            `SELECT id, user_id, category_id, title, messages, created_at, updated_at 
+             FROM chef_chat_sessions WHERE id = $1 LIMIT 1`,
+            [sessionId]
+          ).catch(async () => {
+            // MySQL fallback syntax
+            return await db.query(
+              `SELECT id, user_id, category_id, title, messages, created_at, updated_at 
+               FROM chef_chat_sessions WHERE id = ? LIMIT 1`,
+              [sessionId]
+            );
+          });
 
-    if (categoryId && categoryId !== 'all') {
-      queryParams.push(categoryId);
-      whereClauses.push(`category_id = $${queryParams.length}`);
-    }
-
-    if (search) {
-      queryParams.push(`%${search}%`);
-      whereClauses.push(`title ILIKE $${queryParams.length}`);
-    }
-
-    const whereStr = whereClauses.join(' AND ');
-
-    const countRes = await queryDb(
-      `SELECT COUNT(*) as total FROM chef_chat_sessions WHERE ${whereStr}`,
-      queryParams
-    );
-    const countRow = (countRes.rows || [])[0] || {};
-    const total = Number(countRow.total ?? countRow.count ?? 0);
-
-    queryParams.push(limit);
-    const limitParamIdx = queryParams.length;
-    queryParams.push(offset);
-    const offsetParamIdx = queryParams.length;
-
-    const sessionsRes = await queryDb(
-      `SELECT id, user_id, category_id, title, messages, created_at, updated_at 
-       FROM chef_chat_sessions 
-       WHERE ${whereStr} 
-       ORDER BY updated_at DESC 
-       LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
-      queryParams
-    );
-
-    const sessions = (sessionsRes.rows || []).map((session: any) => {
-      let parsedMessages: any[] = [];
-      try {
-        if (typeof session.messages === 'string') {
-          parsedMessages = JSON.parse(session.messages);
-        } else if (Array.isArray(session.messages)) {
-          parsedMessages = session.messages;
-        } else if (session.messages) {
-          parsedMessages = [session.messages];
-        }
-      } catch (_) {
-        parsedMessages = [];
+          if (res && res.rows && res.rows[0]) {
+            const row = res.rows[0];
+            const msgs = typeof row.messages === 'string' ? JSON.parse(row.messages) : (row.messages || []);
+            return NextResponse.json({ success: true, session: { ...row, messages: msgs } });
+          }
+        } catch (_) {}
       }
 
+      // Fallback
+      const fb = readFallbackData();
+      const match = fb.sessions.find(s => s.id === sessionId);
+      if (match) {
+        return NextResponse.json({ success: true, session: match });
+      }
+      return NextResponse.json({ success: true, session: { id: sessionId, messages: [] } });
+    }
+
+    // 2. Paginated Sessions & Categories
+    if (db) {
+      try {
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS chef_chat_categories (
+            id VARCHAR(255) PRIMARY KEY,
+            user_id VARCHAR(255) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE TABLE IF NOT EXISTS chef_chat_sessions (
+            id VARCHAR(255) PRIMARY KEY,
+            user_id VARCHAR(255) NOT NULL,
+            category_id VARCHAR(255),
+            title VARCHAR(500) NOT NULL,
+            messages TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+        `).catch(() => {});
+
+        let querySql = `
+          SELECT s.id, s.title, s.category_id, c.name as category_name, s.created_at, s.updated_at
+          FROM chef_chat_sessions s
+          LEFT JOIN chef_chat_categories c ON s.category_id = c.id
+          WHERE s.user_id = $1
+        `;
+        const params: any[] = [userId];
+
+        if (categoryId && categoryId !== 'all') {
+          querySql += ` AND s.category_id = $2`;
+          params.push(categoryId);
+        }
+
+        querySql += ` ORDER BY s.updated_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        params.push(limit, offset);
+
+        const listRes = await db.query(querySql, params);
+        const countRes = await db.query(
+          `SELECT COUNT(*) as total FROM chef_chat_sessions WHERE user_id = $1 ${categoryId && categoryId !== 'all' ? 'AND category_id = $2' : ''}`,
+          categoryId && categoryId !== 'all' ? [userId, categoryId] : [userId]
+        );
+        const catRes = await db.query(`SELECT id, name, created_at FROM chef_chat_categories WHERE user_id = $1 ORDER BY created_at ASC`, [userId]);
+
+        const total = parseInt(countRes?.rows?.[0]?.total || '0', 10);
+        return NextResponse.json({
+          success: true,
+          sessions: listRes?.rows || [],
+          categories: catRes?.rows || [],
+          total,
+          page,
+          totalPages: Math.max(1, Math.ceil(total / limit))
+        });
+      } catch (dbErr) {
+        console.warn('[history API] DB query failed, falling back to disk store:', dbErr);
+      }
+    }
+
+    // Disk Store Fallback
+    const fb = readFallbackData();
+    let userSessions = fb.sessions.filter(s => s.user_id === userId);
+    if (categoryId && categoryId !== 'all') {
+      userSessions = userSessions.filter(s => s.category_id === categoryId);
+    }
+    userSessions.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+    const total = userSessions.length;
+    const paginated = userSessions.slice(offset, offset + limit).map(s => {
+      const cat = fb.categories.find(c => c.id === s.category_id);
       return {
-        id: session.id,
-        userId: session.user_id,
-        categoryId: session.category_id,
-        title: session.title || 'Culinary Consultation',
-        messages: parsedMessages,
-        messageCount: parsedMessages.length,
-        createdAt: session.created_at,
-        updatedAt: session.updated_at
+        id: s.id,
+        title: s.title,
+        category_id: s.category_id,
+        category_name: cat ? cat.name : null,
+        created_at: s.created_at,
+        updated_at: s.updated_at
       };
     });
 
     return NextResponse.json({
       success: true,
-      sessions,
-      categories,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit)
-      }
+      sessions: paginated,
+      categories: fb.categories.filter(c => c.user_id === userId),
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / limit))
     });
   } catch (err: any) {
-    console.error('[chef/history] GET error:', err);
-    return NextResponse.json(
-      { success: false, error: err.message || 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureHistoryTables();
-    const body = await req.json();
-    const { action, userId, sessionId, categoryId, title, name, icon, messages } = body;
+    const body = await req.json().catch(() => ({}));
+    const { action, userId = 'guest', id, title, messages = [], name, categoryId, sessionId, sessionIds = [] } = body;
+    const db = await getDb();
 
-    const targetUserId = (userId || body.user_id || '').trim();
-    if (!targetUserId) {
-      return NextResponse.json({ success: false, error: 'User ID is required' }, { status: 400 });
+    // 1. SAVE SESSION
+    if (action === 'save_session') {
+      const sessId = id || ('sess_' + Date.now());
+      const sessTitle = title || 'Chef Conversation';
+      const msgsJson = typeof messages === 'string' ? messages : JSON.stringify(messages);
+
+      if (db) {
+        try {
+          await db.query(
+            `INSERT INTO chef_chat_sessions (id, user_id, title, messages, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, NOW(), NOW())
+             ON CONFLICT (id) DO UPDATE SET 
+               title = EXCLUDED.title,
+               messages = EXCLUDED.messages,
+               updated_at = NOW();`,
+            [sessId, userId, sessTitle, msgsJson]
+          );
+          return NextResponse.json({ success: true, id: sessId });
+        } catch (_) {}
+      }
+
+      // Fallback
+      const fb = readFallbackData();
+      const existingIdx = fb.sessions.findIndex(s => s.id === sessId);
+      const sessionObj = {
+        id: sessId,
+        user_id: userId,
+        title: sessTitle,
+        messages: Array.isArray(messages) ? messages : JSON.parse(msgsJson),
+        created_at: existingIdx >= 0 ? fb.sessions[existingIdx].created_at : new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      if (existingIdx >= 0) fb.sessions[existingIdx] = { ...fb.sessions[existingIdx], ...sessionObj };
+      else fb.sessions.unshift(sessionObj);
+      writeFallbackData(fb);
+      return NextResponse.json({ success: true, id: sessId });
     }
 
-    if (action === 'create_category' || (!sessionId && name)) {
-      const catId = categoryId || 'cat_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      await queryDb(
-        `INSERT INTO chef_chat_categories (id, user_id, name, icon, created_at)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, icon = EXCLUDED.icon`,
-        [catId, targetUserId, name || 'Custom Category', icon || 'Utensils']
-      );
-      return NextResponse.json({ success: true, category: { id: catId, name, icon } });
+    // 2. CREATE CATEGORY
+    if (action === 'create_category') {
+      const catId = 'cat_' + Date.now();
+      const cleanName = (name || '').trim();
+      if (!cleanName) return NextResponse.json({ success: false, error: 'Category name required' }, { status: 400 });
+
+      if (db) {
+        try {
+          await db.query(
+            `INSERT INTO chef_chat_categories (id, user_id, name, created_at) VALUES ($1, $2, $3, NOW())`,
+            [catId, userId, cleanName]
+          );
+          return NextResponse.json({ success: true, category: { id: catId, name: cleanName } });
+        } catch (_) {}
+      }
+
+      const fb = readFallbackData();
+      fb.categories.push({ id: catId, user_id: userId, name: cleanName, created_at: new Date().toISOString() });
+      writeFallbackData(fb);
+      return NextResponse.json({ success: true, category: { id: catId, name: cleanName } });
     }
 
-    const targetSessionId = sessionId || ('sess_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
-    const safeMessages = JSON.stringify(Array.isArray(messages) ? messages : []);
-    const sessionTitle = title || 'Culinary Consultation';
+    // 3. SET SESSION CATEGORY
+    if (action === 'set_session_category') {
+      if (db) {
+        try {
+          await db.query(
+            `UPDATE chef_chat_sessions SET category_id = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`,
+            [categoryId || null, sessionId, userId]
+          );
+          return NextResponse.json({ success: true });
+        } catch (_) {}
+      }
 
-    await queryDb(
-      `INSERT INTO chef_chat_sessions (id, user_id, category_id, title, messages, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT (id) DO UPDATE SET 
-         title = COALESCE(EXCLUDED.title, chef_chat_sessions.title),
-         category_id = COALESCE(EXCLUDED.category_id, chef_chat_sessions.category_id),
-         messages = EXCLUDED.messages,
-         updated_at = CURRENT_TIMESTAMP`,
-      [targetSessionId, targetUserId, categoryId || null, sessionTitle, safeMessages]
-    );
+      const fb = readFallbackData();
+      const sess = fb.sessions.find(s => s.id === sessionId);
+      if (sess) {
+        sess.category_id = categoryId || null;
+        sess.updated_at = new Date().toISOString();
+        writeFallbackData(fb);
+      }
+      return NextResponse.json({ success: true });
+    }
 
-    return NextResponse.json({
-      success: true,
-      sessionId: targetSessionId,
-      title: sessionTitle
-    });
+    // 4. BATCH DELETE SESSIONS
+    if (action === 'delete_sessions') {
+      const idsToDelete = Array.isArray(sessionIds) ? sessionIds : [];
+      if (idsToDelete.length === 0) return NextResponse.json({ success: true, deleted: 0 });
+
+      if (db) {
+        try {
+          await db.query(
+            `DELETE FROM chef_chat_sessions WHERE id = ANY($1::varchar[]) AND user_id = $2`,
+            [idsToDelete, userId]
+          );
+          return NextResponse.json({ success: true, deleted: idsToDelete.length });
+        } catch (_) {}
+      }
+
+      const fb = readFallbackData();
+      fb.sessions = fb.sessions.filter(s => !idsToDelete.includes(s.id));
+      writeFallbackData(fb);
+      return NextResponse.json({ success: true, deleted: idsToDelete.length });
+    }
+
+    // 5. CLEAR ALL HISTORY FOR USER
+    if (action === 'clear_all_history') {
+      if (db) {
+        try {
+          await db.query(`DELETE FROM chef_chat_sessions WHERE user_id = $1`, [userId]);
+          return NextResponse.json({ success: true });
+        } catch (_) {}
+      }
+
+      const fb = readFallbackData();
+      fb.sessions = fb.sessions.filter(s => s.user_id !== userId);
+      writeFallbackData(fb);
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });
   } catch (err: any) {
-    console.error('[chef/history] POST error:', err);
-    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
-  }
-}
-
-export async function PATCH(req: NextRequest) {
-  try {
-    await ensureHistoryTables();
-    const body = await req.json();
-    const { sessionId, title, categoryId, userId } = body;
-
-    if (!sessionId) {
-      return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
-    }
-
-    const updates: string[] = ['updated_at = CURRENT_TIMESTAMP'];
-    const params: any[] = [sessionId];
-
-    if (title !== undefined) {
-      params.push(title);
-      updates.push(`title = $${params.length}`);
-    }
-
-    if (categoryId !== undefined) {
-      params.push(categoryId === 'all' || categoryId === '' ? null : categoryId);
-      updates.push(`category_id = $${params.length}`);
-    }
-
-    if (userId) {
-      params.push(userId);
-      await queryDb(
-        `UPDATE chef_chat_sessions SET ${updates.join(', ')} WHERE id = $1 AND user_id = $${params.length}`,
-        params
-      );
-    } else {
-      await queryDb(
-        `UPDATE chef_chat_sessions SET ${updates.join(', ')} WHERE id = $1`,
-        params
-      );
-    }
-
-    return NextResponse.json({ success: true, sessionId });
-  } catch (err: any) {
-    console.error('[chef/history] PATCH error:', err);
-    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    await ensureHistoryTables();
     const { searchParams } = new URL(req.url);
-    const sessionId = searchParams.get('sessionId') || searchParams.get('id');
-    const userId = searchParams.get('userId');
-    const clearAll = searchParams.get('clearAll') === 'true';
+    const action = searchParams.get('action') || '';
+    const userId = searchParams.get('userId') || 'guest';
+    const sessionId = searchParams.get('sessionId') || '';
+    const categoryId = searchParams.get('categoryId') || '';
+    const sessionIdsParam = searchParams.get('sessionIds') || '';
 
-    if (clearAll && userId) {
-      await queryDb(`DELETE FROM chef_chat_sessions WHERE user_id = $1`, [userId]);
-      return NextResponse.json({ success: true, message: 'All sessions deleted' });
+    const db = await getDb();
+
+    // 1. Delete single session
+    if (action === 'delete_session' && sessionId) {
+      if (db) {
+        try {
+          await db.query(`DELETE FROM chef_chat_sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
+          return NextResponse.json({ success: true });
+        } catch (_) {}
+      }
+      const fb = readFallbackData();
+      fb.sessions = fb.sessions.filter(s => s.id !== sessionId);
+      writeFallbackData(fb);
+      return NextResponse.json({ success: true });
     }
 
-    if (!sessionId) {
-      return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
+    // 2. Batch delete sessions via query param
+    if (action === 'delete_sessions' && sessionIdsParam) {
+      const idsToDelete = sessionIdsParam.split(',').map(s => s.trim()).filter(Boolean);
+      if (db) {
+        try {
+          await db.query(`DELETE FROM chef_chat_sessions WHERE id = ANY($1::varchar[]) AND user_id = $2`, [idsToDelete, userId]);
+          return NextResponse.json({ success: true, deleted: idsToDelete.length });
+        } catch (_) {}
+      }
+      const fb = readFallbackData();
+      fb.sessions = fb.sessions.filter(s => !idsToDelete.includes(s.id));
+      writeFallbackData(fb);
+      return NextResponse.json({ success: true, deleted: idsToDelete.length });
     }
 
-    if (userId) {
-      await queryDb(`DELETE FROM chef_chat_sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
-    } else {
-      await queryDb(`DELETE FROM chef_chat_sessions WHERE id = $1`, [sessionId]);
+    // 3. Clear all history
+    if (action === 'clear_all_history') {
+      if (db) {
+        try {
+          await db.query(`DELETE FROM chef_chat_sessions WHERE user_id = $1`, [userId]);
+          return NextResponse.json({ success: true });
+        } catch (_) {}
+      }
+      const fb = readFallbackData();
+      fb.sessions = fb.sessions.filter(s => s.user_id !== userId);
+      writeFallbackData(fb);
+      return NextResponse.json({ success: true });
     }
 
-    return NextResponse.json({ success: true, sessionId });
+    // 4. Delete category (keeps sessions, sets category_id to NULL)
+    if (action === 'delete_category' && categoryId) {
+      if (db) {
+        try {
+          await db.query(`UPDATE chef_chat_sessions SET category_id = NULL WHERE category_id = $1 AND user_id = $2`, [categoryId, userId]);
+          await db.query(`DELETE FROM chef_chat_categories WHERE id = $1 AND user_id = $2`, [categoryId, userId]);
+          return NextResponse.json({ success: true });
+        } catch (_) {}
+      }
+      const fb = readFallbackData();
+      fb.categories = fb.categories.filter(c => c.id !== categoryId);
+      fb.sessions.forEach(s => { if (s.category_id === categoryId) s.category_id = null; });
+      writeFallbackData(fb);
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ success: false, error: 'Invalid delete action' }, { status: 400 });
   } catch (err: any) {
-    console.error('[chef/history] DELETE error:', err);
-    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

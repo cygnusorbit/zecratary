@@ -1,0 +1,48 @@
+{
+  "id": "rec_1793387474226_cdwz7",
+  "title": "Signature Hainanese Chicken Rice for Two",
+  "description": "Tender poached chicken served over deeply aromatic, ginger-pandan scented jasmine rice, accompanied by a savory soy-sesame drizzle and fresh cucumber.",
+  "prepMinutes": 15,
+  "cookMinutes": 20,
+  "servings": 2,
+  "calories": 480,
+  "mealType": "Dinner",
+  "recipeType": "Dinner",
+  "ingredients": [
+    "2 whole chicken leg quarters (bone-in, skin-on)",
+    "1.5 cups Jasmine rice, rinsed and drained",
+    "3 Pandan leaves, knotted",
+    "5 slices fresh Ginger",
+    "4 cloves Garlic, minced",
+    "2 tbsp Sesame oil",
+    "2 tbsp Light soy sauce",
+    "1/2 Cucumber, sliced for garnish",
+    "1 tsp Salt",
+    "4 cups Water or stock for poaching"
+  ],
+  "instructions": [
+    "Rub the chicken legs generously with salt, then rinse thoroughly.",
+    "Poach the chicken in simmering water with ginger slices and 1 pandan leaf for 25 minutes until fully cooked.",
+    "Transfer cooked chicken immediately into an ice bath for 10 minutes to lock in moisture and create a gelatinous skin.",
+    "In a pan, sauté minced garlic and remaining ginger in 1 tbsp sesame oil until fragrant. Add rinsed rice and toast for 2 minutes.",
+    "Transfer toasted rice to a rice cooker, add 1.75 cups of reserved chicken poaching broth and knotted pandan leaves, then cook.",
+    "Chop the cooled chicken into bite-sized pieces, drizzle with a mixture of light soy sauce, sesame oil, and 2 tbsp warm broth, and serve with the hot rice and cucumber slices."
+  ],
+  "directions": [
+    "Rub the chicken legs generously with salt, then rinse thoroughly.",
+    "Poach the chicken in simmering water with ginger slices and 1 pandan leaf for 25 minutes until fully cooked.",
+    "Transfer cooked chicken immediately into an ice bath for 10 minutes to lock in moisture and create a gelatinous skin.",
+    "In a pan, sauté minced garlic and remaining ginger in 1 tbsp sesame oil until fragrant. Add rinsed rice and toast for 2 minutes.",
+    "Transfer toasted rice to a rice cooker, add 1.75 cups of reserved chicken poaching broth and knotted pandan leaves, then cook.",
+    "Chop the cooled chicken into bite-sized pieces, drizzle with a mixture of light soy sauce, sesame oil, and 2 tbsp warm broth, and serve with the hot rice and cucumber slices."
+  ],
+  "image": "/recipes/images/scraped_1793387474221_e8dfa7812f.jpg",
+  "imageUrl": "/recipes/images/scraped_1793387474221_e8dfa7812f.jpg",
+  "image_url": "/recipes/images/scraped_1793387474221_e8dfa7812f.jpg",
+  "sourceUrl": "https://www.recipetineats.com/recipes/",
+  "sourceName": "recipetineats.com",
+  "userId": "usr_admin_1",
+  "userEmail": "admin@zecratary.com",
+  "createdAt": "2026-10-30T19:11:14.226Z",
+  "updatedAt": "2026-10-30T19:11:14.226Z"
+}

@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.2.04",
+  "version": "8.2.05",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.2.04",
+  "version": "8.2.05",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -6394,12 +6394,15 @@ export default function PlannerPage() {
 // @ts-nocheck
 'use client';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { 
-  ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, 
-  Calendar, CalendarPlus, X, Loader2, User as UserIcon, 
-  Sparkles, Bookmark, Package, Plus, Trash2, ChevronDown, 
-  Cpu, Mic, MicOff, Volume2, Square, Award,
-  Layers, CheckCircle2, ShoppingCart, Globe
+  ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
+  Calendar, CalendarPlus, X, ArrowLeftRight, Utensils, Loader2, User as UserIcon, 
+  Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
+  ChevronLeft, ChevronRight, Search, Heart, Copy, ShoppingCart, Dices, 
+  CheckCircle2, Layers, HelpCircle, Coins, Cpu, ShieldAlert, Mic, MicOff,
+  Volume2, VolumeX, Square, BookOpen, BookA, Zap, Award, History, Folder,
+  FolderPlus, MessageSquare, Tag
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -6409,14 +6412,14 @@ interface MealItem {
   id: string;
   dayIndex: number;
   dayLabel: string;
-  dateStr?: string;
+  dateStr: string;
   mealType: string;
   title: string;
-  description?: string;
-  prepMinutes?: number;
-  cookMinutes?: number;
-  servings?: number;
-  calories?: number;
+  description: string;
+  prepMinutes: number;
+  cookMinutes: number;
+  servings: number;
+  image?: string;
   isBatchCook?: boolean;
   isLeftover?: boolean;
   leftoverFrom?: string;
@@ -6424,10 +6427,10 @@ interface MealItem {
 }
 
 interface MealPlanData {
-  title?: string;
+  title: string;
   totalDays: number;
-  theme?: string;
-  budgetPerServing?: string;
+  theme: string;
+  budgetPerServing: string;
   meals: MealItem[];
 }
 
@@ -6442,18 +6445,39 @@ interface RecommendedRecipeData {
   ingredients: string[];
   instructions: string[];
   chefTip?: string;
-  sourceUrl?: string;
-  sourceName?: string;
   image?: string;
 }
 
+interface SystemRecommendation {
+  label: string;
+  route: string;
+  description?: string;
+}
+
 interface ChatMessage {
+  systemRecommendations?: SystemRecommendation[];
   id: string;
   role: 'user' | 'assistant';
   content?: string;
   plan?: MealPlanData;
   recipe?: any;
   recommendedRecipe?: RecommendedRecipeData;
+}
+
+interface ChatCategory {
+  id: string;
+  name: string;
+  created_at?: string;
+}
+
+interface ChatSessionItem {
+  id: string;
+  title: string;
+  category_id?: string | null;
+  category_name?: string | null;
+  message_count?: number;
+  created_at: string;
+  updated_at: string;
 }
 
 const DIETARY_OPTIONS = [
@@ -6468,7 +6492,7 @@ const ALLERGY_OPTIONS = [
 
 const COUNTRIES = [
   'Singapore', 'United States', 'United Kingdom', 'Australia', 
-  'Canada', 'Malaysia', 'Japan', 'Germany', 'France', 'India', 'Thailand'
+  'Canada', 'Malaysia', 'Japan', 'Germany', 'France', 'India'
 ];
 
 const DEFAULT_SECTIONS = [
@@ -6478,9 +6502,38 @@ const DEFAULT_SECTIONS = [
     description: 'Basic duration, meal types, and start dates for the multi-day plan.',
     enabled: true,
     questions: [
-      "How many days would you like to plan for (up to 7 days)?",
-      "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
-      "When would you like the meal plan to start (today, tomorrow, or a specific date)?"
+      {
+        id: 'q_core_1',
+        text: "How many days would you like to plan for (up to 7 days)?",
+        dedicatedAnswers: [
+          "3 Days (Quick Prep)",
+          "5 Days (Workweek)",
+          "7 Days (Full Week)",
+          "Weekend Plan (2 Days)"
+        ]
+      },
+      {
+        id: 'q_core_2',
+        text: "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+        dedicatedAnswers: [
+          "Dinner only",
+          "Lunch & Dinner",
+          "All Meals (Breakfast, Lunch, Dinner)",
+          "Breakfast & Dinner",
+          "All Meals + Snack"
+        ]
+      },
+      {
+        id: 'q_core_3',
+        text: "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+        dedicatedAnswers: [
+          "Start Today",
+          "Start Tomorrow",
+          "Next Monday (Fresh Week)",
+          "This Coming Weekend",
+          "Flexible / Any Day"
+        ]
+      }
     ]
   },
   {
@@ -6489,188 +6542,56 @@ const DEFAULT_SECTIONS = [
     description: 'Themes, nutritional restrictions, and financial target per serving.',
     enabled: true,
     questions: [
-      "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
-      "What is your approximate ingredient budget per serving?"
+      {
+        id: 'q_pref_1',
+        text: "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+        dedicatedAnswers: [
+          "High-Protein Wholesome",
+          "Quick & Easy (<25m)",
+          "Mediterranean Fresh",
+          "Keto / Low-Carb",
+          "Budget-Friendly Comfort",
+          "Plant-Based / Balanced Veggie"
+        ]
+      },
+      {
+        id: 'q_pref_2',
+        text: "What is your approximate ingredient budget per serving?",
+        dedicatedAnswers: [
+          "Under $5/serving (Economy)",
+          "$5 - $8/serving (Balanced)",
+          "$8 - $12/serving (Generous)",
+          "$12+/serving (Premium)",
+          "Flexible Target"
+        ]
+      }
     ]
   }
 ];
 
-const getCostFromFeatureObject = (obj: any): number | null => {
-  if (!obj || typeof obj !== 'object') return null;
-
-  const targetKeys = [
-    'AI Chef Recipe Generation',
-    'ai chef recipe generation',
-    'ai_chef_recipe_generation',
-    'aiChefRecipeGeneration',
-    'aiChefCost',
-    'ai_chef_cost',
-    'chefCost',
-    'chef_cost',
-    'AI Chef Generation',
-    'ai chef generation',
-    'ai_chef_generation',
-    'aiChefGeneration',
-    'chef',
-    'ai_chef',
-    'aiChef',
-    'recipe_generation',
-    'recipeGeneration'
-  ];
-
-  for (const k of targetKeys) {
-    if (typeof obj[k] !== 'undefined' && obj[k] !== null) {
-      const num = Number(obj[k]);
-      if (!isNaN(num)) return num;
-    }
-  }
-
-  const entries = Object.entries(obj);
-  for (const [key, val] of entries) {
-    const cleanKey = key.toLowerCase().replace(/[-_]/g, ' ').trim();
-    if (
-      cleanKey === 'ai chef recipe generation' ||
-      cleanKey === 'chef recipe generation' ||
-      cleanKey === 'ai chef generation' ||
-      cleanKey === 'ai chef cost' ||
-      cleanKey === 'chef cost' ||
-      cleanKey === 'ai chef' ||
-      cleanKey === 'chef'
-    ) {
-      const num = Number(val);
-      if (!isNaN(num)) return num;
-    }
-  }
-
-  return null;
+// Polymorphic Safe Helper Functions for Questions & Dedicated Answers
+const getQuestionText = (qItem: any): string => {
+  if (!qItem) return '';
+  if (typeof qItem === 'string') return qItem.trim();
+  return (qItem.text || qItem.question || qItem.title || '').trim();
 };
 
-const resolveChefRecipeCost = (...sources: any[]): number => {
-  for (const raw of sources) {
-    if (!raw) continue;
-    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
-    if (!s || typeof s !== 'object') continue;
-
-    // 1. Direct database columns & top-level settings fields (PostgreSQL & MySQL token_settings)
-    if (typeof s.aiChefCost !== 'undefined' && s.aiChefCost !== null) {
-      const val = Number(s.aiChefCost);
-      if (!isNaN(val)) return val;
-    }
-    if (typeof s.ai_chef_cost !== 'undefined' && s.ai_chef_cost !== null) {
-      const val = Number(s.ai_chef_cost);
-      if (!isNaN(val)) return val;
-    }
-    if (typeof s.chefCost !== 'undefined' && s.chefCost !== null) {
-      const val = Number(s.chefCost);
-      if (!isNaN(val)) return val;
-    }
-    if (typeof s.chef_cost !== 'undefined' && s.chef_cost !== null) {
-      const val = Number(s.chef_cost);
-      if (!isNaN(val)) return val;
-    }
-    if (typeof s.aiChefRecipeGenerationCost !== 'undefined' && s.aiChefRecipeGenerationCost !== null) {
-      const val = Number(s.aiChefRecipeGenerationCost);
-      if (!isNaN(val)) return val;
-    }
-    if (typeof s.ai_chef_recipe_generation_cost !== 'undefined' && s.ai_chef_recipe_generation_cost !== null) {
-      const val = Number(s.ai_chef_recipe_generation_cost);
-      if (!isNaN(val)) return val;
-    }
-
-    // 2. Feature cost objects (featureCosts, costs, pricing)
-    const objSources = [s.featureCosts, s.costs, s.feature_costs, s.pricing];
-    for (const obj of objSources) {
-      const matched = getCostFromFeatureObject(obj);
-      if (matched !== null) return matched;
-    }
-
-    // 3. Features array / rules list lookup
-    const featuresList = s.features || s.featureList || s.tokenRules || s.rules || s.items;
-    if (Array.isArray(featuresList)) {
-      const item = featuresList.find((f: any) => {
-        const name = String(f?.name || f?.title || f?.label || f?.feature || '').toLowerCase().replace(/[-_]/g, ' ').trim();
-        const id = String(f?.id || f?.key || '').toLowerCase().replace(/[-_]/g, ' ').trim();
-        return (
-          name === 'ai chef recipe generation' ||
-          name === 'chef recipe generation' ||
-          name === 'ai chef generation' ||
-          name === 'ai chef cost' ||
-          name === 'chef cost' ||
-          name === 'ai chef' ||
-          name.includes('chef recipe') ||
-          id === 'ai chef recipe generation' ||
-          id === 'chef recipe generation' ||
-          id === 'ai chef cost' ||
-          id === 'aichefcost' ||
-          id === 'chefcost' ||
-          id === 'ai chef' ||
-          id === 'chef'
-        );
-      });
-      if (item && (item.cost !== undefined || item.tokens !== undefined || item.price !== undefined || item.tokenCost !== undefined)) {
-        const v = Number(item.cost ?? item.tokens ?? item.price ?? item.tokenCost);
-        if (!isNaN(v)) return v;
-      }
-    }
+const getQuestionDedicatedAnswers = (qItem: any): string[] => {
+  if (!qItem || typeof qItem === 'string') return [];
+  if (Array.isArray(qItem.dedicatedAnswers) && qItem.dedicatedAnswers.length > 0) {
+    return qItem.dedicatedAnswers.filter(Boolean);
   }
-  return 0;
-};
-
-const resolveIsTokenEnabled = (...sources: any[]): boolean => {
-  for (const raw of sources) {
-    if (!raw) continue;
-    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
-    if (!s || typeof s !== 'object') continue;
-    if (s.isEnabled !== undefined) return Boolean(s.isEnabled);
-    if (s.isTokenEnabled !== undefined) return Boolean(s.isTokenEnabled);
-    if (s.is_enabled !== undefined) return Boolean(s.is_enabled);
-    if (s.enabled !== undefined) return Boolean(s.enabled);
-    if (s.systemActive !== undefined) return Boolean(s.systemActive);
+  if (Array.isArray(qItem.answers) && qItem.answers.length > 0) {
+    return qItem.answers.filter(Boolean);
   }
-  return true;
-};
-
-const resolveTokenSymbol = (...sources: any[]): string => {
-  for (const raw of sources) {
-    if (!raw) continue;
-    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
-    if (!s || typeof s !== 'object') continue;
-    if (s.tokenSymbol !== undefined && s.tokenSymbol !== null && String(s.tokenSymbol).trim() !== '') {
-      return String(s.tokenSymbol).trim();
-    }
-    if (s.token_symbol !== undefined && s.token_symbol !== null && String(s.token_symbol).trim() !== '') {
-      return String(s.token_symbol).trim();
-    }
-    if (s.symbol !== undefined && s.symbol !== null && String(s.symbol).trim() !== '') {
-      return String(s.symbol).trim();
-    }
-  }
-  return '';
-};
-
-const resolveTokenName = (...sources: any[]): string => {
-  for (const raw of sources) {
-    if (!raw) continue;
-    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
-    if (!s || typeof s !== 'object') continue;
-    if (s.tokenName) return String(s.tokenName).trim();
-    if (s.token_name) return String(s.token_name).trim();
-    if (s.name && typeof s.name === 'string') return String(s.name).trim();
-  }
-  return '';
-};
-
-const resolveTokenPackages = (...sources: any[]): any[] => {
-  for (const raw of sources) {
-    if (!raw) continue;
-    const s = raw.settings || raw.tokenSettings || raw.token_settings || raw.data?.settings || raw.data || raw;
-    if (!s || typeof s !== 'object') continue;
-    if (Array.isArray(s.packages) && s.packages.length > 0) return s.packages;
+  if (Array.isArray(qItem.options) && qItem.options.length > 0) {
+    return qItem.options.filter(Boolean);
   }
   return [];
 };
 
 export default function ChefChatPage() {
+  const router = useRouter();
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const currentUserRef = useRef<User | null>(null);
@@ -6681,42 +6602,51 @@ export default function ChefChatPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Dynamic AI Model & Settings Synced with /admin/ai-settings
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-3.5-flash-lite');
-  const [activeAiProvider, setActiveAiProvider] = useState<string>('gemini');
+  // Chat History & Categories State (PostgreSQL backed)
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => 'sess_' + Date.now());
+  const currentSessionIdRef = useRef<string>(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
+  const [historySessions, setHistorySessions] = useState<ChatSessionItem[]>([]);
+  const [historyCategories, setHistoryCategories] = useState<ChatCategory[]>([]);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const [historyTotalPages, setHistoryTotalPages] = useState<number>(1);
+  const [historyTotalCount, setHistoryTotalCount] = useState<number>(0);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+  const [newCategoryName, setNewCategoryName] = useState<string>('');
+
+  // AI & Voice telemetry settings
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
-  const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
+  const [wizardQuestionsList, setWizardQuestionsList] = useState<any[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.0-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
   const [maxPlanDays, setMaxPlanDays] = useState<number>(7);
-  const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
-
-  // Real-Time In-Stock Pantry Items (Loaded dynamically from /api/pantry)
-  const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
 
   // Voice Interaction State
   const [enableVoiceInteraction, setEnableVoiceInteraction] = useState<boolean>(true);
   const [voiceSpeed, setVoiceSpeed] = useState<number>(1.0);
   const [voiceAutoPlay, setVoiceAutoPlay] = useState<boolean>(false);
-  
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('en-US-Neural2-F');
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Dynamic Token Telemetry (Zero hardcoded values, fully synchronized with /admin/token-setting)
+  // Token Telemetry
   const [tokenBalance, setTokenBalance] = useState<number>(0);
-  const [tokenSymbol, setTokenSymbol] = useState<string>('');
-  const [tokenName, setTokenName] = useState<string>('');
-  const [chefCost, setChefCost] = useState<number | null>(null);
-  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
+  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenName, setTokenName] = useState<string>('Foodie Token');
+  const [chefCost, setChefCost] = useState<number>(1);
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // User Dietary Preferences State
+  // Dietary Preferences State
   const [showPreferences, setShowPreferences] = useState<boolean>(false);
   const [servings, setServings] = useState<number>(2);
   const [country, setCountry] = useState<string>('Singapore');
@@ -6727,23 +6657,224 @@ export default function ChefChatPage() {
   const [tastesList, setTastesList] = useState<string[]>(['Less Spicy']);
   const [newTasteInput, setNewTasteInput] = useState<string>('');
 
-  // Wizard Flow State
+  // Wizard Questionnaire Flow State
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
+
+  // Recipe Modals
+  const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<RecommendedRecipeData | null>(null);
+  const [showRecipeDetailsModal, setShowRecipeDetailsModal] = useState<boolean>(false);
+  const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const safeJsonParse = async (res: Response) => {
+  const getUserKey = useCallback((user: User | null) => {
+    if (!user) return 'guest';
+    return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
+  }, []);
+
+  const updateWizardStep = (step: number | null) => {
+    setWizardStep(step);
     try {
-      const text = await res.text();
-      if (!text || !text.trim()) return null;
-      return JSON.parse(text);
-    } catch (_) {
-      return null;
+      if (typeof window === 'undefined') return;
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      if (step !== null) {
+        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
+      } else {
+        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
+      }
+    } catch (_) {}
+  };
+
+  // ------------------------------------------------------------------
+  // Chat History & Category PostgreSQL Operations
+  // ------------------------------------------------------------------
+  const fetchChatHistory = useCallback(async (pageToLoad = historyPage, categoryFilter = selectedCategoryFilter) => {
+    setLoadingHistory(true);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const res = await fetch(
+        `/api/chef/history?userId=${encodeURIComponent(userKey)}&categoryId=${encodeURIComponent(categoryFilter)}&page=${pageToLoad}`,
+        { cache: 'no-store' }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setHistorySessions(data.sessions || []);
+        setHistoryCategories(data.categories || []);
+        setHistoryPage(data.page || 1);
+        setHistoryTotalPages(data.totalPages || 1);
+        setHistoryTotalCount(data.total || 0);
+      }
+    } catch (err) {
+      console.warn('Failed to load chat history:', err);
+    } finally {
+      setLoadingHistory(false);
     }
+  }, [getUserKey, historyPage, selectedCategoryFilter]);
+
+  const saveCurrentSessionToDb = useCallback(async (msgs: ChatMessage[]) => {
+    if (msgs.length === 0) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const firstUserMsg = msgs.find(m => m.role === 'user');
+      const title = firstUserMsg?.content 
+        ? firstUserMsg.content.slice(0, 45) + (firstUserMsg.content.length > 45 ? '...' : '')
+        : 'Chef Conversation';
+
+      await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_session',
+          userId: userKey,
+          id: currentSessionIdRef.current,
+          title,
+          messages: msgs
+        })
+      });
+    } catch (_) {}
+  }, [getUserKey]);
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newCategoryName.trim();
+    if (!clean) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const res = await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_category',
+          userId: userKey,
+          name: clean
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewCategoryName('');
+        showToast(`Category "${clean}" created!`);
+        fetchChatHistory(1, selectedCategoryFilter);
+      }
+    } catch (_) {
+      showToast("Could not create category.");
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
+    if (!confirm(`Delete category "${categoryName}"? Existing chats will be kept.`)) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch(
+        `/api/chef/history?action=delete_category&categoryId=${encodeURIComponent(categoryId)}&userId=${encodeURIComponent(userKey)}`,
+        { method: 'DELETE' }
+      );
+      showToast(`Category "${categoryName}" deleted.`);
+      if (selectedCategoryFilter === categoryId) setSelectedCategoryFilter('all');
+      fetchChatHistory(1, 'all');
+    } catch (_) {
+      showToast("Could not delete category.");
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this chat?")) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch(
+        `/api/chef/history?action=delete_session&sessionId=${encodeURIComponent(sessionId)}&userId=${encodeURIComponent(userKey)}`,
+        { method: 'DELETE' }
+      );
+
+      if (currentSessionIdRef.current === sessionId) {
+        startNewChat();
+      }
+      showToast("Chat deleted.");
+      fetchChatHistory(historyPage, selectedCategoryFilter);
+    } catch (_) {
+      showToast("Could not delete chat.");
+    }
+  };
+
+  const handleSelectSession = async (sessionItem: ChatSessionItem) => {
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const sRes = await fetch(`/api/chef/session?id=${sessionItem.id}`, { cache: 'no-store' }).catch(() => null);
+      let sessionMsgs: ChatMessage[] = [];
+      if (sRes && sRes.ok) {
+        const sData = await sRes.json();
+        sessionMsgs = sData.messages || [];
+      } else {
+        const local = localStorage.getItem(`zecratary_chef_sess_${sessionItem.id}`);
+        if (local) sessionMsgs = JSON.parse(local);
+      }
+
+      currentSessionIdRef.current = sessionItem.id;
+      setCurrentSessionId(sessionItem.id);
+      setMessages(sessionMsgs);
+      updateWizardStep(null);
+      setShowHistoryDrawer(false);
+      showToast(`Loaded: ${sessionItem.title}`);
+    } catch (_) {
+      showToast("Failed to load chat.");
+    }
+  };
+
+  const startNewChat = () => {
+    stopSpeaking();
+    const newId = 'sess_' + Date.now();
+    currentSessionIdRef.current = newId;
+    setCurrentSessionId(newId);
+    setMessages([]);
+    updateWizardStep(null);
+    setWizardAnswers({});
+    setActiveTopicTitle('Standard Wizard');
+    setShowHistoryDrawer(false);
+    showToast("Started a new chat session.");
+  };
+
+  const handleAssignCategory = async (sessionId: string, categoryId: string) => {
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_session_category',
+          userId: userKey,
+          sessionId,
+          categoryId: categoryId === 'none' ? null : categoryId
+        })
+      });
+      fetchChatHistory(historyPage, selectedCategoryFilter);
+      showToast("Category updated.");
+    } catch (_) {}
+  };
+
+  // ------------------------------------------------------------------
+  // Voice Synthesis Engine
+  // ------------------------------------------------------------------
+  const cleanSpeechText = (text: string): string => {
+    if (!text) return '';
+    return text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/[#*_~`]/g, '')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+      .replace(/•|\*|-/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
 
   const stopSpeaking = () => {
@@ -6763,17 +6894,23 @@ export default function ChefChatPage() {
     }
 
     stopSpeaking();
-    const clean = (textToSpeak || '')
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/[#*_~`]/g, '')
-      .replace(/•|\*|-/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
+    const clean = cleanSpeechText(textToSpeak);
     if (!clean) return;
 
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = Math.max(0.7, Math.min(1.8, voiceSpeed || 1.0));
+
+    if (selectedVoiceName.includes('F') || selectedVoiceName.includes('Aria')) {
+      utterance.pitch = 1.05;
+    } else if (selectedVoiceName.includes('D') || selectedVoiceName.includes('Marcus')) {
+      utterance.pitch = 0.88;
+    }
+
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      const matchedVoice = voices.find(v => v.lang.startsWith('en'));
+      if (matchedVoice) utterance.voice = matchedVoice;
+    }
 
     utterance.onstart = () => {
       setIsSpeaking(true);
@@ -6796,7 +6933,7 @@ export default function ChefChatPage() {
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      showToast(t('speechNotSupported', 'Speech recognition is not supported in this browser.'));
+      showToast("Speech recognition is not supported in this browser.");
       return;
     }
 
@@ -6809,14 +6946,20 @@ export default function ChefChatPage() {
     try {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
-      recognition.interimResults = false;
       recognition.lang = 'en-US';
 
-      recognition.onstart = () => setIsListening(true);
+      recognition.onstart = () => {
+        setIsListening(true);
+        showToast("🎙️ Listening... Speak your request");
+      };
+
       recognition.onresult = (event: any) => {
         const transcript = event.results?.[0]?.[0]?.transcript || '';
-        if (transcript) setPrompt(prev => (prev ? `${prev} ${transcript}` : transcript));
+        if (transcript) {
+          setPrompt(prev => (prev ? `${prev} ${transcript}` : transcript));
+        }
       };
+
       recognition.onerror = () => setIsListening(false);
       recognition.onend = () => setIsListening(false);
 
@@ -6827,63 +6970,24 @@ export default function ChefChatPage() {
     }
   };
 
-  const getUserKey = useCallback((user: User | null) => {
-    if (!user) return 'usr_admin_1';
-    return user.id || (user.email ? user.email.toLowerCase().trim() : 'usr_admin_1');
-  }, []);
-
-  const loadPantryItems = useCallback(async (user: User | null) => {
-    try {
-      const userKey = getUserKey(user);
-      const res = await fetch(`/api/pantry?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await safeJsonParse(res);
-        if (!data) return;
-        const items = Array.isArray(data) ? data : (data?.items || data?.pantry || []);
-        if (Array.isArray(items)) {
-          const names = items
-            .filter((it: any) => it && (it.quantity > 0 || it.in_stock !== false))
-            .map((it: any) => String(it.name || it.item || it.title || '').trim())
-            .filter(Boolean);
-          setPantryIngredientsList(Array.from(new Set(names)));
-        }
-      }
-    } catch (_) {}
-  }, [getUserKey]);
-
+  // ------------------------------------------------------------------
+  // Dietary Preferences Handlers (PostgreSQL Sync)
+  // ------------------------------------------------------------------
   const loadUserPreferences = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
     try {
       const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await safeJsonParse(res);
-        if (data && data.success && data.preferences) {
-          const p = data.preferences;
-          if (typeof p.servings === 'number') setServings(p.servings);
-          if (p.country) setCountry(p.country);
-          if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-          if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
-          if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
-          if (Array.isArray(p.tastes)) setTastesList(p.tastes);
-          return;
-        }
+      const data = await res.json();
+      if (data.success && data.preferences) {
+        const p = data.preferences;
+        if (typeof p.servings === 'number') setServings(p.servings);
+        if (p.country) setCountry(p.country);
+        if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
+        if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
+        if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
+        if (Array.isArray(p.tastes)) setTastesList(p.tastes);
       }
     } catch (_) {}
-
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(`zecratary_recipe_preferences_${userKey}`) || localStorage.getItem('zecratary_recipe_preferences');
-        if (saved) {
-          const p = JSON.parse(saved);
-          if (typeof p.servings === 'number') setServings(p.servings);
-          if (p.country) setCountry(p.country);
-          if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-          if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
-          if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
-          if (Array.isArray(p.tastes)) setTastesList(p.tastes);
-        }
-      } catch (_) {}
-    }
   }, [getUserKey]);
 
   const handleToggleDiet = (item: string) => {
@@ -6894,30 +6998,28 @@ export default function ChefChatPage() {
     setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
-  const handleAddAvoid = () => {
+  const handleAddAvoid = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const clean = newAvoidInput.trim();
     if (!clean) return;
-    if (!ingredientsToAvoid.includes(clean)) {
-      setIngredientsToAvoid(prev => [...prev, clean]);
-    }
+    if (!ingredientsToAvoid.includes(clean)) setIngredientsToAvoid([...ingredientsToAvoid, clean]);
     setNewAvoidInput('');
   };
 
   const handleRemoveAvoid = (item: string) => {
-    setIngredientsToAvoid(prev => prev.filter(a => a !== item));
+    setIngredientsToAvoid(ingredientsToAvoid.filter(a => a !== item));
   };
 
-  const handleAddTaste = () => {
+  const handleAddTaste = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const clean = newTasteInput.trim();
     if (!clean) return;
-    if (!tastesList.includes(clean)) {
-      setTastesList(prev => [...prev, clean]);
-    }
+    if (!tastesList.includes(clean)) setTastesList([...tastesList, clean]);
     setNewTasteInput('');
   };
 
   const handleRemoveTaste = (item: string) => {
-    setTastesList(prev => prev.filter(t => t !== item));
+    setTastesList(tastesList.filter(t => t !== item));
   };
 
   const handleSavePreferences = async () => {
@@ -6933,11 +7035,6 @@ export default function ChefChatPage() {
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
 
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`zecratary_recipe_preferences_${userKey}`, JSON.stringify(prefs));
-      localStorage.setItem('zecratary_recipe_preferences', JSON.stringify(prefs));
-    }
-
     try {
       await fetch('/api/user/preferences', {
         method: 'POST',
@@ -6947,7 +7044,7 @@ export default function ChefChatPage() {
     } catch (_) {}
 
     setShowPreferences(false);
-    showToast(t('prefsSavedToast', 'Preferences saved and synchronized!'));
+    showToast("Preferences saved and synchronized!");
   };
 
   const handleClearAllPreferences = async () => {
@@ -6961,108 +7058,50 @@ export default function ChefChatPage() {
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
 
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(`zecratary_recipe_preferences_${userKey}`);
-      localStorage.removeItem('zecratary_recipe_preferences');
-    }
-
     try {
       await fetch('/api/user/preferences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: userKey, servings: 2, country: 'Singapore', diets: [], allergies: [], avoid: [], tastes: [] })
+        body: JSON.stringify({
+          userId: userKey,
+          servings: 2,
+          country: 'Singapore',
+          diets: [],
+          allergies: [],
+          avoid: [],
+          tastes: []
+        })
       });
     } catch (_) {}
 
-    showToast(t('prefsClearedToast', 'Preferences cleared!'));
+    showToast("Preferences cleared!");
   };
 
-  // Authoritative Telemetry: Synchronize tokens dynamically with /admin/token-setting & live DB
-  const fetchTokenAndAiTelemetry = useCallback(async () => {
+  // ------------------------------------------------------------------
+  // Telemetry & Settings Synchronization
+  // ------------------------------------------------------------------
+  const fetchTelemetry = useCallback(async () => {
     try {
       const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const userEmail = active?.email || '';
-
-      const queryParams = new URLSearchParams();
-      if (active?.id) queryParams.set('userId', active.id);
-      else if (userKey) queryParams.set('userId', userKey);
-      if (userEmail) queryParams.set('email', userEmail);
-      queryParams.set('t', String(Date.now()));
-
-      // 1. Live token balance & costs from /api/tokens
-      let tokenData: any = null;
-      try {
-        const res = await fetch(`/api/tokens?${queryParams.toString()}`, { cache: 'no-store' });
-        if (res.ok) {
-          tokenData = await safeJsonParse(res);
-          if (tokenData && tokenData.success) {
-            const liveBal = typeof tokenData.balance === 'number'
-              ? tokenData.balance
-              : typeof tokenData.tokenBalance === 'number'
-              ? tokenData.tokenBalance
-              : typeof tokenData.token_balance === 'number'
-              ? tokenData.token_balance
-              : null;
-            if (liveBal !== null) setTokenBalance(liveBal);
-          }
-        }
-      } catch (_) {}
-
-      // 2. Authoritative configuration directly from /api/admin/token-setting
-      let adminTokenData: any = null;
-      try {
-        let adminTokenRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
-        if (!adminTokenRes.ok) {
-          adminTokenRes = await fetch(`/api/admin/token-settings?t=${Date.now()}`, { cache: 'no-store' });
-        }
-        if (adminTokenRes.ok) {
-          adminTokenData = await safeJsonParse(adminTokenRes);
-        }
-      } catch (_) {}
-
-      // 3. Admin AI settings from /api/admin/settings
-      let adminSettingsData: any = null;
-      try {
-        let sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
-        if (!sRes.ok) {
-          sRes = await fetch(`/api/admin/ai-settings?t=${Date.now()}`, { cache: 'no-store' });
-        }
-        if (sRes.ok) {
-          adminSettingsData = await safeJsonParse(sRes);
-        }
-      } catch (_) {}
-
-      // Local storage fallback for cross-tab speed
-      let localTokenSettings: any = null;
-      if (typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_token_settings');
-          if (raw) localTokenSettings = JSON.parse(raw);
-        } catch (_) {}
+      const queryParam = active?.id ? `?userId=${active.id}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
+      
+      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success) {
+        setTokenBalance(Number(data.balance ?? 0));
+        setTokenSymbol(data.tokenSymbol || '🪙');
+        setTokenName(data.tokenName || 'Foodie Token');
+        setChefCost(Number(data.costs?.chef ?? 1));
+        if (Array.isArray(data.packages)) setTokenPackages(data.packages);
       }
 
-      // Dynamic Resolution strictly matching /admin/token-setting
-      const resolvedCost = resolveChefRecipeCost(adminTokenData, tokenData, localTokenSettings, adminSettingsData);
-      const resolvedEnabled = resolveIsTokenEnabled(adminTokenData, tokenData, localTokenSettings);
-      const resolvedSymbol = resolveTokenSymbol(adminTokenData, tokenData, localTokenSettings);
-      const resolvedName = resolveTokenName(adminTokenData, tokenData, localTokenSettings);
-      const resolvedPackages = resolveTokenPackages(adminTokenData, tokenData, localTokenSettings);
-
-      setChefCost(resolvedCost);
-      setIsTokenEnabled(resolvedEnabled);
-      if (resolvedSymbol !== undefined) setTokenSymbol(resolvedSymbol);
-      if (resolvedName) setTokenName(resolvedName);
-      if (resolvedPackages.length > 0) setTokenPackages(resolvedPackages);
-
-      // Dynamic AI Model settings
-      const chefCfg = adminSettingsData?.chefAiSettings || adminSettingsData?.settings?.chefAiSettings || adminSettingsData;
+      const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
+      const sData = await sRes.json();
+      const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
       if (chefCfg) {
-        const resolvedModel = chefCfg.model || adminSettingsData?.aiModel || adminSettingsData?.settings?.aiModel;
-        const resolvedProvider = chefCfg.provider || adminSettingsData?.aiProvider || adminSettingsData?.settings?.aiProvider;
-        if (resolvedModel) setActiveAiModel(resolvedModel);
-        if (resolvedProvider) setActiveAiProvider(resolvedProvider);
-
+        if (sData.aiModel || chefCfg.model) {
+          setActiveAiModel((sData.aiModel || chefCfg.model).replace(/^models\//, ''));
+        }
         if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
         if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
         if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
@@ -7071,7 +7110,7 @@ export default function ChefChatPage() {
         if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
         if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
         if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
-        if (Array.isArray(chefCfg.recommendedRecipeUrls)) setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+        if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
 
         if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
           const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
@@ -7081,89 +7120,46 @@ export default function ChefChatPage() {
           setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
         }
       }
-    } catch (err) {
-      console.warn('Failed to fetch /chef telemetry:', err);
-    }
-  }, [getUserKey]);
+    } catch (_) {}
+  }, []);
+
+  const applySavedTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
 
   useEffect(() => {
+    document.title = `${t('foodieChatHeading', 'Foodie Chat')} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
     currentUserRef.current = user;
 
+    applySavedTheme();
     loadUserPreferences(user);
-    loadPantryItems(user);
-    fetchTokenAndAiTelemetry();
+    fetchTelemetry();
+    fetchChatHistory(1, 'all');
 
     const handleSync = () => {
       const active = getCurrentUser();
       setCurrentUser(active);
       currentUserRef.current = active;
       loadUserPreferences(active);
-      loadPantryItems(active);
-      fetchTokenAndAiTelemetry();
+      fetchTelemetry();
+      fetchChatHistory(1, selectedCategoryFilter);
     };
-
-    let aiChannel: BroadcastChannel | null = null;
-    let tokenChannel: BroadcastChannel | null = null;
-    let balanceChannel: BroadcastChannel | null = null;
-
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        aiChannel = new BroadcastChannel('zecratary_ai_settings_sync');
-        aiChannel.onmessage = (event) => {
-          if (event.data?.model) setActiveAiModel(event.data.model);
-          if (event.data?.provider) setActiveAiProvider(event.data.provider);
-          handleSync();
-        };
-
-        tokenChannel = new BroadcastChannel('zecratary_token_sync');
-        tokenChannel.onmessage = () => handleSync();
-
-        balanceChannel = new BroadcastChannel('zecratary_balance_channel');
-        balanceChannel.onmessage = (event) => {
-          if (typeof event.data?.balance === 'number') setTokenBalance(event.data.balance);
-          handleSync();
-        };
-      } catch (_) {}
-    }
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_theme_mode_changed', handleSync);
-    window.addEventListener('zecratary_token_settings_updated', handleSync);
-    window.addEventListener('zecratary_tokens_updated', handleSync);
-    window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_users_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_chef_ai_settings_updated', handleSync);
-    window.addEventListener('zecratary_engine_config_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-    window.addEventListener('zecratary_settings_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('zecratary_admin_settings_updated', fetchTelemetry);
 
     return () => {
-      aiChannel?.close();
-      tokenChannel?.close();
-      balanceChannel?.close();
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
-      window.removeEventListener('zecratary_token_settings_updated', handleSync);
-      window.removeEventListener('zecratary_tokens_updated', handleSync);
-      window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_users_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_chef_ai_settings_updated', handleSync);
-      window.removeEventListener('zecratary_engine_config_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-      window.removeEventListener('zecratary_settings_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('zecratary_admin_settings_updated', fetchTelemetry);
     };
-  }, [loadUserPreferences, loadPantryItems, fetchTokenAndAiTelemetry]);
+  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, fetchChatHistory, selectedCategoryFilter, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -7172,62 +7168,37 @@ export default function ChefChatPage() {
   const updateMessages = (newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setMessages(prev => {
       const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
+      saveCurrentSessionToDb(updated);
       try {
-        if (typeof window === 'undefined') return updated;
-        const active = currentUserRef.current || getCurrentUser();
-        const userKey = getUserKey(active);
-        if (updated.length > 0) {
-          localStorage.setItem(`zecratary_chef_chat_messages_${userKey}`, JSON.stringify(updated));
-        } else {
-          localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
-        }
+        localStorage.setItem(`zecratary_chef_sess_${currentSessionIdRef.current}`, JSON.stringify(updated));
       } catch (_) {}
       return updated;
     });
   };
 
-  const updateWizardStep = (step: number | null) => {
-    setWizardStep(step);
-    try {
-      if (typeof window === 'undefined') return;
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      if (step !== null) {
-        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
-      } else {
-        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
-      }
-    } catch (_) {}
-  };
-
-  const resetChat = () => {
-    stopSpeaking();
-    setMessages([]);
-    setWizardStep(null);
-    setWizardAnswers({});
-    setActiveTopicTitle('Standard Wizard');
-    showToast(t('chatResetToast', 'Started new chef conversation'));
-  };
-
+  // ------------------------------------------------------------------
+  // Questionnaire Flow
+  // ------------------------------------------------------------------
   const handleStartTopicWizard = (sec: any) => {
     const qList = Array.isArray(sec.questions) && sec.questions.length > 0
       ? sec.questions
-      : ["How many days would you like to plan for (up to 7 days)?"];
+      : DEFAULT_SECTIONS[0].questions;
 
     setActiveTopicTitle(sec.topicTitle);
     setWizardQuestionsList(qList);
-    setWizardStep(0);
+    updateWizardStep(0);
     setWizardAnswers({});
 
+    const firstQuestionText = getQuestionText(qList[0]);
     const initialMsg: ChatMessage = { 
       id: 'ast_' + Date.now(), 
       role: 'assistant', 
-      content: `📋 **${sec.topicTitle}**\n${sec.description || 'Intake questionnaire for your customized meal plan.'}\n\n**Question 1 of ${qList.length}:**\n${qList[0]}` 
+      content: `📋 **${sec.topicTitle}**\n${sec.description || 'Intake questionnaire for your customized meal plan.'}\n\n**Question 1 of ${qList.length}:**\n${firstQuestionText}` 
     };
 
     updateMessages(prev => [
       ...prev,
-      { id: 'usr_' + Date.now(), role: 'user', content: `${t('startCompleteIntake', 'Start Questionnaire')}: ${sec.topicTitle}` },
+      { id: 'usr_' + Date.now(), role: 'user', content: `Start Questionnaire: ${sec.topicTitle}` },
       initialMsg
     ]);
 
@@ -7239,22 +7210,23 @@ export default function ChefChatPage() {
   const handleStartFullWizard = () => {
     const activeSections = questionnaireSections.filter((s: any) => s.enabled !== false);
     const allQuestions = activeSections.flatMap((s: any) => s.questions || []);
-    const qList = allQuestions.length > 0 ? allQuestions : wizardQuestionsList;
+    const qList = allQuestions.length > 0 ? allQuestions : DEFAULT_SECTIONS.flatMap(s => s.questions);
 
     setActiveTopicTitle('Complete Intake Wizard');
     setWizardQuestionsList(qList);
-    setWizardStep(0);
+    updateWizardStep(0);
     setWizardAnswers({});
 
+    const firstQuestionText = getQuestionText(qList[0]);
     const initialMsg: ChatMessage = { 
       id: 'ast_' + Date.now(), 
       role: 'assistant', 
-      content: `Starting complete meal plan intake wizard (**Question 1 of ${qList.length}**):\n\n${qList[0]}` 
+      content: `Starting complete meal plan intake wizard (**Question 1 of ${qList.length}**):\n\n${firstQuestionText}` 
     };
 
     updateMessages(prev => [
       ...prev,
-      { id: 'usr_' + Date.now(), role: 'user', content: t('startCompleteIntake', 'Start Complete Meal Plan Intake') },
+      { id: 'usr_' + Date.now(), role: 'user', content: 'Start Complete Meal Plan Intake Wizard' },
       initialMsg
     ]);
 
@@ -7263,52 +7235,190 @@ export default function ChefChatPage() {
     }
   };
 
+  // ------------------------------------------------------------------
+  // High-Precision Contextual Preset Options Matcher & Dedicated Resolver
+  // ------------------------------------------------------------------
   const currentPresetOptions = useMemo(() => {
-    if (wizardStep === null || !wizardQuestionsList[wizardStep]) return [];
-    const q = wizardQuestionsList[wizardStep].toLowerCase();
+    if (wizardStep === null || !wizardQuestionsList || !wizardQuestionsList[wizardStep]) return [];
+    
+    const currentQItem = wizardQuestionsList[wizardStep];
+    
+    // 0. FIRST PRIORITY: Dedicated Answers configured in /admin/ai-settings
+    const dedicated = getQuestionDedicatedAnswers(currentQItem);
+    if (dedicated.length > 0) {
+      return dedicated;
+    }
 
-    if (q.includes('day') || q.includes('how many')) {
-      const days = [t('oneDayPreset', '1 Day (Single Day Focus)')];
-      if (maxPlanDays >= 3) days.push('3 Days');
-      if (maxPlanDays >= 5) days.push('5 Days');
-      days.push(`${maxPlanDays} Days`);
+    // SAFE RESOLUTION: Extract text regardless of string or object format
+    const rawQuestionText = getQuestionText(currentQItem);
+    if (!rawQuestionText) return [];
+    const q = rawQuestionText.toLowerCase().trim();
+
+    // 1. MEAL TYPES (Evaluated BEFORE duration so "each day" won't trigger day counts)
+    if (/\b(meal type|meal types|which meal|types of meal|breakfast|lunch|dinner|snack|meals to include)\b/i.test(q)) {
+      return [
+        'Dinner only',
+        'Lunch & Dinner',
+        'All Meals (Breakfast, Lunch, Dinner)',
+        'Breakfast & Lunch',
+        'Breakfast & Dinner',
+        'All Meals + Snack'
+      ];
+    }
+
+    // 2. START DATE / SCHEDULE (Evaluated BEFORE duration so "today" won't trigger day counts)
+    if (/\b(when|start date|starting|start|commence|begin|schedule date)\b/i.test(q) && !/\b(how many days|number of days)\b/i.test(q)) {
+      return [
+        'Start Today',
+        'Start Tomorrow',
+        'Next Monday (Fresh Week)',
+        'This Coming Weekend (Saturday)',
+        'Flexible / Any Day'
+      ];
+    }
+
+    // 3. DURATION / NUMBER OF DAYS
+    if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
+      const days = [];
+      days.push('3 Days (Quick Prep)');
+      days.push('5 Days (Workweek)');
+      if (maxPlanDays >= 7) days.push('7 Days (Full Week)');
+      else days.push(`${maxPlanDays} Days`);
+      days.push('Weekend Plan (2 Days)');
+      days.push('Single Day Focus');
       return Array.from(new Set(days));
     }
-    if (q.includes('meal type') || q.includes('types')) {
-      return ['Dinner only', 'Lunch & Dinner', 'All Meals (Breakfast, Lunch, Dinner)'];
-    }
-    if (q.includes('start') || q.includes('date') || q.includes('when')) {
-      return ['Start Today', 'Start Tomorrow', 'Next Monday'];
-    }
-    if (q.includes('theme') || q.includes('preference')) {
-      return ['High-Protein Wholesome', 'Keto / Low-Carb', 'Quick & Easy (Under 25 mins)', 'Mediterranean Fresh', 'Comfort Food'];
-    }
-    if (q.includes('budget')) {
-      return ['Under $5 per serving', '$5 - $8 per serving', '$10 - $15 per serving', 'Flexible target'];
+
+    // 4. BUDGET & FINANCIAL TARGET
+    if (/\b(budget|cost|spend|price|financial|per serving|per meal)\b/i.test(q)) {
+      return [
+        'Under $5 per serving (Economy)',
+        '$5 - $8 per serving (Balanced)',
+        '$8 - $12 per serving (Generous)',
+        '$12+ per serving (Premium)',
+        'Flexible target'
+      ];
     }
 
-    return ['Yes, strictly apply', 'Standard recommended', 'Prioritize in-stock pantry items'];
-  }, [wizardStep, wizardQuestionsList, maxPlanDays, t]);
+    // 5. THEMES, PREFERENCES, FLAVORS & CUISINES
+    if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine|cuisines|comfort food|high-protein)\b/i.test(q)) {
+      return [
+        'High-Protein Wholesome',
+        'Quick & Easy (Under 25 mins)',
+        'Mediterranean Fresh & Olive Oil',
+        'Keto / Low-Carb Wholesome',
+        'Budget-Friendly Comfort Food',
+        'Plant-Based / Balanced Veggie',
+        'Hearty Family Classics'
+      ];
+    }
 
-  // Derived effective cost and dynamic display label without hardcoded glyphs
-  const effectiveCost = isTokenEnabled ? (chefCost ?? 0) : 0;
-  const costLabel = useMemo(() => {
-    if (chefCost === null) return '';
-    if (!isTokenEnabled || effectiveCost <= 0) return t('freeBadge', 'Free');
-    return tokenSymbol ? `${effectiveCost} ${tokenSymbol}` : `${effectiveCost}`;
-  }, [chefCost, isTokenEnabled, effectiveCost, tokenSymbol, t]);
+    // 6. SERVINGS & HOUSEHOLD SIZE
+    if (/\b(serving|servings|people|person|household|family|portion|portions)\b/i.test(q)) {
+      return [
+        '1 Person (Solo Dining)',
+        '2 People (Couple / Pair)',
+        '3-4 People (Family Size)',
+        '5+ People (Large Batch)'
+      ];
+    }
 
+    // 7. DIETARY RESTRICTIONS
+    if (/\b(diet|diets|dietary|vegetarian|vegan|pescatarian|halal|kosher|keto|paleo)\b/i.test(q)) {
+      return [
+        'Vegetarian (No Meat/Fish)',
+        'Vegan (100% Plant-Based)',
+        'High-Protein Balanced',
+        'Pescatarian (Fish & Veggies)',
+        'Halal Certified Style',
+        'Standard / No Restrictions'
+      ];
+    }
+
+    // 8. ALLERGIES & PROHIBITED INGREDIENTS
+    if (/\b(allerg|allergy|allergies|avoid|avoiding|intoleran|dislike|exclude)\b/i.test(q)) {
+      return [
+        'No Allergies (Standard)',
+        'Nut-Free (No Peanuts/Tree Nuts)',
+        'Dairy-Free / Lactose-Free',
+        'Gluten-Free Only',
+        'Avoid Heavy Oil / Deep Fried',
+        'Shellfish-Free'
+      ];
+    }
+
+    // 9. PANTRY & IN-STOCK INGREDIENTS
+    if (/\b(pantry|fridge|in-stock|on hand|stock|inventory|existing ingredients)\b/i.test(q)) {
+      return [
+        'Prioritize in-stock pantry items',
+        'Mix pantry items with fresh groceries',
+        'Start fresh with new grocery items'
+      ];
+    }
+
+    // 10. COOKING TIME & PREP EQUIPMENT
+    if (/\b(cook time|prep time|cooking time|minutes|speed|quick|equipment|air fryer|one-pot|slow cook)\b/i.test(q)) {
+      return [
+        'Speedy (Under 15 mins)',
+        'Moderate (20 - 30 mins)',
+        'One-Pot / Sheet Pan Only',
+        'Air Fryer Friendly',
+        'Weekend Leisure Cooking'
+      ];
+    }
+
+    // 11. BATCH COOKING & LEFTOVERS
+    if (/\b(batch|leftover|leftovers|cook once|bulk)\b/i.test(q)) {
+      return [
+        'Include batch cooking & leftovers',
+        'Fresh cooked meal every day',
+        'Cook once, eat twice (Smart Leftovers)'
+      ];
+    }
+
+    // 12. CONTEXT-AWARE INTELLIGENT FALLBACK
+    return [
+      'Yes, strictly apply',
+      'Standard recommended',
+      'Surprise me with chef selections',
+      'Flexible / No preference'
+    ];
+  }, [wizardStep, wizardQuestionsList, maxPlanDays]);
+
+  // ------------------------------------------------------------------
+  // Chat Prompt Execution with PostgreSQL Persistence
+  // ------------------------------------------------------------------
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
     if (!textToSend || loading) return;
 
-    // Strict balance guardrail matching /admin/token-setting
-    const currentCost = isTokenEnabled ? (chefCost ?? 0) : 0;
-    if (isTokenEnabled && currentCost > 0 && tokenBalance < currentCost) {
-      showToast((t('insufficientTokens', 'Insufficient {tokenName}. Required: {cost} {symbol}'))
-        .replace('{tokenName}', tokenName || t('tokensWord', 'Tokens'))
-        .replace('{cost}', String(currentCost))
-        .replace('{symbol}', tokenSymbol || ''));
+    const lower = textToSend.toLowerCase();
+
+    // Trigger full intake wizard if requested directly via prompt
+    if (wizardStep === null && (
+      lower.includes('complete meal plan intake') || 
+      lower.includes('meal plan intake wizard') ||
+      lower === 'start complete meal plan intake wizard' ||
+      /^(?:start|create|make|build)\s+(?:a\s+)?meal\s+plan(?:\s+intake)?(?:\s+wizard)?$/i.test(lower)
+    )) {
+      handleStartFullWizard();
+      setPrompt('');
+      return;
+    }
+
+    if (strictDietEnforcement && filterWordsList.length > 0) {
+      const matchedFilter = filterWordsList.find(word => {
+        const clean = word.trim().toLowerCase();
+        return clean.length > 1 && lower.includes(clean);
+      });
+      if (matchedFilter) {
+        showToast(`⚠️ Dietary restriction: "${matchedFilter}" is prohibited by AI Settings.`);
+        return;
+      }
+    }
+
+    if (tokenBalance < chefCost) {
+      showToast(`Insufficient ${tokenName}. Required: ${chefCost} ${tokenSymbol}, Balance: ${tokenBalance} ${tokenSymbol}`);
       setIsTokenPurchaseOpen(true);
       return;
     }
@@ -7327,10 +7437,11 @@ export default function ChefChatPage() {
       if (nextIdx < wizardQuestionsList.length) {
         updateWizardStep(nextIdx);
         setTimeout(() => {
+          const nextQuestionText = getQuestionText(wizardQuestionsList[nextIdx]);
           const nextQuestionMsg: ChatMessage = {
             id: 'ast_' + Date.now(),
             role: 'assistant',
-            content: `**Question ${nextIdx + 1} of ${wizardQuestionsList.length}:**\n${wizardQuestionsList[nextIdx]}`
+            content: `**Question ${nextIdx + 1} of ${wizardQuestionsList.length}:**\n${nextQuestionText}`
           };
           updateMessages(prev => [...prev, nextQuestionMsg]);
           setLoading(false);
@@ -7343,58 +7454,38 @@ export default function ChefChatPage() {
         updateWizardStep(null);
         try {
           const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-          const userKey = getUserKey(activeAuth);
           const res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              prompt: `Synthesize a comprehensive ${activeTopicTitle} meal plan and signature recommended recipe based on the completed questionnaire.`,
               isQuestionnaireComplete: true,
               topicTitle: activeTopicTitle,
               questionnaireAnswers: updatedAnswers,
-              userId: activeAuth?.id || userKey,
-              userEmail: activeAuth?.email || undefined,
-              source: 'chef',
-              feature: 'AI Chef Recipe Generation',
-              action: 'ai_chef_recipe_generation',
-              tokenCost: currentCost,
-              model: activeAiModel,
-              provider: activeAiProvider,
+              userId: activeAuth?.id,
+              userEmail: activeAuth?.email,
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
-              pantry: enablePantryContext ? pantryIngredientsList : [],
-              recommendedRecipeUrls
+              pantry: enablePantryContext ? pantryIngredientsList : []
             })
           });
 
-          const data = await safeJsonParse(res);
-          if (data) {
-            const serverNewBalance = data.remainingBalance ?? data.newBalance ?? data.balance ?? data.currentBalance;
-            if (typeof serverNewBalance === 'number') {
-              setTokenBalance(serverNewBalance);
-            } else if (currentCost > 0) {
-              const consumed = typeof data.consumedSystemTokens === 'number'
-                ? data.consumedSystemTokens
-                : typeof data.deducted === 'number'
-                ? data.deducted
-                : currentCost;
-              setTokenBalance(prev => Math.max(0, prev - consumed));
-            }
+          const data = await res.json();
+          if (!res.ok || !data.success) throw new Error(data.error || 'Failed to synthesize questionnaire results.');
 
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new Event('zecratary_tokens_updated'));
-            }
+          if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
+          else setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
 
-            const fallbackReply = (t('wizardCompleteReply', 'I have formulated your meal plan and signature recommended recipe based on your {topic} questionnaire!')).replace('{topic}', activeTopicTitle);
-            const planMsg: ChatMessage = {
-              id: 'ast_plan_' + Date.now(),
-              role: 'assistant',
-              content: data.reply || fallbackReply,
-              plan: data.plan,
-              recommendedRecipe: data.recommendedRecipe || data.recipe
-            };
+          const planMsg: ChatMessage = {
+            id: 'ast_plan_' + Date.now(),
+            role: 'assistant',
+            content: data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`,
+            plan: data.plan,
+            recommendedRecipe: data.recommendedRecipe || data.recipe,
+            systemRecommendations: data.systemRecommendations || []
+          };
 
-            updateMessages(prev => [...prev, planMsg]);
-            if (enableVoiceInteraction && voiceAutoPlay) speakText(planMsg.content || '', planMsg.id);
+          updateMessages(prev => [...prev, planMsg]);
+          if (enableVoiceInteraction && voiceAutoPlay) {
+            speakText(planMsg.content || '', planMsg.id);
           }
         } catch (err: any) {
           updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message}` }]);
@@ -7408,163 +7499,43 @@ export default function ChefChatPage() {
 
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-      const userKey = getUserKey(activeAuth);
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
-          userId: activeAuth?.id || userKey,
-          userEmail: activeAuth?.email || undefined,
+          userId: activeAuth?.id,
+          userEmail: activeAuth?.email,
           source: 'chef',
-          feature: 'AI Chef Recipe Generation',
-          action: 'ai_chef_recipe_generation',
-          tokenCost: currentCost,
-          model: activeAiModel,
-          provider: activeAiProvider,
           preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
-          pantry: enablePantryContext ? pantryIngredientsList : [],
-          recommendedRecipeUrls
+          pantry: enablePantryContext ? pantryIngredientsList : []
         })
       });
 
-      const data = await safeJsonParse(res);
-      if (data) {
-        const serverNewBalance = data.remainingBalance ?? data.newBalance ?? data.balance ?? data.currentBalance;
-        if (typeof serverNewBalance === 'number') {
-          setTokenBalance(serverNewBalance);
-        } else if (currentCost > 0) {
-          const consumed = typeof data.consumedSystemTokens === 'number'
-            ? data.consumedSystemTokens
-            : typeof data.deducted === 'number'
-            ? data.deducted
-            : currentCost;
-          setTokenBalance(prev => Math.max(0, prev - consumed));
-        }
-
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_tokens_updated'));
-        }
-
-        const astMsg: ChatMessage = {
-          id: 'ast_' + Date.now(),
-          role: 'assistant',
-          content: data.reply || data.response || t('defaultCulinaryReply', 'Here are personalized culinary recommendations based on your preferences.'),
-          plan: data.plan,
-          recommendedRecipe: data.recommendedRecipe || data.recipe
-        };
-
-        updateMessages(prev => [...prev, astMsg]);
-        if (currentCost > 0) {
-          const symPart = tokenSymbol ? ` ${tokenSymbol}` : '';
-          showToast(`-${currentCost}${symPart} consumed`);
-        }
-        if (enableVoiceInteraction && voiceAutoPlay) speakText(astMsg.content || '', astMsg.id);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        if (data.insufficientTokens) setIsTokenPurchaseOpen(true);
+        throw new Error(data.error || 'Chef Foodie could not process your query.');
       }
-    } catch (err: any) {
-      updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || t('errorCommunicatingAi', 'Error communicating with AI culinary engine.')}` }]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleSaveRecipeToBook = async (recipe: any) => {
-    try {
-      const recId = 'saved_ai_' + Date.now();
-      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-      const userKey = getUserKey(activeAuth);
-      const newRec = {
-        id: recId,
-        userId: userKey,
-        title: recipe.title,
-        name: recipe.title,
-        description: recipe.description,
-        prepTimeMinutes: recipe.prepMinutes || 15,
-        cookTimeMinutes: recipe.cookMinutes || 20,
-        servings: recipe.servings || servings,
-        recipeType: recipe.mealType || 'Main Dish',
-        isFavorite: true,
-        ingredients: recipe.ingredients || [],
-        instructions: recipe.instructions || []
+      if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
+      else setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
+
+      const astMsg: ChatMessage = {
+        id: 'ast_' + Date.now(),
+        role: 'assistant',
+        content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
+        recommendedRecipe: data.recommendedRecipe || data.recipe
       };
 
-      try {
-        await fetch('/api/saved-recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newRec)
-        });
-      } catch (_) {}
-
-      const raw = localStorage.getItem('zecratary_saved_recipes') || '[]';
-      const existing = JSON.parse(raw);
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify([newRec, ...existing]));
-
-      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      showToast(t('savedToRecipesToast', 'Saved to your recipe library!'));
-    } catch (_) {
-      showToast(t('couldNotSaveRecipe', 'Could not save recipe.'));
-    }
-  };
-
-  const handleScheduleMealPlan = async (plan: MealPlanData) => {
-    try {
-      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-      const userKey = getUserKey(activeAuth);
-      const mealsToSchedule = (plan.meals || []).map((m, idx) => ({
-        id: 'plan_meal_' + Date.now() + '_' + idx,
-        userId: userKey,
-        title: m.title,
-        mealType: m.mealType || 'Dinner',
-        dayLabel: m.dayLabel || `Day ${idx + 1}`,
-        prepMinutes: m.prepMinutes || 15,
-        cookMinutes: m.cookMinutes || 20,
-        servings: m.servings || servings,
-        date: m.dateStr || new Date(Date.now() + idx * 86400000).toISOString().split('T')[0]
-      }));
-
-      try {
-        await fetch('/api/planner', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'import_plan', meals: mealsToSchedule })
-        });
-      } catch (_) {}
-
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
-      showToast(t('mealPlanAddedToast', 'Meal plan added to weekly planner!'));
-    } catch (_) {
-      showToast(t('couldNotSchedulePlan', 'Could not schedule meal plan.'));
-    }
-  };
-
-  const handleAddIngredientsToGrocery = async (recipe: RecommendedRecipeData) => {
-    try {
-      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-      const userKey = getUserKey(activeAuth);
-      const items = (recipe.ingredients || []).map((ing, idx) => ({
-        id: `groc_${Date.now()}_${idx}`,
-        userId: userKey,
-        name: ing,
-        category: 'Pantry & Produce',
-        checked: false,
-        recipeTitle: recipe.title
-      }));
-
-      try {
-        await fetch('/api/grocery', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'add_bulk', items, userId: userKey })
-        });
-      } catch (_) {}
-
-      window.dispatchEvent(new Event('zecratary_grocery_updated'));
-      window.dispatchEvent(new Event('zecratary_shopping_updated'));
-      showToast(t('ingredientsAddedToGroceryToast', 'Ingredients added to your grocery shopping list!'));
-    } catch (_) {
-      showToast(t('couldNotSaveRecipe', 'Could not save recipe.'));
+      updateMessages(prev => [...prev, astMsg]);
+      if (enableVoiceInteraction && voiceAutoPlay) {
+        speakText(astMsg.content || '', astMsg.id);
+      }
+    } catch (err: any) {
+      updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || 'Error communicating with AI engine.'}` }]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -7574,24 +7545,9 @@ export default function ChefChatPage() {
 
   return (
     <div 
-      role="region"
-      aria-label={t('chefWorkspaceAria', 'AI Chef Workspace')}
-      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
+      className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      <style dangerouslySetInnerHTML={{ __html: `
-        .chef-input:-webkit-autofill,
-        .chef-input:-webkit-autofill:hover,
-        .chef-input:-webkit-autofill:focus,
-        .chef-input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
-          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
-          -webkit-text-fill-color: var(--color-text) !important;
-          caret-color: var(--color-text) !important;
-          transition: background-color 50000s ease-in-out 0s !important;
-        }
-      `}} />
-
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -7606,17 +7562,15 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER - 100% FLUID BAR WITHOUT REDUNDANT TOKEN TOPUP BOX */}
+      {/* TOP HEADER WITH HISTORY & CHAT CONTROLS */}
       <div 
-        role="region"
-        aria-label={t('chefHeaderAria', 'Chef Navigation and Active AI Model Status')}
-        className="w-full space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
+        className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
       >
-        <div className="flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3">
             <div 
-              className="w-10 h-10 rounded-2xl flex items-center justify-center border shadow-xs shrink-0"
+              className="w-10 h-10 rounded-2xl flex items-center justify-center border shadow-xs"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-primary)',
@@ -7625,20 +7579,20 @@ export default function ChefChatPage() {
             >
               <ChefHat className="h-6 w-6" />
             </div>
-            <div className="truncate">
-              <h1 className="text-xl font-black tracking-tight truncate" style={{ color: 'var(--color-text)' }}>
-                {t('foodieChatHeading', 'AI Chef Assistant')}
+            <div>
+              <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                {t('foodieChatHeading', 'Foodie Chat')}
               </h1>
-              <p className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('foodieChatSubtitle', 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards')}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-2">
             {isSpeaking && (
               <div 
-                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold animate-pulse shadow-xs"
+                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold animate-pulse shadow-sm"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-primary)',
@@ -7646,87 +7600,41 @@ export default function ChefChatPage() {
                 }}
               >
                 <Volume2 className="h-3.5 w-3.5" />
-                <span>{t('speaking', 'Speaking...')}</span>
+                <span>Speaking...</span>
                 <button 
                   type="button" 
                   onClick={stopSpeaking}
                   className="hover:underline text-[10px] ml-1 font-extrabold cursor-pointer"
                 >
-                  [{t('stop', 'Stop')}]
+                  [Stop]
                 </button>
               </div>
             )}
 
-            {pantryIngredientsList.length > 0 && (
-              <div 
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                }}
-                title={t('activePantryContextTooltip', 'Active In-Stock Pantry Context')}
-              >
-                <Package className="h-3.5 w-3.5" />
-                <span>{(t('pantryInStockBadge', 'Pantry: {count} in-stock')).replace('{count}', String(pantryIngredientsList.length))}</span>
-              </div>
-            )}
-
-            {recommendedRecipeUrls.length > 0 && (
-              <div 
-                className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-secondary)'
-                }}
-                title={t('curatedSourcesTooltip', 'Curated Recipe Sources')}
-              >
-                <Globe className="h-3.5 w-3.5 text-sky-400" />
-                <span>{(t('primarySourcesBadge', 'Sources: {count} active')).replace('{count}', String(recommendedRecipeUrls.length))}</span>
-              </div>
-            )}
-
-            {/* FREE TOKEN MODE BADGE */}
-            {!isTokenEnabled && (
-              <div 
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-black uppercase tracking-wider shadow-xs animate-in fade-in"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                }}
-                title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in admin settings')}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>{t('tokenFreeModeBadge', 'Free Token Mode')}</span>
-              </div>
-            )}
-
-            {/* DYNAMIC AI MODEL BADGE */}
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs transition-all duration-200"
-              style={{ 
-                backgroundColor: 'var(--color-inner-dark)', 
-                borderColor: 'var(--color-border)', 
-                color: 'var(--color-text)' 
+            {/* CHAT HISTORY DRAWER BUTTON */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowHistoryDrawer(true);
+                fetchChatHistory(1, selectedCategoryFilter);
               }}
-              title={(t('activeAiModelTooltip', 'Active AI Model: {model} ({provider})')).replace('{model}', activeAiModel).replace('{provider}', activeAiProvider.toUpperCase())}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80 flex items-center gap-1.5 text-xs font-bold"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
+              }}
+              title="View Chat History & Categories"
             >
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <Cpu className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
-              <span className="font-mono text-[11px] font-extrabold tracking-tight truncate max-w-[140px] sm:max-w-none">
-                {activeAiModel}
-              </span>
-            </div>
+              <History className="h-4 w-4" />
+              <span className="hidden md:inline">History</span>
+            </button>
 
+            {/* PREFERENCES SLIDERS BUTTON */}
             <button
               type="button"
               onClick={() => setShowPreferences(true)}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -7737,30 +7645,27 @@ export default function ChefChatPage() {
               <SlidersHorizontal className="h-4 w-4" />
             </button>
 
+            {/* NEW CHAT BUTTON */}
             <button
               type="button"
-              onClick={resetChat}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
+              onClick={startNewChat}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-secondary)'
               }}
-              title={t('newChat', 'New Chat')}
+              title="Start New Chat"
             >
               <Edit3 className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* DIETARY PREFERENCES PILLS */}
-        <div 
-          role="region"
-          aria-label={t('dietaryPillsAria', 'Active Dietary and Allergy Preferences')}
-          className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in"
-        >
+        {/* USER DIETARY PREFERENCES PILLS */}
+        <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
           <span 
-            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
@@ -7771,12 +7676,12 @@ export default function ChefChatPage() {
           </span>
 
           <span 
-            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
               color: 'var(--color-emerald)'
-            }}
+}}
           >
             {t('countryLabelPref', 'Country:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{country}</strong>
           </span>
@@ -7784,7 +7689,7 @@ export default function ChefChatPage() {
           {selectedDiets.map((d) => (
             <span 
               key={`diet-${d}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-emerald)',
@@ -7798,7 +7703,7 @@ export default function ChefChatPage() {
           {selectedAllergies.map((a) => (
             <span 
               key={`allergy-${a}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -7812,7 +7717,7 @@ export default function ChefChatPage() {
           {ingredientsToAvoid.map((av) => (
             <span 
               key={`avoid-${av}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -7826,7 +7731,7 @@ export default function ChefChatPage() {
           {tastesList.map((itemTaste) => (
             <span 
               key={`taste-${itemTaste}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -7840,13 +7745,9 @@ export default function ChefChatPage() {
       </div>
 
       {/* MAIN CONVERSATION STREAM */}
-      <div 
-        role="region"
-        aria-label={t('chatConversationAria', 'Recipe Conversation Stream')}
-        className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar w-full"
-      >
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar">
         {messages.length === 0 ? (
-          <div className="text-center my-auto py-10 space-y-6 max-w-4xl mx-auto">
+          <div className="text-center my-auto py-10 space-y-6">
             <div 
               className="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto border shadow-lg"
               style={{
@@ -7862,15 +7763,11 @@ export default function ChefChatPage() {
                 {t('heyImChef', "Hey, I'm Chef Foodie!")}
               </h2>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('chefHeroSub', 'Select a questionnaire topic below, try a quick starter prompt, or speak into the microphone')}
+                Select a questionnaire topic below or speak into the microphone to plan meals
               </p>
             </div>
 
-            <div 
-              role="region"
-              aria-label={t('questionnaireChipsAria', 'Questionnaire Topics and Quick Prompts')}
-              className="flex flex-wrap justify-center gap-2.5 max-w-3xl mx-auto"
-            >
+            <div className="flex flex-wrap justify-center gap-2.5 max-w-xl mx-auto">
               <button
                 type="button"
                 onClick={handleStartFullWizard}
@@ -7880,67 +7777,15 @@ export default function ChefChatPage() {
                   borderColor: 'var(--color-primary)'
                 }}
               >
-                <Sparkles className="h-4 w-4" /> {t('startCompleteIntake', 'Start Complete Meal Plan Intake')}
+                <Sparkles className="h-4 w-4" /> Start Complete Meal Plan Intake Wizard
               </button>
-
-              <button
-                type="button"
-                onClick={() => handleSend(t('systemCapabilitiesChip', '✨ What can I do with Chef Foodie?'))}
-                className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              >
-                <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                <span>{t('systemCapabilitiesChip', '✨ What can I do with Chef Foodie?')}</span>
-              </button>
-
-              {pantryIngredientsList.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => handleSend(t('pantryRecommendationChip', '🍳 Recommend dinner using my in-stock pantry items'))}
-                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                >
-                  <Package className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>{t('pantryRecommendationChip', '🍳 Recommend dinner using my in-stock pantry items')}</span>
-                </button>
-              )}
-
-              {recommendedRecipeUrls.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => handleSend(t('primarySourcesPrompt', 'Recommend a signature chef recipe inspired by the primary source URLs configured in admin settings.'))}
-                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                >
-                  <Globe className="h-3.5 w-3.5 text-sky-400" />
-                  <span>{(t('primarySourcesChip', '🌐 Primary Sources ({count})')).replace('{count}', String(recommendedRecipeUrls.length))}</span>
-                </button>
-              )}
 
               {activeQuestionnaireSections.map((sec) => (
                 <button
                   key={sec.id}
                   type="button"
                   onClick={() => handleStartTopicWizard(sec)}
-                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-1.5"
+                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
@@ -7951,7 +7796,7 @@ export default function ChefChatPage() {
                 >
                   <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                   <span>{sec.topicTitle}</span>
-                  <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} {t('questionsWord', 'questions')})</span>
+                  <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} questions)</span>
                 </button>
               ))}
             </div>
@@ -7962,10 +7807,10 @@ export default function ChefChatPage() {
             const hasAudioActive = isSpeaking && speakingMsgId === m.id;
 
             return (
-              <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'} w-full`}>
+              <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
                 {!isUser && (
                   <div 
-                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-xs"
+                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -7976,10 +7821,10 @@ export default function ChefChatPage() {
                   </div>
                 )}
 
-                <div className={`space-y-3.5 ${isUser ? 'max-w-xl sm:max-w-2xl' : 'w-full max-w-full'}`}>
+                <div className={`max-w-xl sm:max-w-2xl space-y-3.5 ${isUser ? '' : 'w-full'}`}>
                   {m.content && (
                     <div 
-                      className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs w-full max-w-4xl'}`}
+                      className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs'}`}
                       style={isUser ? {
                         backgroundColor: 'var(--color-primary)'
                       } : {
@@ -7996,7 +7841,7 @@ export default function ChefChatPage() {
                             onClick={() => speakText(m.content || '', m.id)}
                             className="p-1 rounded-lg transition shrink-0 cursor-pointer hover:opacity-80"
                             style={{ color: hasAudioActive ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
-                            title={hasAudioActive ? t('stop', 'Stop') : t('listenRecipe', 'Listen')}
+                            title={hasAudioActive ? "Stop speech" : "Read aloud"}
                           >
                             {hasAudioActive ? <Square className="h-4 w-4 fill-current" /> : <Volume2 className="h-4 w-4" />}
                           </button>
@@ -8005,299 +7850,112 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* MULTI-DAY MEAL PLAN PRESENTATION */}
-                  {m.plan && Array.isArray(m.plan.meals) && m.plan.meals.length > 0 && (
+                  {/* RECOMMENDATION RECIPE CARD PREVIEW */}
+                  {m.recommendedRecipe && (
                     <div 
-                      role="region"
-                      aria-label={t('mealPlanAria', 'Generated Multi-Day Meal Plan')}
-                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200 w-full"
+                      className="border rounded-2xl p-3.5 space-y-3 shadow-sm transition-all duration-200 hover:shadow-md"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)'
                       }}
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                            <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
-                              {(m.plan.totalDays === 1 || m.plan.meals.length === 1)
-                                ? t('singleDayPlan', '1-Day Meal Plan')
-                                : (t('daysPlan', '{days}-Day Meal Plan')).replace('{days}', String(m.plan.totalDays || m.plan.meals.length))}
-                            </h3>
-                          </div>
-                          <div className="flex items-center gap-3 text-xs opacity-75 mt-0.5">
-                            {m.plan.theme && <span>{t('themeLabel', 'Theme:')} <strong>{m.plan.theme}</strong></span>}
-                            {m.plan.budgetPerServing && <span>{t('budgetLabel', 'Budget:')} <strong>{m.plan.budgetPerServing}</strong></span>}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center border rounded-xl p-0.5 shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                            <button
-                              type="button"
-                              onClick={() => setResultDisplayMode('card')}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'card' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
+                      <div className="flex items-start justify-between gap-3">
+                        <div 
+                          onClick={() => {
+                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setShowRecipeDetailsModal(true);
+                          }}
+                          className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer group"
+                        >
+                          <div className="relative shrink-0">
+                            <img
+                              src={m.recommendedRecipe.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
+                              alt={m.recommendedRecipe.title}
+                              className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border transition group-hover:scale-105"
+                              style={{ borderColor: 'var(--color-border)' }}
+                            />
+                            <span 
+                              className="absolute -top-1.5 -left-1.5 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md text-white shadow-xs"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
                             >
-                              {t('viewModeCard', 'Card')}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setResultDisplayMode('compact')}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'compact' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
-                            >
-                              {t('viewModeCompact', 'Compact')}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setResultDisplayMode('detailed')}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'detailed' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
-                            >
-                              {t('viewModeDetailed', 'Detailed')}
-                            </button>
+                              Recommended
+                            </span>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => handleScheduleMealPlan(m.plan!)}
-                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 text-white"
-                            style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                          >
-                            <CalendarPlus className="h-3.5 w-3.5" />
-                            <span>{t('addToMealPlanner', 'Add to Meal Planner')}</span>
-                          </button>
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
+                              {m.recommendedRecipe.title}
+                            </h4>
+                            <p className="text-[11px] leading-relaxed line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
+                              {m.recommendedRecipe.description}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-bold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {m.recommendedRecipe.prepMinutes + m.recommendedRecipe.cookMinutes}m
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Users className="h-3 w-3" /> {m.recommendedRecipe.servings || servings} serv
+                              </span>
+                              {m.recommendedRecipe.calories && (
+                                <span className="font-mono text-emerald-500">{m.recommendedRecipe.calories} kcal</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
-
-                      {resultDisplayMode === 'compact' ? (
-                        <div className="overflow-x-auto w-full">
-                          <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                              <tr className="border-b text-[10px] uppercase font-bold opacity-70" style={{ borderColor: 'var(--color-border)' }}>
-                                <th className="py-2.5 px-3">{t('tableColDay', 'Day & Date')}</th>
-                                <th className="py-2.5 px-3">{t('tableColMeal', 'Meal Slot')}</th>
-                                <th className="py-2.5 px-3">{t('tableColDish', 'Recipe / Dish')}</th>
-                                <th className="py-2.5 px-3">{t('tableColTime', 'Time')}</th>
-                                <th className="py-2.5 px-3 text-right">{t('tableColServings', 'Servings')}</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-                              {m.plan.meals.map((meal, mIdx) => (
-                                <tr key={meal.id || mIdx} className="hover:bg-slate-800/20 transition">
-                                  <td className="py-2.5 px-3 font-bold" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel}</td>
-                                  <td className="py-2.5 px-3 uppercase text-[10px] font-extrabold opacity-75">{meal.mealType}</td>
-                                  <td className="py-2.5 px-3 font-semibold">{meal.title}</td>
-                                  <td className="py-2.5 px-3 text-[11px] opacity-75 font-mono">{(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m</td>
-                                  <td className="py-2.5 px-3 text-right font-bold">{meal.servings || servings}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5 w-full">
-                          {m.plan.meals.map((meal, mIdx) => (
-                            <div 
-                              key={meal.id || mIdx}
-                              className="p-4 rounded-2xl border space-y-2 relative flex flex-col justify-between shadow-xs transition"
-                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                            >
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
-                                    {meal.dayLabel}
-                                  </span>
-                                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border opacity-75" style={{ borderColor: 'var(--color-border)' }}>
-                                    {meal.mealType}
-                                  </span>
-                                </div>
-                                <h4 className="font-bold text-xs leading-snug line-clamp-2" style={{ color: 'var(--color-text)' }}>
-                                  {meal.title}
-                                </h4>
-                                {meal.description && (
-                                  <p className="text-[11px] leading-relaxed opacity-75 line-clamp-2">
-                                    {meal.description}
-                                  </p>
-                                )}
-
-                                {resultDisplayMode === 'detailed' && Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
-                                  <div className="pt-1.5 space-y-1">
-                                    <span className="text-[9px] font-bold uppercase tracking-wider opacity-60 block">{t('keyIngredients', 'Key Ingredients:')}</span>
-                                    <div className="flex flex-wrap gap-1">
-                                      {meal.ingredients.slice(0, 4).map((ing, iIdx) => (
-                                        <span key={iIdx} className="text-[9px] px-1.5 py-0.5 rounded border opacity-75" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-                                          • {ing}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="pt-2 border-t flex items-center justify-between text-[10px] font-semibold opacity-75" style={{ borderColor: 'var(--color-border)' }}>
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
-                                  {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
-                                </span>
-                                {meal.isBatchCook && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                                    {t('batchCookingBadge', 'Batch Cook')}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   )}
 
-                  {/* FINAL RECOMMENDED RECIPE SHOWCASE */}
-                  {m.recommendedRecipe && (
+                  {/* MULTI-DAY PLAN PRESENTATION */}
+                  {m.plan && (
                     <div 
-                      role="region"
-                      aria-label={t('recommendedRecipeAria', 'Final Recommended Recipe Card')}
-                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200 w-full"
+                      className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
                       style={{
                         backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-primary)'
+                        borderColor: 'var(--color-border)'
                       }}
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                         <div className="flex items-center gap-2">
-                          <Award className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-                          <div>
-                            <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-                              {t('finalRecommendedRecipe', 'Final Recommended Recipe')}
-                            </span>
-                            <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
-                              {m.recommendedRecipe.title}
-                            </h3>
+                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                          <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
+                            {m.plan.title} ({m.plan.totalDays} Days)
+                          </h3>
+                        </div>
+                        <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                          Budget: {m.plan.budgetPerServing || '$4.00'}/serv
+                        </span>
+                      </div>
+
+                      <div className="space-y-3">
+                        {m.plan.meals.map((meal) => (
+                          <div 
+                            key={meal.id}
+                            className="border rounded-2xl p-3.5 space-y-2"
+                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                          >
+                            <div className="flex justify-between items-center text-xs font-bold">
+                              <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
+                              <span className="uppercase text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{meal.mealType}</span>
+                            </div>
+                            <div className="flex items-start gap-3">
+                              <img src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} alt={meal.title} className="w-14 h-14 rounded-xl object-cover border shrink-0" style={{ borderColor: 'var(--color-border)' }} />
+                              <div className="space-y-0.5 flex-1 min-w-0">
+                                <h4 className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                <p className="text-[11px] line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <button
-                            type="button"
-                            onClick={() => handleAddIngredientsToGrocery(m.recommendedRecipe!)}
-                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                          >
-                            <ShoppingCart className="h-3.5 w-3.5 text-sky-400" />
-                            <span>{t('addIngredientsToGrocery', '+ Add to Grocery List')}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleSaveRecipeToBook(m.recommendedRecipe)}
-                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-emerald)',
-                              color: 'var(--color-emerald)'
-                            }}
-                          >
-                            <Bookmark className="h-3.5 w-3.5" />
-                            <span>{t('saveRecipe', 'Save Recipe')}</span>
-                          </button>
-                        </div>
+                        ))}
                       </div>
-
-                      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                        {m.recommendedRecipe.description}
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-4 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3.5 w-3.5 text-emerald-400" /> {t('prep', 'Prep:')} {m.recommendedRecipe.prepMinutes || 15}m
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('cook', 'Cook:')} {m.recommendedRecipe.cookMinutes || 20}m
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Users className="h-3.5 w-3.5" /> {t('serves', 'Serves:')} {m.recommendedRecipe.servings || servings}
-                        </span>
-
-                        {m.recommendedRecipe.sourceUrl && (
-                          <a
-                            href={m.recommendedRecipe.sourceUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-sky-400 hover:underline ml-auto"
-                          >
-                            <Globe className="h-3.5 w-3.5" />
-                            <span>{t('viewSourceRecipe', 'View Source Recipe ↗')}</span>
-                          </a>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                        <div className="space-y-2">
-                          <h4 className="font-bold text-xs uppercase tracking-wider flex items-center justify-between" style={{ color: 'var(--color-primary)' }}>
-                            <span>{(t('ingredientsCount', 'Ingredients ({count})')).replace('{count}', String(m.recommendedRecipe.ingredients?.length || 0))}</span>
-                          </h4>
-                          <ul className="space-y-1 text-xs">
-                            {(m.recommendedRecipe.ingredients || []).map((ing: string, i: number) => {
-                              const inPantry = pantryIngredientsList.some(p => ing.toLowerCase().includes(p.toLowerCase()));
-                              return (
-                                <li key={i} className="flex items-center justify-between p-1.5 rounded-lg border text-[11px]" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                                  <span style={{ color: 'var(--color-text)' }}>• {ing}</span>
-                                  {inPantry && (
-                                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                      {t('pantryBadge', 'Pantry ✓')}
-                                    </span>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-
-                        <div className="space-y-2">
-                          <h4 className="font-bold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                            {t('stepDirections', 'Step-by-Step Directions')}
-                          </h4>
-                          <ol className="space-y-1.5 text-xs">
-                            {(m.recommendedRecipe.instructions || []).map((step: string, sIdx: number) => (
-                              <li key={sIdx} className="flex items-start gap-2 text-[11px] leading-snug">
-                                <span className="font-extrabold text-[10px] w-4 h-4 rounded-full flex items-center justify-center shrink-0 border mt-0.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}>
-                                  {sIdx + 1}
-                                </span>
-                                <span style={{ color: 'var(--color-text-secondary)' }}>{step}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      </div>
-
-                      {m.recommendedRecipe.chefTip && (
-                        <div 
-                          className="p-3 rounded-2xl border flex items-start gap-2.5 text-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <Sparkles className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
-                          <div className="space-y-0.5">
-                            <strong className="block text-[11px]" style={{ color: 'var(--color-primary)' }}>{t('chefProTip', 'Chef Foodie Pro Tip:')}</strong>
-                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                              {m.recommendedRecipe.chefTip}
-                            </p>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
+
                 </div>
 
                 {isUser && (
                   <div 
-                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-xs"
+                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8314,7 +7972,7 @@ export default function ChefChatPage() {
 
         {loading && (
           <div 
-            className="flex items-center gap-3 p-3.5 border rounded-2xl max-w-xs text-xs shadow-xs"
+            className="flex items-center gap-3 p-3.5 border rounded-2xl max-w-xs text-xs shadow-sm"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
@@ -8328,12 +7986,10 @@ export default function ChefChatPage() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* PRESET ANSWERS */}
+      {/* DYNAMIC CONTEXTUAL PRESET ANSWERS (Supports Admin Configured Dedicated Answers & Fallbacks) */}
       {wizardStep !== null && currentPresetOptions.length > 0 && (
         <div 
-          role="region"
-          aria-label={t('presetAnswersAria', 'Preset Step Answers')}
-          className="p-3 rounded-2xl border space-y-2 animate-in fade-in transition-colors duration-200 w-full"
+          className="p-3.5 rounded-2xl border space-y-2.5 animate-in fade-in transition-colors duration-200"
           style={{
             backgroundColor: 'var(--color-card)',
             borderColor: 'var(--color-border)'
@@ -8341,15 +7997,15 @@ export default function ChefChatPage() {
         >
           <div className="flex items-center justify-between text-[11px] font-bold">
             <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-              <Sparkles className="h-3.5 w-3.5" /> {(t('presetAnswersTitle', 'Preset Answers (Step {step} of {total}):')).replace('{step}', String(wizardStep + 1)).replace('{total}', String(wizardQuestionsList.length))}
+              <Sparkles className="h-3.5 w-3.5" /> Preset Answers (Step {wizardStep + 1} of {wizardQuestionsList.length}):
             </span>
             <button
               type="button"
-              onClick={() => { updateWizardStep(null); showToast(t('exitedWizardToast', 'Exited wizard questionnaire')); }}
+              onClick={() => { updateWizardStep(null); showToast("Exited wizard"); }}
               className="text-[10px] hover:underline cursor-pointer"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              {t('cancelWizard', 'Cancel Wizard')}
+              Cancel Wizard
             </button>
           </div>
 
@@ -8359,7 +8015,7 @@ export default function ChefChatPage() {
                 key={oIdx}
                 type="button"
                 onClick={() => handleSend(opt)}
-                className="text-xs font-semibold px-3 py-1.5 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02]"
+                className="text-xs font-semibold px-3.5 py-2 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02] active:scale-95"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -8377,20 +8033,28 @@ export default function ChefChatPage() {
 
       {/* TOPIC LAUNCHER CHIPS */}
       {wizardStep === null && activeQuestionnaireSections.length > 0 && (
-        <div 
-          role="region"
-          aria-label={t('questionnaireChipsAria', 'Questionnaire Topics and Quick Prompts')}
-          className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0 w-full"
-        >
+        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
           <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> {t('questionnaires', 'Questionnaires:')}
+            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> Questionnaires:
           </span>
+          <button
+            type="button"
+            onClick={handleStartFullWizard}
+            className="text-xs font-bold px-3.5 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02] text-white"
+            style={{
+              backgroundColor: 'var(--color-primary)',
+              borderColor: 'var(--color-primary)'
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Complete Intake Wizard</span>
+          </button>
           {activeQuestionnaireSections.map((sec) => (
             <button
               key={`chip-${sec.id}`}
               type="button"
               onClick={() => handleStartTopicWizard(sec)}
-              className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:scale-[1.02]"
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -8406,11 +8070,9 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR (DYNAMIC BADGE SYNCED WITH /admin/token-setting) */}
+      {/* PROMPT INPUT BAR */}
       <div 
-        role="region"
-        aria-label={t('promptInputAria', 'Culinary Prompt Input Bar')}
-        className="w-full border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
+        className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
@@ -8426,57 +8088,34 @@ export default function ChefChatPage() {
               borderColor: isListening ? 'var(--color-primary)' : 'var(--color-border)',
               color: isListening ? '#ffffff' : 'var(--color-text-secondary)'
             }}
-            title={isListening ? t('listeningToVoice', 'Listening...') : t('listenRecipe', 'Speak')}
+            title={isListening ? "Listening... click to stop" : "Speak via microphone"}
           >
             {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
           </button>
         )}
 
         <input
-          id="chef_prompt_query_field"
-          name="chef_prompt_query_field"
           type="text"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          data-lpignore="true"
-          data-1p-ignore="true"
-          data-bwignore="true"
-          data-form-type="other"
-          aria-label={t('promptInputAria', 'Culinary Prompt Input Bar')}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={
-            isListening 
-              ? t('listeningToVoice', 'Listening to your voice...') 
-              : costLabel 
-                ? `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${costLabel})`
-                : t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')
-          }
-          className="chef-input bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
+          placeholder={isListening ? "Listening to your voice..." : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${chefCost} ${tokenSymbol})`}
+          className="bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
         
         <div className="flex items-center gap-1.5 pr-1">
-          {costLabel && (
-            <span 
-              className="text-[10px] font-mono font-bold px-2 py-1 rounded-lg border hidden sm:inline-block transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: (!isTokenEnabled || effectiveCost <= 0) ? 'var(--color-emerald)' : 'var(--color-border)',
-                color: (!isTokenEnabled || effectiveCost <= 0) ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
-              }}
-              title={
-                !isTokenEnabled || effectiveCost <= 0 
-                  ? t('freeModeTooltip', 'Free Mode (No tokens charged)') 
-                  : `${effectiveCost} ${tokenName || tokenSymbol}`
-              }
-            >
-              {costLabel}
-            </span>
-          )}
+          <span 
+            className="text-[10px] font-mono font-bold px-2 py-1 rounded-lg border hidden sm:inline-block"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+            title={`Each prompt costs ${chefCost} ${tokenName}`}
+          >
+            {chefCost} {tokenSymbol}
+          </span>
 
           <button
             type="button"
@@ -8490,12 +8129,288 @@ export default function ChefChatPage() {
         </div>
       </div>
 
-      {/* ACCESSIBLE DIETARY PREFERENCES MODAL */}
+      {/* CHAT HISTORY & CATEGORIES SIDE DRAWER (POSTGRESQL BACKED) */}
+      {showHistoryDrawer && (
+        <div 
+          onClick={() => setShowHistoryDrawer(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-end cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md h-full flex flex-col justify-between border-l p-5 space-y-4 shadow-2xl relative cursor-default animate-in slide-in-from-right duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center gap-2">
+                  <History className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                  <div>
+                    <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                      Chat History ({historyTotalCount})
+                    </h2>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      Up to 10 chats per page • Filtered by category
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={startNewChat}
+                    className="px-2.5 py-1 rounded-xl text-white text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer shadow-sm hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                    title="New Chat"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> New
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowHistoryDrawer(false)}
+                    className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* CATEGORIES SECTION */}
+              <div className="space-y-2.5 pt-1">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                    <Folder className="h-3.5 w-3.5" /> Chat Categories:
+                  </span>
+                </div>
+
+                <form onSubmit={handleCreateCategory} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="New category name (e.g. Keto Prep, Dinners)..."
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    className="flex-1 border rounded-xl px-3 py-1.5 text-xs outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newCategoryName.trim()}
+                    className="px-3 py-1.5 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 flex items-center gap-1 shadow-xs hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-emerald)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add
+                  </button>
+                </form>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategoryFilter('all');
+                      fetchChatHistory(1, 'all');
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs"
+                    style={{
+                      backgroundColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                      borderColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: selectedCategoryFilter === 'all' ? '#ffffff' : 'var(--color-text-secondary)'
+                    }}
+                  >
+                    All Chats
+                  </button>
+
+                  {historyCategories.map((cat) => (
+                    <div
+                      key={cat.id}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs group"
+                      style={{
+                        backgroundColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                        borderColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: selectedCategoryFilter === cat.id ? '#ffffff' : 'var(--color-text-secondary)'
+                      }}
+                      onClick={() => {
+                        setSelectedCategoryFilter(cat.id);
+                        fetchChatHistory(1, cat.id);
+                      }}
+                    >
+                      <span>{cat.name}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteCategory(cat.id, cat.name);
+                        }}
+                        className="opacity-70 hover:opacity-100 hover:text-red-400 ml-1 cursor-pointer"
+                        title={`Delete category ${cat.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* SESSIONS LIST */}
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                {loadingHistory ? (
+                  <div className="py-12 text-center text-xs flex items-center justify-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> Loading chat sessions...
+                  </div>
+                ) : historySessions.length === 0 ? (
+                  <div className="py-12 text-center text-xs space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    <MessageSquare className="h-8 w-8 mx-auto opacity-30" />
+                    <p>No chat history found under this category.</p>
+                  </div>
+                ) : (
+                  historySessions.map((sess) => {
+                    const isCurrentActive = sess.id === currentSessionId;
+                    const dateFormatted = new Date(sess.updated_at).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+
+                    return (
+                      <div
+                        key={sess.id}
+                        onClick={() => handleSelectSession(sess)}
+                        className="p-3 rounded-2xl border transition cursor-pointer flex items-center justify-between gap-3 shadow-xs hover:scale-[1.01]"
+                        style={{
+                          backgroundColor: isCurrentActive ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                          borderColor: isCurrentActive ? 'var(--color-primary)' : 'var(--color-border)'
+                        }}
+                      >
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            {sess.category_name ? (
+                              <span 
+                                className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border flex items-center gap-1"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                              >
+                                <Tag className="h-2.5 w-2.5" /> {sess.category_name}
+                              </span>
+                            ) : null}
+                            <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                              {dateFormatted}
+                            </span>
+                          </div>
+
+                          <h4 
+                            className="font-bold text-xs truncate leading-snug"
+                            style={{ color: isCurrentActive ? 'var(--color-primary)' : 'var(--color-text)' }}
+                          >
+                            {sess.title}
+                          </h4>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <select
+                            value={sess.category_id || 'none'}
+                            onChange={(e) => handleAssignCategory(sess.id, e.target.value)}
+                            className="text-[10px] border rounded-lg px-2 py-1 outline-none font-medium appearance-none cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            title="Assign to Category"
+                          >
+                            <option value="none">No Category</option>
+                            {historyCategories.map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSession(sess.id, e)}
+                            className="p-1.5 rounded-lg border text-red-500 hover:bg-red-500/10 transition cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                            title="Delete this chat"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* PAGINATION */}
+              {historyTotalPages > 1 && (
+                <div 
+                  className="pt-3 border-t flex items-center justify-between text-xs font-bold"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                >
+                  <span>Page {historyPage} of {historyTotalPages}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={historyPage <= 1}
+                      onClick={() => fetchChatHistory(historyPage - 1, selectedCategoryFilter)}
+                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+
+                    {Array.from({ length: historyTotalPages }, (_, i) => i + 1).map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => fetchChatHistory(num, selectedCategoryFilter)}
+                        className="w-7 h-7 rounded-lg text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
+                        style={historyPage === num ? {
+                          backgroundColor: 'var(--color-primary)',
+                          borderColor: 'var(--color-primary)',
+                          color: '#ffffff'
+                        } : {
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                      >
+                        {num}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      disabled={historyPage >= historyTotalPages}
+                      onClick={() => fetchChatHistory(historyPage + 1, selectedCategoryFilter)}
+                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECIPE PREFERENCES MODAL */}
       {showPreferences && (
         <div 
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('recipePreferencesAria', 'Recipe Preferences Configuration')}
           onClick={() => setShowPreferences(false)}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
         >
@@ -8510,16 +8425,10 @@ export default function ChefChatPage() {
           >
             <div className="flex justify-between items-start">
               <div>
-                <h2 
-                  className="text-xl font-black tracking-tight"
-                  style={{ color: 'var(--color-primary)' }}
-                >
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
                   {t('recipePreferencesTitle', 'Recipe Preferences')}
                 </h2>
-                <p 
-                  className="text-xs mt-0.5"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('recipePreferencesSub', 'Personalise your cooking experience')}
                 </p>
               </div>
@@ -8527,8 +8436,7 @@ export default function ChefChatPage() {
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
-                aria-label={t('close', 'Close')}
-                className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
+                className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -8548,7 +8456,7 @@ export default function ChefChatPage() {
                   <button
                     type="button"
                     onClick={() => setServings(Math.max(1, servings - 1))}
-                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-xs hover:opacity-80"
+                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8563,7 +8471,7 @@ export default function ChefChatPage() {
                   <button
                     type="button"
                     onClick={() => setServings(servings + 1)}
-                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-xs hover:opacity-80"
+                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8583,7 +8491,7 @@ export default function ChefChatPage() {
                   <select
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
-                    className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-xs font-medium"
+                    className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-sm font-medium"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8610,7 +8518,7 @@ export default function ChefChatPage() {
                         key={item}
                         type="button"
                         onClick={() => handleToggleDiet(item)}
-                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-xs"
+                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-primary)',
@@ -8640,10 +8548,10 @@ export default function ChefChatPage() {
                         key={item}
                         type="button"
                         onClick={() => handleToggleAllergy(item)}
-                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-xs"
+                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
+                          borderColor: 'var(--color-border)',
                           color: 'var(--color-primary)'
                         } : {
                           backgroundColor: 'var(--color-inner-dark)',
@@ -8658,39 +8566,17 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* INGREDIENTS TO AVOID */}
-              <div 
-                role="region"
-                aria-label={t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
-                className="space-y-2"
-              >
+              <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
                 </label>
-                <div className="flex gap-2">
+                <form onSubmit={handleAddAvoid} className="flex gap-2">
                   <input
-                    id="chef_avoid_ingredient_input"
-                    name="chef_avoid_ingredient_input"
                     type="text"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    aria-label={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddAvoid();
-                      }
-                    }}
-                    className="chef-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
+                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8698,14 +8584,13 @@ export default function ChefChatPage() {
                     }}
                   />
                   <button
-                    type="button"
-                    onClick={handleAddAvoid}
+                    type="submit"
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
-                </div>
+                </form>
 
                 <div 
                   className="p-3 rounded-2xl border min-h-[50px] flex flex-wrap gap-2 items-center"
@@ -8722,7 +8607,7 @@ export default function ChefChatPage() {
                     ingredientsToAvoid.map((item) => (
                       <span 
                         key={item}
-                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-xs"
+                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-sm"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-emerald)',
@@ -8743,43 +8628,17 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* TASTES & COOKING STYLES */}
-              <div 
-                role="region"
-                aria-label={t('tastesTitle', 'Tastes & Cooking Styles')}
-                className="space-y-2"
-              >
+              <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('tastesTitle', 'Tastes & Cooking Styles')}
+                  {t('tastesTitle', 'Tastes')}
                 </label>
-                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('tastesDesc', "Anything else about how you like to eat. We'll factor these into your recipes.")}
-                </p>
-
-                <div className="flex gap-2">
+                <form onSubmit={handleAddTaste} className="flex gap-2">
                   <input
-                    id="chef_taste_preference_input"
-                    name="chef_taste_preference_input"
                     type="text"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    aria-label={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami, extra garlic...')}
-                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami, extra garlic...')}
+                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami...')}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddTaste();
-                      }
-                    }}
-                    className="chef-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
+                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8787,14 +8646,13 @@ export default function ChefChatPage() {
                     }}
                   />
                   <button
-                    type="button"
-                    onClick={handleAddTaste}
+                    type="submit"
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
-                </div>
+                </form>
 
                 <div 
                   className="p-3 rounded-2xl border min-h-[50px] flex flex-wrap gap-2 items-center"
@@ -8811,7 +8669,7 @@ export default function ChefChatPage() {
                     tastesList.map((item) => (
                       <span 
                         key={item}
-                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-xs"
+                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-sm"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-emerald)',
@@ -8840,7 +8698,7 @@ export default function ChefChatPage() {
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
-                className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-xs hover:opacity-80"
+                className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-sm hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -8872,7 +8730,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOKEN PURCHASE MODAL (Triggered on-demand when tokens run low) */}
+      {/* TOKEN PURCHASE MODAL */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
@@ -8882,15 +8740,7 @@ export default function ChefChatPage() {
         packages={tokenPackages}
         onPurchased={(newBal) => {
           setTokenBalance(newBal);
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event('zecratary_tokens_updated'));
-            window.dispatchEvent(new Event('zecratary_users_updated'));
-          }
-          showToast(
-            tokenSymbol
-              ? `${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal} ${tokenSymbol}`
-              : `${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal}`
-          );
+          showToast(`Tokens added! New balance: ${newBal} ${tokenSymbol}`);
         }}
       />
     </div>
@@ -14160,7 +14010,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { 
   Radio, Activity, CheckCircle2, XCircle, Loader2,
   Cpu, Sparkles, Globe, PackageCheck, 
-  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, Eye, EyeOff, Calendar, Clock, Flame, Users, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle, ChevronDown, BarChart3, TrendingUp, Hash, DollarSign
+  ShieldAlert, Check, RefreshCw, Bot, Zap, SlidersHorizontal, ListPlus, Trash2, Plus, Layers, FolderPlus, LayoutTemplate, Mic, Volume2, Settings, Eye, EyeOff, Calendar, Clock, Flame, Users, ToggleLeft, ToggleRight, BookOpen, BookA, Ban, X, CheckCircle, ChevronDown, BarChart3, TrendingUp, MessageSquare
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -14170,12 +14020,18 @@ import {
 } from '@/lib/adminSync';
 import { applyThemeToDocument, fetchAndApplyServerTheme, getMemoryThemeColors, setMemoryThemeColors } from '@/lib/themeConfig';
 
+interface QuestionnaireQuestion {
+  id: string;
+  text: string;
+  dedicatedAnswers: string[];
+}
+
 interface QuestionnaireSection {
   id: string;
   topicTitle: string;
   description: string;
   enabled?: boolean;
-  questions: string[];
+  questions: QuestionnaireQuestion[];
 }
 
 interface DailyUsagePoint {
@@ -14187,6 +14043,26 @@ interface DailyUsagePoint {
   cost: number;
 }
 
+const getDefaultDedicatedAnswersForText = (text: string): string[] => {
+  const lower = (text || '').toLowerCase();
+  if (lower.includes('how many days') || lower.includes('duration') || lower.includes('plan for')) {
+    return ["3 Days (Quick Prep)", "5 Days (Workweek)", "7 Days (Full Week)", "Weekend Plan (2 Days)"];
+  }
+  if (lower.includes('meal type') || lower.includes('breakfast') || lower.includes('dinner')) {
+    return ["Dinner only", "Lunch & Dinner", "All Meals (Breakfast, Lunch, Dinner)", "Breakfast & Dinner", "All Meals + Snack"];
+  }
+  if (lower.includes('when') || lower.includes('start')) {
+    return ["Start Today", "Start Tomorrow", "Next Monday (Fresh Week)", "This Coming Weekend", "Flexible / Any Day"];
+  }
+  if (lower.includes('preference') || lower.includes('theme') || lower.includes('diet') || lower.includes('macro')) {
+    return ["High-Protein Wholesome", "Quick & Easy (<25m)", "Mediterranean Fresh", "Keto / Low-Carb", "Budget-Friendly Comfort", "Plant-Based / Balanced Veggie"];
+  }
+  if (lower.includes('budget') || lower.includes('serving') || lower.includes('$')) {
+    return ["Under $5/serving (Economy)", "$5 - $8/serving (Balanced)", "$8 - $12/serving (Generous)", "$12+/serving (Premium)", "Flexible Target"];
+  }
+  return ["Standard Option", "Custom Preference"];
+};
+
 const DEFAULT_SECTIONS: QuestionnaireSection[] = [
   {
     id: 'sec_core',
@@ -14194,9 +14070,38 @@ const DEFAULT_SECTIONS: QuestionnaireSection[] = [
     description: 'Basic duration, meal types, and start dates for the multi-day plan.',
     enabled: true,
     questions: [
-      "How many days would you like to plan for (up to 7 days)?",
-      "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
-      "When would you like the meal plan to start (today, tomorrow, or a specific date)?"
+      {
+        id: 'q_core_1',
+        text: "How many days would you like to plan for (up to 7 days)?",
+        dedicatedAnswers: [
+          "3 Days (Quick Prep)",
+          "5 Days (Workweek)",
+          "7 Days (Full Week)",
+          "Weekend Plan (2 Days)"
+        ]
+      },
+      {
+        id: 'q_core_2',
+        text: "Which meal types would you like to include each day (e.g., breakfast, lunch, dinner, snack)?",
+        dedicatedAnswers: [
+          "Dinner only",
+          "Lunch & Dinner",
+          "All Meals (Breakfast, Lunch, Dinner)",
+          "Breakfast & Dinner",
+          "All Meals + Snack"
+        ]
+      },
+      {
+        id: 'q_core_3',
+        text: "When would you like the meal plan to start (today, tomorrow, or a specific date)?",
+        dedicatedAnswers: [
+          "Start Today",
+          "Start Tomorrow",
+          "Next Monday (Fresh Week)",
+          "This Coming Weekend",
+          "Flexible / Any Day"
+        ]
+      }
     ]
   },
   {
@@ -14205,8 +14110,29 @@ const DEFAULT_SECTIONS: QuestionnaireSection[] = [
     description: 'Themes, nutritional restrictions, and financial target per serving.',
     enabled: true,
     questions: [
-      "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
-      "What is your approximate ingredient budget per serving?"
+      {
+        id: 'q_pref_1',
+        text: "Do you have any specific preferences or themes for these meals (e.g., high-protein, comfort food)?",
+        dedicatedAnswers: [
+          "High-Protein Wholesome",
+          "Quick & Easy (<25m)",
+          "Mediterranean Fresh",
+          "Keto / Low-Carb",
+          "Budget-Friendly Comfort",
+          "Plant-Based / Balanced Veggie"
+        ]
+      },
+      {
+        id: 'q_pref_2',
+        text: "What is your approximate ingredient budget per serving?",
+        dedicatedAnswers: [
+          "Under $5/serving (Economy)",
+          "$5 - $8/serving (Balanced)",
+          "$8 - $12/serving (Generous)",
+          "$12+/serving (Premium)",
+          "Flexible Target"
+        ]
+      }
     ]
   }
 ];
@@ -14231,7 +14157,7 @@ export default function ChefAISettingsPage() {
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [systemPrompt, setSystemPrompt] = useState(
-    'You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, and dietary preferences when generating culinary or meal planning responses.'
+    'You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize the selected Knowledge Base, custom vocabulary, filter words, recommended recipe sources, and dietary preferences when generating culinary or meal planning responses.'
   );
   const [envKeysMap, setEnvKeysMap] = useState<Record<string, string>>({});
   const [syncingEnvKey, setSyncingEnvKey] = useState(false);
@@ -14260,7 +14186,7 @@ export default function ChefAISettingsPage() {
   const [voiceAutoPlay, setVoiceAutoPlay] = useState(false);
   const [selectedVoiceName, setSelectedVoiceName] = useState('en-US-Neural2-F');
 
-  // Agent Parameters: Knowledge Base, Custom Vocabulary, Filter Words
+  // Agent Parameters
   const [knowledgeBaseList, setKnowledgeBaseList] = useState<string[]>(['Culinary Masterclass DB v2', 'Nutritional Guidelines 2026']);
   const [newKbInput, setNewKbInput] = useState('');
 
@@ -14270,16 +14196,21 @@ export default function ChefAISettingsPage() {
   const [filterWordsList, setFilterWordsList] = useState<string[]>(['Oily', 'Artificial preservatives', 'Unhealthy trans fats']);
   const [newFilterInput, setNewFilterInput] = useState('');
 
-  // Multi-Topic Questionnaire State
+  // Recommended Recipes Url (Primary Source for /chef)
+  const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
+  const [newRecipeUrlInput, setNewRecipeUrlInput] = useState('');
+
+  // Multi-Topic Questionnaire State with Dedicated Answers
   const [sections, setSections] = useState<QuestionnaireSection[]>(DEFAULT_SECTIONS);
   const [newTopicTitle, setNewTopicTitle] = useState('');
   const [newTopicDesc, setNewTopicDesc] = useState('');
   const [activeTopicId, setActiveTopicId] = useState<string>('sec_core');
   const [newQuestionText, setNewQuestionText] = useState('');
+  const [dedicatedAnswerInputs, setDedicatedAnswerInputs] = useState<Record<string, string>>({});
 
   const [saved, setSaved] = useState(false);
 
-  // Dynamic Theme Synchronization & Smooth Day/Dark Transition
+  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback((incomingColors?: any) => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -14422,7 +14353,7 @@ export default function ChefAISettingsPage() {
     loadUsageMetrics(usageTimeframe);
   }, [usageTimeframe, loadUsageMetrics]);
 
-  // Fetch API Keys from .env / PostgreSQL
+  // Fetch API Keys
   const fetchEnvKeys = async () => {
     try {
       const res = await fetch('/api/admin/keys?t=' + Date.now(), { cache: 'no-store' });
@@ -14453,7 +14384,7 @@ export default function ChefAISettingsPage() {
     return {};
   };
 
-  // Load Settings Exclusively from Server Storage
+  // Load Settings from Server Storage
   const loadSettingsFromServer = useCallback(async () => {
     if (typeof purgeLegacyBrowserAdminStorage === 'function') {
       purgeLegacyBrowserAdminStorage();
@@ -14488,8 +14419,43 @@ export default function ChefAISettingsPage() {
         if (Array.isArray(c.customVocabularyList)) setCustomVocabularyList(c.customVocabularyList);
         if (Array.isArray(c.filterWordsList)) setFilterWordsList(c.filterWordsList);
 
+        if (Array.isArray(c.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(c.recommendedRecipeUrls.filter(Boolean));
+        } else if (Array.isArray(c.recommendedRecipesUrls)) {
+          setRecommendedRecipeUrls(c.recommendedRecipesUrls.filter(Boolean));
+        } else if (Array.isArray(serverData.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(serverData.recommendedRecipeUrls.filter(Boolean));
+        }
+
         if (Array.isArray(c.sections) && c.sections.length > 0) {
-          setSections(c.sections.map((s: any) => ({ ...s, enabled: s.enabled !== false })));
+          setSections(c.sections.map((s: any, secIdx: number) => ({
+            id: s.id || `sec_${secIdx}`,
+            topicTitle: s.topicTitle || `Topic ${secIdx + 1}`,
+            description: s.description || '',
+            enabled: s.enabled !== false,
+            questions: Array.isArray(s.questions)
+              ? s.questions.map((q: any, qIdx: number) => {
+                  if (typeof q === 'string') {
+                    return {
+                      id: `${s.id || 'sec'}_q_${qIdx}`,
+                      text: q,
+                      dedicatedAnswers: getDefaultDedicatedAnswersForText(q)
+                    };
+                  }
+                  return {
+                    id: q.id || `${s.id || 'sec'}_q_${qIdx}`,
+                    text: q.text || q.question || '',
+                    dedicatedAnswers: Array.isArray(q.dedicatedAnswers) 
+                      ? q.dedicatedAnswers 
+                      : Array.isArray(q.answers) 
+                        ? q.answers 
+                        : Array.isArray(q.options) 
+                          ? q.options 
+                          : getDefaultDedicatedAnswersForText(q.text || '')
+                  };
+                })
+              : []
+          })));
         }
       }
     } catch (err) {
@@ -14522,7 +14488,6 @@ export default function ChefAISettingsPage() {
     }
   };
 
-  // Resilient Dual-Tier Test Connection
   const handleTestApiKey = async () => {
     const keyToTest = apiKey.trim() || 
       (provider === 'gemini' 
@@ -14544,7 +14509,6 @@ export default function ChefAISettingsPage() {
     let latency = 0;
 
     try {
-      // Primary verification via server route
       const res = await fetch('/api/admin/test-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -14567,7 +14531,6 @@ export default function ChefAISettingsPage() {
         success = true;
         message = data.message || `${t('connectedPrefix', 'Connected to')} ${provider === 'gemini' ? 'Google Gemini' : 'OpenAI'} (${model}) in ${latency}ms!`;
       } else if (res.status === 404 || !res.ok) {
-        // Direct Provider Fallback Verification
         if (provider === 'gemini') {
           const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
           const directData = await directRes.json();
@@ -14599,32 +14562,13 @@ export default function ChefAISettingsPage() {
       }
     } catch (err: any) {
       latency = Math.round(performance.now() - startTime);
-      // Fallback check on network error
-      if (provider === 'gemini') {
-        try {
-          const pingRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
-          const pingData = await pingRes.json();
-          if (pingRes.ok && pingData.models) {
-            success = true;
-            message = `${t('connectedPrefix', 'Connected to')} Google Gemini (${model}) in ${latency}ms!`;
-          } else {
-            success = false;
-            message = pingData.error?.message || err.message || t('verificationEndpointError', 'Handshake error.');
-          }
-        } catch (e: any) {
-          success = false;
-          message = e.message || err.message || t('verificationEndpointError', 'Could not reach endpoint.');
-        }
-      } else {
-        success = false;
-        message = err.message || t('verificationEndpointError', 'Could not reach verification endpoint.');
-      }
+      success = false;
+      message = err.message || t('verificationEndpointError', 'Could not reach verification endpoint.');
     } finally {
       setTestingKey(false);
       setTestResult({ success, message, latency });
 
       if (success) {
-        // Auto-persist working key & model to server storage
         persistServerAdminSettings({
           aiProvider: provider,
           aiModel: model,
@@ -14719,31 +14663,7 @@ export default function ChefAISettingsPage() {
             updatedAt: new Date().toISOString()
           }
         });
-
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-          window.dispatchEvent(new Event('zecratary_settings_updated'));
-          window.dispatchEvent(new Event('zecratary_engine_config_updated'));
-          window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
-          try {
-            const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
-            syncCh.postMessage({ model: activeModel, provider: 'gemini' });
-            syncCh.close();
-          } catch (_) {}
-        }
       } else if (!silent) {
-        // Direct ping fallback for silent/manual autoconnect
-        try {
-          const direct = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
-          if (direct.ok) {
-            setTestResult({
-              success: true,
-              message: `${t('connectedPrefix', 'Connected to')} Google Gemini (${activeModel})! Verified and synchronized.`,
-              latency
-            });
-            return;
-          }
-        } catch (_) {}
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
       }
     } catch (err: any) {
@@ -14804,6 +14724,7 @@ export default function ChefAISettingsPage() {
     }
   };
 
+  // Topic Section Handlers
   const handleAddTopicSection = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTopicTitle.trim()) return;
@@ -14836,32 +14757,180 @@ export default function ChefAISettingsPage() {
     if (e) e.stopPropagation();
     setSections(sections.map(sec => {
       if (sec.id === secId) {
-        return { ...sec, enabled: sec.enabled === false ? true : false };
+        return { ...sec, enabled: sec.enabled === false };
       }
       return sec;
     }));
   };
 
+  // Question & Dedicated Answer Handlers
   const handleAddQuestionToTopic = (secId: string) => {
     if (!newQuestionText.trim()) return;
+    const newText = newQuestionText.trim();
+    const newQuestion: QuestionnaireQuestion = {
+      id: `${secId}_q_${Date.now()}`,
+      text: newText,
+      dedicatedAnswers: getDefaultDedicatedAnswersForText(newText)
+    };
+
     setSections(sections.map(sec => {
       if (sec.id === secId) {
-        return { ...sec, questions: [...sec.questions, newQuestionText.trim()] };
+        return { ...sec, questions: [...sec.questions, newQuestion] };
       }
       return sec;
     }));
     setNewQuestionText('');
   };
 
-  const handleRemoveQuestionFromTopic = (secId: string, qIndex: number) => {
+  const handleUpdateQuestionText = (secId: string, qIdx: number, newText: string) => {
     setSections(sections.map(sec => {
       if (sec.id === secId) {
-        return { ...sec, questions: sec.questions.filter((_, i) => i !== qIndex) };
+        const qs = [...sec.questions];
+        qs[qIdx] = { ...qs[qIdx], text: newText };
+        return { ...sec, questions: qs };
       }
       return sec;
     }));
   };
 
+  const handleRemoveQuestionFromTopic = (secId: string, qIdx: number) => {
+    setSections(sections.map(sec => {
+      if (sec.id === secId) {
+        return { ...sec, questions: sec.questions.filter((_, i) => i !== qIdx) };
+      }
+      return sec;
+    }));
+  };
+
+  const handleAddDedicatedAnswer = (secId: string, qIdx: number) => {
+    const inputKey = `${secId}_${qIdx}`;
+    const raw = (dedicatedAnswerInputs[inputKey] || '').trim();
+    if (!raw) return;
+
+    const newItems = raw.includes(',') 
+      ? raw.split(',').map(s => s.trim()).filter(Boolean)
+      : [raw];
+
+    setSections(prevSections => prevSections.map(sec => {
+      if (sec.id === secId) {
+        const qs = [...sec.questions];
+        const targetQ = { ...qs[qIdx] };
+        const currentAnswers = [...(targetQ.dedicatedAnswers || [])];
+
+        newItems.forEach(item => {
+          if (!currentAnswers.includes(item)) {
+            currentAnswers.push(item);
+          }
+        });
+
+        targetQ.dedicatedAnswers = currentAnswers;
+        qs[qIdx] = targetQ;
+        return { ...sec, questions: qs };
+      }
+      return sec;
+    }));
+
+    setDedicatedAnswerInputs(prev => ({ ...prev, [inputKey]: '' }));
+  };
+
+  const handleRemoveDedicatedAnswer = (secId: string, qIdx: number, ansIdx: number) => {
+    setSections(sections.map(sec => {
+      if (sec.id === secId) {
+        const qs = [...sec.questions];
+        const targetQ = { ...qs[qIdx] };
+        targetQ.dedicatedAnswers = (targetQ.dedicatedAnswers || []).filter((_, i) => i !== ansIdx);
+        qs[qIdx] = targetQ;
+        return { ...sec, questions: qs };
+      }
+      return sec;
+    }));
+  };
+
+  // Recommended Recipes Url Handlers
+  const persistUrlsToDb = async (urls: string[]) => {
+    try {
+      await persistServerAdminSettings({
+        aiProvider: provider,
+        aiModel: model,
+        chefAiSettings: {
+          provider,
+          apiKey: apiKey.trim(),
+          model,
+          temperature,
+          maxTokens,
+          systemPrompt,
+          enableWebSearch,
+          enablePantryContext,
+          strictDietEnforcement,
+          maxPlanDays,
+          resultDisplayMode,
+          enableVoiceInteraction,
+          voiceEngine,
+          voiceSpeed,
+          voiceAutoPlay,
+          selectedVoiceName,
+          knowledgeBaseList,
+          customVocabularyList,
+          filterWordsList,
+          recommendedRecipeUrls: urls,
+          sections,
+          updatedAt: new Date().toISOString()
+        },
+        recommendedRecipeUrls: urls
+      });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+      }
+    } catch (_) {}
+  };
+
+  const handleAddRecommendedUrls = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const raw = newRecipeUrlInput.trim();
+    if (!raw) return;
+
+    const entries = raw
+      .split(/[\n,]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const cleanedUrls: string[] = [];
+    for (let entry of entries) {
+      if (!/^https?:\/\//i.test(entry)) {
+        entry = 'https://' + entry;
+      }
+      try {
+        new URL(entry);
+        if (!recommendedRecipeUrls.includes(entry) && !cleanedUrls.includes(entry)) {
+          cleanedUrls.push(entry);
+        }
+      } catch (_) {}
+    }
+
+    if (cleanedUrls.length > 0) {
+      const updated = [...recommendedRecipeUrls, ...cleanedUrls];
+      setRecommendedRecipeUrls(updated);
+      setNewRecipeUrlInput('');
+      persistUrlsToDb(updated);
+    }
+  };
+
+  const handleRemoveRecommendedUrl = (idx: number) => {
+    const updated = recommendedRecipeUrls.filter((_, i) => i !== idx);
+    setRecommendedRecipeUrls(updated);
+    persistUrlsToDb(updated);
+  };
+
+  const handleClearAllRecommendedUrls = () => {
+    if (confirm(t('confirmClearAllUrls', 'Clear all recommended recipe URLs?'))) {
+      setRecommendedRecipeUrls([]);
+      persistUrlsToDb([]);
+    }
+  };
+
+  // Master Save Configuration Handler
   const handleSave = async (e?: React.FormEvent | React.MouseEvent) => {
     if (e) e.preventDefault();
     if (isSaving) return;
@@ -14888,11 +14957,16 @@ export default function ChefAISettingsPage() {
       knowledgeBaseList,
       customVocabularyList,
       filterWordsList,
+      recommendedRecipeUrls,
       sections,
       updatedAt: new Date().toISOString()
     };
 
     const activeFlattenedQuestions = sections
+      .filter(s => s.enabled !== false)
+      .flatMap(s => s.questions.map(q => q.text));
+
+    const activeFlattenedItems = sections
       .filter(s => s.enabled !== false)
       .flatMap(s => s.questions);
 
@@ -14901,12 +14975,14 @@ export default function ChefAISettingsPage() {
         aiProvider: provider,
         aiModel: model,
         chefAiSettings: config,
-        chefQuestionnaire: activeFlattenedQuestions
+        recommendedRecipeUrls,
+        chefQuestionnaire: activeFlattenedQuestions,
+        chefQuestionnaireWithAnswers: activeFlattenedItems
       });
 
       if (cleanApiKey) {
         try {
-          const res = await fetch('/api/admin/keys', {
+          await fetch('/api/admin/keys', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -14917,14 +14993,6 @@ export default function ChefAISettingsPage() {
               status: 'active'
             })
           });
-
-          const data = await res.json();
-          if (res.ok && data.success) {
-            setTestResult({
-              success: true,
-              message: `${t('keySavedToEnv', 'Key saved to local .env and synchronized')} (${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'})`
-            });
-          }
         } catch (_) {}
       }
 
@@ -14962,7 +15030,6 @@ export default function ChefAISettingsPage() {
   const totalCombinedTokens = totalPromptTokens + totalCompletionTokens;
   const totalCostEstimate = usagePoints.reduce((acc, p) => acc + p.cost, 0);
 
-  // Chart Coordinates Calculation
   const chartHeight = 160;
   const chartWidth = 680;
   const maxTokenValue = Math.max(...usagePoints.map(p => p.promptTokens + p.completionTokens), 1000);
@@ -15029,8 +15096,6 @@ export default function ChefAISettingsPage() {
               backgroundColor: 'var(--color-primary)',
               boxShadow: 'var(--color-primary-shadow, 0 8px 20px -4px rgba(224, 86, 56, 0.3))'
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             {isSaving ? (
               <>
@@ -15076,7 +15141,6 @@ export default function ChefAISettingsPage() {
         })}
       </div>
 
-      {/* Accessible Landmark Container */}
       <div 
         role="region"
         aria-label={t('aiAssistantConfigForm', 'AI Assistant Settings Configuration Form')}
@@ -15087,7 +15151,7 @@ export default function ChefAISettingsPage() {
         {/* TAB 1: GENERAL & MODEL CONFIG */}
         {activeTab === 'general' && (
           <div className="space-y-6 animate-in fade-in">
-            {/* 1.1 AI Engine Provider & Model Selection */}
+            {/* AI Engine Provider & Model Selection */}
             <div 
               className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
               style={{
@@ -15268,7 +15332,7 @@ export default function ChefAISettingsPage() {
                   </span>
                 </div>
 
-                {/* Harmonized Model Selector with Custom Chevron */}
+                {/* Model Selector */}
                 <div>
                   <label className="block font-bold mb-1.5 uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('modelVersionIdentifier', 'Model Version Identifier')}
@@ -15313,7 +15377,7 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* 1.2 NEW: AI USAGE & TOKEN CONSUMPTION CHART */}
+            {/* AI Engine Usage & Token Consumption Analytics */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm transition-colors duration-200"
               style={{
@@ -15480,7 +15544,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* SVG Dynamic Timeline Bar Chart */}
+              {/* Dynamic Bar Chart */}
               <div 
                 className="border rounded-2xl p-4 space-y-3 transition-colors shadow-inner"
                 style={{
@@ -15522,7 +15586,6 @@ export default function ChefAISettingsPage() {
                     className="w-full h-44 select-none min-w-[500px]"
                     preserveAspectRatio="none"
                   >
-                    {/* Horizontal Gridlines */}
                     {[0, 0.25, 0.5, 0.75, 1].map((ratio, gIdx) => {
                       const y = chartHeight - ratio * (chartHeight - 20) + 10;
                       return (
@@ -15550,7 +15613,6 @@ export default function ChefAISettingsPage() {
                       );
                     })}
 
-                    {/* Bars for Each Day */}
                     {usagePoints.map((p, idx) => {
                       const n = usagePoints.length;
                       const colWidth = (chartWidth - 40) / n;
@@ -15571,7 +15633,6 @@ export default function ChefAISettingsPage() {
                           onMouseLeave={() => setHoveredPointIndex(null)}
                           className="cursor-pointer"
                         >
-                          {/* Hover Background Pill */}
                           <rect
                             x={30 + idx * colWidth}
                             y="0"
@@ -15582,7 +15643,6 @@ export default function ChefAISettingsPage() {
                             rx="4"
                           />
 
-                          {/* Completion Tokens Bar (Stacked on top) */}
                           <rect
                             x={x}
                             y={compY}
@@ -15593,7 +15653,6 @@ export default function ChefAISettingsPage() {
                             rx="2"
                           />
 
-                          {/* Prompt Tokens Bar (Bottom) */}
                           <rect
                             x={x}
                             y={promptY}
@@ -15604,7 +15663,6 @@ export default function ChefAISettingsPage() {
                             rx="2"
                           />
 
-                          {/* X Axis Date Label */}
                           {(n <= 10 || idx % Math.ceil(n / 7) === 0 || idx === n - 1) && (
                             <text
                               x={x + barW / 2}
@@ -15622,33 +15680,12 @@ export default function ChefAISettingsPage() {
                     })}
                   </svg>
                 </div>
-
-                {/* Model Distribution Ratio */}
-                <div className="pt-2 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                    {t('modelEngineBreakdown', 'Active Engine Invocations Share:')}
-                  </span>
-                  <div className="flex items-center gap-3 font-mono text-[10px]">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
-                      <span>Gemini 3.5 Flash Lite (71%)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-emerald)' }} />
-                      <span>Gemini 3.6 Flash (22%)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-blue, #3b82f6)' }} />
-                      <span>GPT-4o (7%)</span>
-                    </span>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER & RESULTS APPEARANCE PREVIEW */}
+        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER WITH DEDICATED ANSWERS */}
         {activeTab === 'questionnaire' && (
           <div className="space-y-6 animate-in fade-in">
             <div 
@@ -15667,7 +15704,7 @@ export default function ChefAISettingsPage() {
                     <Layers className="h-4 w-4" /> {t('questionnaireManagerTitle', 'Multi-Topic Questionnaire & Wizard Manager')}
                   </h2>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics. Use the enable/disable toggle on each topic to include or exclude it from the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
+                    {t('questionnaireManagerDesc', 'Organize intake questions into categorized topics and customize dedicated preset answers for the')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>/chef</span> {t('intakeWizard', 'intake wizard.')}
                   </p>
                 </div>
                 <span 
@@ -15683,12 +15720,13 @@ export default function ChefAISettingsPage() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
-                <div className="lg:col-span-5 space-y-3">
+                {/* Topic Sections Column */}
+                <div className="lg:col-span-4 space-y-3">
                   <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('questionnaireTopicsHeader', 'Questionnaire Topics')}
                   </label>
                   
-                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                  <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
                     {sections.map((sec) => {
                       const isActive = sec.id === activeTopicId;
                       const isEnabled = sec.enabled !== false;
@@ -15730,6 +15768,9 @@ export default function ChefAISettingsPage() {
                               </span>
                             </div>
                             <p className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{sec.description}</p>
+                            <span className="text-[9px] font-mono block opacity-75" style={{ color: 'var(--color-text-secondary)' }}>
+                              {sec.questions.length} {t('questionsCount', 'Questions')}
+                            </span>
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
@@ -15781,22 +15822,13 @@ export default function ChefAISettingsPage() {
                       value={newTopicTitle}
                       onChange={(e) => setNewTopicTitle(e.target.value)}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
-                      aria-label={t('topicTitlePlaceholder', 'Topic Title')}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <input
                       type="text"
@@ -15804,22 +15836,13 @@ export default function ChefAISettingsPage() {
                       value={newTopicDesc}
                       onChange={(e) => setNewTopicDesc(e.target.value)}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
-                      aria-label={t('topicDescPlaceholder', 'Topic Description')}
                       className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-text)'
                       }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                     />
                     <button
                       type="button"
@@ -15827,16 +15850,15 @@ export default function ChefAISettingsPage() {
                       disabled={!newTopicTitle.trim()}
                       className="w-full text-white font-bold py-2 rounded-xl transition text-xs disabled:opacity-40 cursor-pointer shadow-md"
                       style={{ backgroundColor: 'var(--color-primary)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                     >
                       {t('createTopicBtn', 'Create Topic Category')}
                     </button>
                   </div>
                 </div>
 
+                {/* Questions & Dedicated Answers Editor Column */}
                 <div 
-                  className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
+                  className="lg:col-span-8 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -15856,17 +15878,10 @@ export default function ChefAISettingsPage() {
                               setSections(sections.map(s => s.id === activeSection?.id ? { ...s, topicTitle: newTitle } : s));
                             }}
                             autoComplete="off"
-                            autoCorrect="off"
-                            autoCapitalize="off"
-                            data-lpignore="true"
-                            data-1p-ignore="true"
-                            data-bwignore="true"
-                            data-form-type="other"
                             spellCheck={false}
                             className="font-bold text-sm bg-transparent border-b border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] outline-none min-w-[200px] transition-colors truncate"
                             style={{ color: 'var(--color-text)' }}
                             placeholder={t('topicTitlePlaceholder', 'Topic Title...')}
-                            title={t('editTopicTitleTooltip', 'Edit Topic Title')}
                           />
                           <span 
                             className="text-[9px] px-2 py-0.5 rounded font-extrabold uppercase shrink-0 border"
@@ -15887,91 +15902,170 @@ export default function ChefAISettingsPage() {
                             setSections(sections.map(s => s.id === activeSection?.id ? { ...s, description: newDesc } : s));
                           }}
                           autoComplete="off"
-                          autoCorrect="off"
-                          autoCapitalize="off"
-                          data-lpignore="true"
-                          data-1p-ignore="true"
-                          data-bwignore="true"
-                          data-form-type="other"
                           spellCheck={false}
                           className="text-[11px] bg-transparent border-b border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] outline-none w-full transition-colors truncate"
                           style={{ color: 'var(--color-text-secondary)' }}
                           placeholder={t('topicDescPlaceholder', 'Topic Description...')}
-                          title={t('editTopicDescTooltip', 'Edit Topic Description')}
                         />
                       </div>
-                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span className="text-[10px] font-bold shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
                         {activeSection?.questions.length || 0} {t('questionsCount', 'Questions')}
                       </span>
                     </div>
 
-                    <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                    {/* Question Cards with Dedicated Answers */}
+                    <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
                       {activeSection?.questions.length === 0 ? (
-                        <div className="text-center py-8 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
+                        <div className="text-center py-10 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
                           {t('noQuestionsYet', 'No questions in this topic yet. Add one below.')}
                         </div>
                       ) : (
-                        activeSection?.questions.map((qText, qIdx) => (
+                        activeSection?.questions.map((qItem, qIdx) => (
                           <div 
-                            key={qIdx} 
-                            className="flex items-center gap-2.5 border rounded-xl p-3 shadow-xs"
+                            key={qItem.id || qIdx} 
+                            className="border rounded-2xl p-4 space-y-3 shadow-xs transition"
                             style={{
                               backgroundColor: 'var(--color-card)',
                               borderColor: 'var(--color-border)'
                             }}
                           >
-                            <span 
-                              className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                            {/* Question Row */}
+                            <div className="flex items-center gap-2.5">
+                              <span 
+                                className="w-6 h-6 rounded-lg font-bold text-xs flex items-center justify-center shrink-0 border"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-primary)',
+                                  color: 'var(--color-primary)'
+                                }}
+                              >
+                                {qIdx + 1}
+                              </span>
+                              <input
+                                type="text"
+                                value={qItem.text}
+                                onChange={(e) => handleUpdateQuestionText(activeSection.id, qIdx, e.target.value)}
+                                placeholder={t('questionTextPlaceholder', 'Enter question text...')}
+                                autoComplete="off"
+                                spellCheck={false}
+                                aria-label={`${t('questionNumber', 'Question')} ${qIdx + 1}`}
+                                className="settings-input flex-1 border rounded-xl px-3.5 py-2 text-xs outline-none font-semibold transition"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
+                                }}
+                                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
+                                className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shrink-0"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                                title={t('removeQuestionTooltip', 'Remove question')}
+                                aria-label={t('removeQuestionTooltip', 'Remove question')}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+
+                            {/* Dedicated Answers Container */}
+                            <div 
+                              className="p-3 rounded-xl border space-y-2.5 transition-colors duration-200"
                               style={{
                                 backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-primary)',
-                                color: 'var(--color-primary)'
+                                borderColor: 'var(--color-border)'
                               }}
                             >
-                              {qIdx + 1}
-                            </span>
-                            <input
-                              type="text"
-                              value={qText}
-                              onChange={(e) => {
-                                const updatedQ = e.target.value;
-                                setSections(sections.map(s => {
-                                  if (s.id === activeSection.id) {
-                                    const qs = [...s.questions];
-                                    qs[qIdx] = updatedQ;
-                                    return { ...s, questions: qs };
-                                  }
-                                  return s;
-                                }));
-                              }}
-                              autoComplete="off"
-                              autoCorrect="off"
-                              autoCapitalize="off"
-                              data-lpignore="true"
-                              data-1p-ignore="true"
-                              data-bwignore="true"
-                              data-form-type="other"
-                              spellCheck={false}
-                              aria-label={`${t('questionNumber', 'Question')} ${qIdx + 1}`}
-                              className="bg-transparent border-none text-xs outline-none flex-1 font-medium"
-                              style={{ color: 'var(--color-text)' }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveQuestionFromTopic(activeSection.id, qIdx)}
-                              className="transition p-1 cursor-pointer hover:opacity-75"
-                              style={{ color: 'var(--color-text-secondary)' }}
-                              title={t('removeQuestionTooltip', 'Remove question')}
-                              aria-label={t('removeQuestionTooltip', 'Remove question')}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                                  <Sparkles className="h-3 w-3" /> {t('dedicatedAnswersHeader', 'Dedicated Answers for Wizard Manager')} ({qItem.dedicatedAnswers?.length || 0})
+                                </span>
+                                <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {t('dedicatedAnswersSubtitle', 'Preset choices presented to user during intake')}
+                                </span>
+                              </div>
+
+                              {/* Interactive Preset Chips */}
+                              <div className="flex flex-wrap gap-1.5 min-h-[28px] items-center">
+                                {!qItem.dedicatedAnswers || qItem.dedicatedAnswers.length === 0 ? (
+                                  <span className="text-[10px] italic py-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                    {t('noDedicatedAnswers', 'No dedicated answers added yet. Users will need to type freely, or add preset answers below.')}
+                                  </span>
+                                ) : (
+                                  qItem.dedicatedAnswers.map((ans, ansIdx) => (
+                                    <span
+                                      key={ansIdx}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border shadow-2xs transition"
+                                      style={{
+                                        backgroundColor: 'var(--color-card)',
+                                        borderColor: 'var(--color-border)',
+                                        color: 'var(--color-text)'
+                                      }}
+                                    >
+                                      <span>{ans}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveDedicatedAnswer(activeSection.id, qIdx, ansIdx)}
+                                        className="hover:opacity-75 cursor-pointer ml-0.5 text-slate-400 hover:text-red-500 transition"
+                                        title={t('removeAnswer', 'Remove answer')}
+                                        aria-label={`${t('removeAnswer', 'Remove')} ${ans}`}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+
+                              {/* Add Dedicated Answer Input */}
+                              <div className="flex gap-2 pt-1">
+                                <input
+                                  type="text"
+                                  placeholder={t('addDedicatedAnswerPlaceholder', 'Add dedicated answer option (e.g. 3 Days, High-Protein)...')}
+                                  value={dedicatedAnswerInputs[`${activeSection.id}_${qIdx}`] || ''}
+                                  onChange={(e) => setDedicatedAnswerInputs({
+                                    ...dedicatedAnswerInputs,
+                                    [`${activeSection.id}_${qIdx}`]: e.target.value
+                                  })}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleAddDedicatedAnswer(activeSection.id, qIdx);
+                                    }
+                                  }}
+                                  className="settings-input flex-1 border rounded-lg px-3 py-1.5 text-xs outline-none transition"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddDedicatedAnswer(activeSection.id, qIdx)}
+                                  className="text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90 shrink-0"
+                                  style={{ backgroundColor: 'var(--color-primary)' }}
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  <span>{t('addAnswerBtn', 'Add Answer')}</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         ))
                       )}
                     </div>
                   </div>
 
+                  {/* Add New Question Input */}
                   <div className="flex gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                     <input
                       type="text"
@@ -15980,12 +16074,6 @@ export default function ChefAISettingsPage() {
                       onChange={(e) => setNewQuestionText(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddQuestionToTopic(activeSection.id))}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
                       aria-label={t('addQuestionPrefix', 'Add question')}
                       className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
@@ -16000,10 +16088,10 @@ export default function ChefAISettingsPage() {
                     <button
                       type="button"
                       onClick={() => handleAddQuestionToTopic(activeSection.id)}
-                      className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
+                      className="text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90 shrink-0"
                       style={{ backgroundColor: 'var(--color-emerald)' }}
                     >
-                      <Plus className="h-4 w-4" /> {t('addBtn', 'Add')}
+                      <Plus className="h-4 w-4" /> {t('addQuestionBtn', 'Add Question')}
                     </button>
                   </div>
                 </div>
@@ -16063,7 +16151,7 @@ export default function ChefAISettingsPage() {
                 })}
               </div>
 
-              {/* LIVE PREVIEW BOX */}
+              {/* Live Preview Box */}
               <div className="pt-3 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
@@ -16100,17 +16188,6 @@ export default function ChefAISettingsPage() {
                           <span className="font-bold" style={{ color: 'var(--color-primary)' }}>{t('previewDay1Title', 'Day 1 - Sunday:')}</span>
                           <span className="font-medium" style={{ color: 'var(--color-text)' }}>{t('previewMealName1', 'Avocado Quinoa Bowl')}</span>
                           <span style={{ color: 'var(--color-text-secondary)' }}>25m</span>
-                        </div>
-                        <div 
-                          className="flex items-center justify-between p-2 rounded-xl border text-[11px]"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <span className="font-bold" style={{ color: 'var(--color-primary)' }}>{t('previewDay2Title', 'Day 2 - Monday:')}</span>
-                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>{t('previewMealName2', 'Grilled Salmon Salad')}</span>
-                          <span style={{ color: 'var(--color-text-secondary)' }}>20m</span>
                         </div>
                       </div>
                     </div>
@@ -16267,7 +16344,6 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* Harmonized Persona Selector with Custom Chevron */}
               <div className="space-y-2">
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('assistantVoicePersona', 'Assistant Voice Persona')}
@@ -16362,10 +16438,9 @@ export default function ChefAISettingsPage() {
           </div>
         )}
 
-        {/* TAB 4: AGENT PARAMETERS & KNOWLEDGE TUNING */}
+        {/* TAB 4: AGENT PARAMETERS */}
         {activeTab === 'advanced' && (
           <div className="space-y-6 animate-in fade-in">
-            {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
             <div 
               className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
               style={{
@@ -16503,7 +16578,6 @@ export default function ChefAISettingsPage() {
               </div>
             </div>
 
-            {/* AGENT PARAMETERS, KNOWLEDGE TUNING & RESTORED MAX TOKENS */}
             <div 
               className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
               style={{
@@ -16518,7 +16592,6 @@ export default function ChefAISettingsPage() {
                 <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
               </h2>
 
-              {/* TEMPERATURE, RESTORED MAX TOKENS, AND MAX PLAN DAYS */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="space-y-2">
                   <div className="flex justify-between font-bold">
@@ -16541,7 +16614,6 @@ export default function ChefAISettingsPage() {
                   </p>
                 </div>
 
-                {/* RESTORED: Max Output Tokens Cap */}
                 <div className="space-y-2">
                   <div className="flex justify-between font-bold">
                     <span style={{ color: 'var(--color-text-secondary)' }}>{t('maxTokensLabel', 'Max Tokens Output')}: {maxTokens}</span>
@@ -16574,12 +16646,6 @@ export default function ChefAISettingsPage() {
                     value={maxPlanDays}
                     onChange={(e) => setMaxPlanDays(parseInt(e.target.value) || 7)}
                     autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
                     aria-label={t('maxPlanDaysCap', 'Max Plan Days')}
                     className="settings-input w-full border rounded-xl px-4 py-2.5 outline-none transition"
                     style={{
@@ -16596,7 +16662,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* KNOWLEDGE BASE FEATURE */}
+              {/* Knowledge Base */}
               <div className="space-y-3 pt-1">
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
@@ -16629,12 +16695,6 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
                       aria-label={t('knowledgeBaseHeader', 'Knowledge Base')}
                       className="bg-transparent border-none outline-none w-full text-xs"
@@ -16686,7 +16746,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* CUSTOM VOCABULARY FEATURE */}
+              {/* Custom Vocabulary */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
@@ -16719,12 +16779,6 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
                       aria-label={t('customVocabularyHeader', 'Custom Vocabulary')}
                       className="bg-transparent border-none outline-none w-full text-xs"
@@ -16737,14 +16791,6 @@ export default function ChefAISettingsPage() {
                         if (newVocabInput.trim()) {
                           setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
                           setNewVocabInput('');
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          if (newVocabInput.trim()) {
-                            setCustomVocabularyList([...customVocabularyList, newVocabInput.trim()]);
-                            setNewVocabInput('');
-                          }
                         }
                       }}
                       className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80 outline-none"
@@ -16784,7 +16830,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* FILTER WORDS FEATURE */}
+              {/* Filter Words */}
               <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-danger, #ef4444)' }}>
@@ -16817,12 +16863,6 @@ export default function ChefAISettingsPage() {
                         }
                       }}
                       autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       spellCheck={false}
                       aria-label={t('filterWordsHeader', 'Filter Words')}
                       className="bg-transparent border-none outline-none w-full text-xs"
@@ -16835,14 +16875,6 @@ export default function ChefAISettingsPage() {
                         if (newFilterInput.trim()) {
                           setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
                           setNewFilterInput('');
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          if (newFilterInput.trim()) {
-                            setFilterWordsList([...filterWordsList, newFilterInput.trim()]);
-                            setNewFilterInput('');
-                          }
                         }
                       }}
                       className="px-2.5 py-1 rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition hover:opacity-80 outline-none"
@@ -16882,7 +16914,169 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* SYSTEM PROMPT / PERSONA */}
+              {/* RECOMMENDED RECIPES URL (PRIMARY SOURCE FOR /chef) */}
+              <div className="space-y-3 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <div>
+                    <h3 className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                      <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
+                    </h3>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('recommendedRecipesUrlDesc', 'Configure primary source URLs for recipe recommendations. When users ask for recipes on /chef, AI will search and prioritize these URLs as the primary source.')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span 
+                      className="text-[10px] px-2.5 py-0.5 rounded-full font-bold border shrink-0"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: recommendedRecipeUrls.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {recommendedRecipeUrls.length} {t('urlsActiveBadge', 'Active URLs (Primary)')}
+                    </span>
+                    {recommendedRecipeUrls.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllRecommendedUrls}
+                        className="text-[10px] text-red-400 hover:text-red-500 font-bold transition cursor-pointer"
+                      >
+                        {t('clearAll', 'Clear All')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Multi-URL Input Box with Batch Support */}
+                <div className="space-y-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div 
+                      className="settings-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs flex items-center justify-between shadow-xs transition"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <input
+                        type="text"
+                        placeholder={t('recommendedRecipeUrlPlaceholder', 'Add recipe URL (paste single or multiple separated by commas or newlines)...')}
+                        value={newRecipeUrlInput}
+                        onChange={(e) => setNewRecipeUrlInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddRecommendedUrls();
+                          }
+                        }}
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-label={t('recommendedRecipesUrlHeader', 'Recommended Recipes Url')}
+                        className="bg-transparent border-none outline-none w-full text-xs font-medium"
+                        style={{ color: 'var(--color-text)' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAddRecommendedUrls()}
+                      disabled={!newRecipeUrlInput.trim()}
+                      className="px-4 py-2.5 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-40 hover:opacity-90 shrink-0"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      <Plus className="h-4 w-4" /> {t('addUrlBtn', 'Add URL')}
+                    </button>
+                  </div>
+                  <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                    💡 {t('multiUrlHint', 'Tip: You can paste multiple URLs at once separated by commas or newlines. Chef AI will prioritize these as primary culinary references.')}
+                  </span>
+                </div>
+
+                {/* URL List / Badges */}
+                <div className="space-y-2 pt-1">
+                  {recommendedRecipeUrls.length === 0 ? (
+                    <div 
+                      className="p-4 text-center border border-dashed rounded-2xl text-xs space-y-0.5"
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                    >
+                      <span className="font-semibold block">{t('noRecommendedUrlsTitle', 'No Recommended Recipe URLs configured.')}</span>
+                      <span className="text-[11px] block">{t('noRecommendedUrlsDesc', 'Add your preferred food blog or recipe URLs above to make /chef recommend recipes from them first.')}</span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[260px] overflow-y-auto pr-1">
+                      {recommendedRecipeUrls.map((urlStr, idx) => {
+                        let domain = 'Website';
+                        try {
+                          domain = new URL(urlStr).hostname.replace(/^www\./, '');
+                        } catch (_) {}
+
+                        return (
+                          <div 
+                            key={idx}
+                            className="p-2.5 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span 
+                                  className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border truncate"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-primary)'
+                                  }}
+                                >
+                                  {domain}
+                                </span>
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase"
+                                  style={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  {t('primaryTag', 'Primary')}
+                                </span>
+                              </div>
+                              <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text)' }} title={urlStr}>
+                                {urlStr}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <a
+                                href={urlStr}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1 rounded-lg hover:opacity-80 transition cursor-pointer"
+                                style={{ color: 'var(--color-primary)' }}
+                                title={t('openUrlTooltip', 'Open in new tab')}
+                              >
+                                <Globe className="h-3.5 w-3.5" />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveRecommendedUrl(idx)}
+                                className="p-1 rounded-lg hover:text-red-500 transition cursor-pointer"
+                                style={{ color: 'var(--color-text-secondary)' }}
+                                title={t('removeUrlTooltip', 'Remove URL')}
+                                aria-label={t('removeUrlTooltip', 'Remove URL')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* System Prompt */}
               <div className="space-y-2 pt-3 border-t transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
                 <label className="block font-bold uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('systemPromptHeader', 'System Prompt / Autonomous Persona')}
@@ -16892,12 +17086,6 @@ export default function ChefAISettingsPage() {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
                   spellCheck={false}
                   aria-label={t('systemPromptHeader', 'System Prompt')}
                   className="settings-input w-full border rounded-xl p-3.5 outline-none leading-relaxed font-sans text-xs transition"
@@ -48154,7 +48342,9 @@ export default function WalletPage() {
 
 ## File: `apps/web/src/app/api/token/route.ts`
 ```typescript
-export { GET, POST, OPTIONS, dynamic } from '../tokens/route';
+export { GET, POST, OPTIONS } from '../tokens/route';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 ```
 
@@ -53554,11 +53744,11 @@ async function savePaymentSettingsDual(ps: any, currency = 'USD') {
     } catch (myErr) {
       // 3. Fallback conditional update
       try {
-        const row = await query(`SELECT id FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = await query(`SELECT id FROM admin_settings WHERE id = '1' LIMIT 1`);
         const exists = Array.isArray(row) ? row.length > 0 : Boolean(((row as any)?.rows)?.length);
         if (exists) {
-          await query(`UPDATE admin_settings SET payment_settings = $1, currency = $2 WHERE id = 1`, [jsonSettings, currency]).catch(async () => {
-            await query(`UPDATE admin_settings SET payment_settings = ?, currency = ? WHERE id = 1`, [jsonSettings, currency]);
+          await query(`UPDATE admin_settings SET payment_settings = $1, currency = $2 WHERE id = '1'`, [jsonSettings, currency]).catch(async () => {
+            await query(`UPDATE admin_settings SET payment_settings = ?, currency = ? WHERE id = '1'`, [jsonSettings, currency]);
           });
         } else {
           await query(`INSERT INTO admin_settings (id, payment_settings, currency) VALUES (1, $1, $2)`, [jsonSettings, currency]).catch(async () => {
@@ -53630,7 +53820,7 @@ export async function GET() {
     };
 
     // Load from database row id = 1
-    const sRes = await query(`SELECT * FROM admin_settings WHERE id = 1 LIMIT 1`).catch(() => null);
+    const sRes = await query(`SELECT * FROM admin_settings WHERE id = '1' LIMIT 1`).catch(() => null);
     const row = parseDbRow(sRes);
     if (row) {
       if (row.payment_settings) {
@@ -53836,86 +54026,111 @@ export async function DELETE(req: Request) {
 
 ## File: `apps/web/src/app/api/admin/token-setting/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { getTokenSettings, saveTokenSettings, initTokenTables } from '@/lib/tokenService';
+import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    await initTokenTables();
-    const settings = await getTokenSettings();
+    let currency = 'USD';
+    let currencySymbol = '$';
+
+    try {
+      const adminRes: any = await query(
+        `SELECT * FROM admin_settings WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1' LIMIT 1;`
+      ).catch(() => null);
+      const row = Array.isArray(adminRes) ? adminRes[0] : adminRes?.rows?.[0];
+      if (row) {
+        if (row.currency) currency = row.currency;
+        if (row.currency_symbol) currencySymbol = row.currency_symbol;
+        if (row.currencies && Array.isArray(row.currencies)) {
+          const active = row.currencies.find((c: any) => c.is_default || c.active);
+          if (active) {
+            currency = active.code || currency;
+            currencySymbol = active.symbol || currencySymbol;
+          }
+        }
+      }
+    } catch (_) {}
 
     let plans: any[] = [];
     try {
-      plans = await query('SELECT id, slug, name, monthly_tokens, token_limit, price FROM subscription_plans ORDER BY created_at ASC');
+      const plansRes: any = await query(`SELECT * FROM subscription_plans;`).catch(() => null);
+      const rows = Array.isArray(plansRes) ? plansRes : (plansRes?.rows || []);
+      plans = rows.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        price: Number(p.price ?? p.monthly_price_dollars ?? p.price_monthly ?? 0),
+        monthly_price_dollars: Number(p.monthly_price_dollars ?? p.price ?? 0),
+        interval: p.interval || 'month',
+        token_limit: Number(p.token_limit ?? p.tokens_monthly ?? 50000),
+        is_active: p.is_active !== false,
+      }));
+      plans.sort((a, b) => a.price - b.price);
     } catch (_) {}
 
-    let transactions: any[] = [];
+    let settings = {
+      is_enabled: true,
+      default_free_tokens: 500,
+      tokens_per_request: 1,
+      cost_per_1k_tokens: 0.002,
+    };
+
     try {
-      transactions = await query('SELECT id, user_email as customer_email, amount, balance_after, type, description, created_at FROM token_transactions ORDER BY created_at DESC LIMIT 50');
+      const tRes: any = await query(
+        `SELECT * FROM token_settings WHERE id::text = 'current' OR id::text = '1' LIMIT 1;`
+      ).catch(() => null);
+      const tRow = Array.isArray(tRes) ? tRes[0] : tRes?.rows?.[0];
+      if (tRow) {
+        settings = {
+          is_enabled: tRow.is_enabled !== false,
+          default_free_tokens: Number(tRow.default_free_tokens ?? 500),
+          tokens_per_request: Number(tRow.tokens_per_request ?? 1),
+          cost_per_1k_tokens: Number(tRow.cost_per_1k_tokens ?? 0.002),
+        };
+      }
     } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      settings,
-      tokenSettings: settings,
-      chefCost: settings.chefCost,
-      aiChefCost: settings.chefCost,
-      tokenSymbol: settings.tokenSymbol,
-      tokenName: settings.tokenName,
+      currency,
+      currencySymbol,
       plans,
-      transactions,
-      currency: 'USD',
-      currencySymbol: '$'
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+      settings,
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const raw = await req.json();
-    const body = raw.tokenSettings || raw.settings || raw;
+    const body = await req.json();
+    const { settings } = body;
 
-    const rawChef = body.aiChefCost ?? body.chefCost ?? (body.featureCosts ? (body.featureCosts['AI Chef Recipe Generation'] ?? body.featureCosts['chef']) : undefined);
-    const resolvedChefCost = rawChef !== undefined ? Math.max(0, Number(rawChef)) : 8;
-
-    const updated = await saveTokenSettings({
-      tokenName: body.tokenName !== undefined ? String(body.tokenName).trim() : 'Foodie Token',
-      tokenSymbol: body.tokenSymbol !== undefined ? String(body.tokenSymbol).trim() : '',
-      chefCost: resolvedChefCost,
-      aiChefCost: resolvedChefCost,
-      importUrlCost: body.importUrlCost !== undefined ? Number(body.importUrlCost) : 5,
-      importTextCost: body.importTextCost !== undefined ? Number(body.importTextCost) : 2,
-      importPhotoCost: body.importPhotoCost !== undefined ? Number(body.importPhotoCost) : 10,
-      mealPlannerCost: body.mealPlannerCost !== undefined ? Number(body.mealPlannerCost) : 5,
-      macroAnalysisCost: body.macroAnalysisCost !== undefined ? Number(body.macroAnalysisCost) : 3,
-      startingBalance: body.startingBalance !== undefined ? Number(body.startingBalance) : 100,
-      packages: Array.isArray(body.packages) ? body.packages : undefined,
-      isEnabled: body.isEnabled !== undefined ? Boolean(body.isEnabled) : true,
-      planAllocations: body.planAllocations || {}
-    });
-
-    if (body.planAllocations && typeof body.planAllocations === 'object') {
-      for (const [slug, amount] of Object.entries(body.planAllocations)) {
-        try {
-          await query('UPDATE subscription_plans SET monthly_tokens = $1, token_limit = $1 WHERE slug = $2', [Math.max(0, Number(amount)), slug]);
-        } catch (_) {}
-      }
+    if (settings) {
+      await query(`
+        INSERT INTO token_settings (id, is_enabled, default_free_tokens, tokens_per_request, cost_per_1k_tokens, updated_at)
+        VALUES ('current', $1, $2, $3, $4, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          is_enabled = EXCLUDED.is_enabled,
+          default_free_tokens = EXCLUDED.default_free_tokens,
+          tokens_per_request = EXCLUDED.tokens_per_request,
+          cost_per_1k_tokens = EXCLUDED.cost_per_1k_tokens,
+          updated_at = NOW();
+      `, [
+        settings.is_enabled !== false,
+        parseInt(settings.default_free_tokens || '500', 10),
+        parseInt(settings.tokens_per_request || '1', 10),
+        parseFloat(settings.cost_per_1k_tokens || '0.002')
+      ]).catch(() => {});
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Token settings successfully persisted to PostgreSQL & MySQL.',
-      settings: updated,
-      tokenSettings: updated,
-      chefCost: updated.chefCost,
-      aiChefCost: updated.chefCost,
-      tokenSymbol: updated.tokenSymbol
-    });
+    return NextResponse.json({ success: true, message: 'Settings saved successfully' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -54294,11 +54509,11 @@ async function savePaymentSettingsDual(ps: any, currency = 'USD') {
     } catch (myErr) {
       // 3. Fallback conditional update
       try {
-        const row = await query(`SELECT id FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = await query(`SELECT id FROM admin_settings WHERE id = '1' LIMIT 1`);
         const exists = Array.isArray(row) ? row.length > 0 : Boolean(((row as any)?.rows)?.length);
         if (exists) {
-          await query(`UPDATE admin_settings SET payment_settings = $1, currency = $2 WHERE id = 1`, [jsonSettings, currency]).catch(async () => {
-            await query(`UPDATE admin_settings SET payment_settings = ?, currency = ? WHERE id = 1`, [jsonSettings, currency]);
+          await query(`UPDATE admin_settings SET payment_settings = $1, currency = $2 WHERE id = '1'`, [jsonSettings, currency]).catch(async () => {
+            await query(`UPDATE admin_settings SET payment_settings = ?, currency = ? WHERE id = '1'`, [jsonSettings, currency]);
           });
         } else {
           await query(`INSERT INTO admin_settings (id, payment_settings, currency) VALUES (1, $1, $2)`, [jsonSettings, currency]).catch(async () => {
@@ -54370,7 +54585,7 @@ export async function GET() {
     };
 
     // Load from database row id = 1
-    const sRes = await query(`SELECT * FROM admin_settings WHERE id = 1 LIMIT 1`).catch(() => null);
+    const sRes = await query(`SELECT * FROM admin_settings WHERE id = '1' LIMIT 1`).catch(() => null);
     const row = parseDbRow(sRes);
     if (row) {
       if (row.payment_settings) {
@@ -60958,6 +61173,7 @@ import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 import { resolveAndScrapeBestRecipe, extractImageFromUrl } from '@/lib/recipeScraper';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 function cleanJsonString(raw: string): string {
   if (!raw) return '';
@@ -60967,7 +61183,6 @@ function cleanJsonString(raw: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Ingest and parse request body immediately
     let body: any = {};
     try {
       body = await req.json();
@@ -60977,25 +61192,25 @@ export async function POST(req: NextRequest) {
 
     const prompt = (body.prompt || '').trim();
     const isQuestionnaire = Boolean(body.isQuestionnaireComplete);
-    const topicTitle = body.topicTitle || 'Custom Meal Plan';
-    const qaList = Array.isArray(body.questionnaireSummary) ? body.questionnaireSummary : [];
-    const answersMap = body.questionnaireAnswers || {};
+    const topicTitle = body.topicTitle || 'Culinary Meal Plan';
+    const qaList: any[] = Array.isArray(body.questionnaireSummary) ? body.questionnaireSummary : [];
+    const answersMap: Record<string, any> = body.questionnaireAnswers || {};
     const prefs = body.preferences || {};
     const pantryItems = Array.isArray(body.pantry) ? body.pantry : [];
     let referenceUrls: string[] = Array.isArray(body.recommendedRecipeUrls) 
       ? body.recommendedRecipeUrls.filter(Boolean) 
       : [];
 
-    let userId = body.userId;
-    let userEmail = body.userEmail || body.email;
+    let userId = String(body.userId || '').trim();
+    let userEmail = String(body.userEmail || body.email || '').toLowerCase().trim();
 
     if (!userId || !userEmail) {
       const cookieHeader = req.cookies.get('zecratary_session')?.value;
       if (cookieHeader) {
         try {
           const parsed = JSON.parse(decodeURIComponent(cookieHeader));
-          userId = userId || parsed.id;
-          userEmail = userEmail || parsed.email;
+          userId = userId || String(parsed.id || '').trim();
+          userEmail = userEmail || String(parsed.email || '').toLowerCase().trim();
         } catch (_) {}
       }
     }
@@ -61004,56 +61219,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Prompt or questionnaire completion is required' }, { status: 400 });
     }
 
-    // 2. All Saved Recipe Search Grounding from PostgreSQL
-    let savedRecipesContext = '';
-    const enableSavedRecipeSearch = (body as any)?.enableSavedRecipeSearch !== undefined 
-      ? Boolean((body as any).enableSavedRecipeSearch) 
-      : true;
-
-    if (enableSavedRecipeSearch) {
-      try {
-        const savedRows = await query(
-          `SELECT title, description, meal_type, ingredients, instructions, prep_minutes, cook_minutes, source_url 
-           FROM saved_recipes 
-           ORDER BY updated_at DESC LIMIT 20`
-        ).catch(() => []);
-        
-        const rows = Array.isArray(savedRows) ? savedRows : ((savedRows as any)?.rows || []);
-        if (rows.length > 0) {
-          savedRecipesContext = `
-ALL SAVED RECIPES DATABASE & SEARCH GROUNDING:
-${rows.map((r: any, idx: number) => {
-  const ings = Array.isArray(r.ingredients) ? r.ingredients.slice(0, 10).join(', ') : String(r.ingredients || '').slice(0, 150);
-  const insts = Array.isArray(r.instructions) ? r.instructions.slice(0, 3).join('; ') : String(r.instructions || '').slice(0, 150);
-  return `[Saved Recipe ${idx + 1}: "${r.title}"]
-- Meal Type: ${r.meal_type || 'General'}
-- Ingredients: ${ings}
-- Instructions: ${insts}
-- Source: ${r.source_url || 'Personal Saved Collection'}`;
-}).join('\n\n')}
-`;
-        }
-      } catch (err) {
-        console.warn('[AI API] Could not retrieve saved recipes:', err);
-      }
-    }
-
-    // 3. Fetch AI Configurations from PostgreSQL admin_settings
+    // 1. Fetch AI Configurations from PostgreSQL / MySQL admin_settings
     let activeModel = 'gemini-2.5-flash';
     let provider = 'gemini';
     let apiKey = '';
     let temperature = 0.7;
     let maxTokens = 4096;
-    let systemPrompt = 'You are Chef Foodie, an expert executive culinary AI assistant.';
+    let systemPrompt = 'You are Chef Foodie, an expert autonomous culinary AI assistant.';
     let strictDietEnforcement = false;
     let filterWordsList: string[] = [];
     let customVocabularyList: string[] = [];
     let maxPlanDays = 7;
+    let resultDisplayMode = 'card';
 
     try {
-      const sRows = await query('SELECT chef_ai_settings, ai_model, ai_provider, value FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-      if (sRows.length > 0) {
-        const row = sRows[0];
+      const sRows: any = await query(`
+        SELECT chef_ai_settings, ai_model, ai_provider, value 
+        FROM admin_settings 
+        WHERE id::text = 'primary_settings' OR key::text = 'current' OR id::text = '1'
+        LIMIT 1;
+      `);
+      const row = Array.isArray(sRows) ? sRows[0] : sRows?.rows?.[0];
+      if (row) {
         let c = row.chef_ai_settings;
         if (typeof c === 'string') {
           try { c = JSON.parse(c); } catch (_) { c = {}; }
@@ -61062,7 +61249,7 @@ ${rows.map((r: any, idx: number) => {
         }
 
         if (c) {
-          if (c.model || row.ai_model) activeModel = (c.model || row.ai_model).replace(/^models\//, '');
+          if (c.model || row.ai_model) activeModel = String(c.model || row.ai_model).replace(/^models\//, '');
           if (c.provider || row.ai_provider) provider = c.provider || row.ai_provider;
           if (c.apiKey) apiKey = c.apiKey;
           if (c.temperature !== undefined) temperature = Number(c.temperature);
@@ -61072,24 +61259,24 @@ ${rows.map((r: any, idx: number) => {
           if (Array.isArray(c.filterWordsList)) filterWordsList = c.filterWordsList.filter(Boolean);
           if (Array.isArray(c.customVocabularyList)) customVocabularyList = c.customVocabularyList.filter(Boolean);
           if (c.maxPlanDays !== undefined) maxPlanDays = Number(c.maxPlanDays) || 7;
+          if (c.resultDisplayMode) resultDisplayMode = c.resultDisplayMode;
           if (referenceUrls.length === 0 && Array.isArray(c.recommendedRecipeUrls)) {
             referenceUrls = c.recommendedRecipeUrls.filter(Boolean);
           }
         }
       }
-    } catch (e) {
-      console.warn('[PostgreSQL] Settings load notice:', e);
-    }
+    } catch (_) {}
 
     if (!apiKey) {
       try {
-        const kRows = await query(
-          "SELECT key_value FROM admin_api_keys WHERE (provider = $1 OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) AND status = 'active' ORDER BY updated_at DESC LIMIT 1",
-          [provider]
-        );
-        if (kRows.length > 0 && kRows[0].key_value) {
-          apiKey = kRows[0].key_value;
-        }
+        const kRows: any = await query(`
+          SELECT key_value FROM admin_api_keys 
+          WHERE (provider = $1::text OR env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY')) 
+            AND status = 'active' 
+          ORDER BY updated_at DESC LIMIT 1;
+        `, [provider]);
+        const kRow = Array.isArray(kRows) ? kRows[0] : kRows?.rows?.[0];
+        if (kRow?.key_value) apiKey = kRow.key_value;
       } catch (_) {}
     }
     if (!apiKey) {
@@ -61098,11 +61285,11 @@ ${rows.map((r: any, idx: number) => {
         : (process.env.OPENAI_API_KEY || '');
     }
 
-    // 4. Strict Dietary Filter Verification
+    // 2. Enforce Strict Dietary Filters
     if (strictDietEnforcement && filterWordsList.length > 0) {
       const combinedCheck = `${prompt} ${JSON.stringify(answersMap)}`.toLowerCase();
-      const matched = filterWordsList.find(w => {
-        const clean = w.trim().toLowerCase();
+      const matched = filterWordsList.find((w: any) => {
+        const clean = String(w || '').trim().toLowerCase();
         return clean.length > 1 && combinedCheck.includes(clean);
       });
       if (matched) {
@@ -61114,33 +61301,33 @@ ${rows.map((r: any, idx: number) => {
       }
     }
 
-    // 5. Authoritative Token Deduction Telemetry
+    // 3. Token Deduction Telemetry
     const tokenSettings = await getTokenSettings();
-    const authoritativeCost = tokenSettings.isEnabled ? (tokenSettings.chefCost ?? 8) : 0;
+    const chefCost = tokenSettings.chefCost ?? 1;
     let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
 
-    if (authoritativeCost > 0 && (userId || userEmail)) {
+    if (tokenSettings.isEnabled && chefCost > 0 && !body.isDecisionConfirmation) {
       deduction = await deductUserTokens({
-        userId,
-        userEmail,
-        cost: authoritativeCost,
+        userId: userId || 'guest',
+        userEmail: userEmail || 'user@zecratary.com',
+        cost: chefCost,
         feature: 'chef',
-        description: isQuestionnaire ? `Intake plan: ${topicTitle}` : `Chef prompt: ${prompt.slice(0, 35)}...`
+        description: isQuestionnaire ? `Questionnaire plan: ${topicTitle}` : `Chef prompt: ${prompt.slice(0, 35)}...`
       });
 
       if (!deduction.success) {
         return NextResponse.json({
           success: false,
-          error: deduction.error || 'Insufficient token balance.',
+          error: deduction.error,
           insufficientTokens: true,
-          required: authoritativeCost,
+          required: chefCost,
           currentBalance: deduction.currentBalance,
           tokenSymbol: tokenSettings.tokenSymbol
         }, { status: 402 });
       }
     }
 
-    // 6. Parse Intake Questionnaire Variables
+    // 4. Parse Intake Questionnaire Variables
     let parsedDays = body.requestedDays || 3;
     let parsedMealTypes = body.requestedMealTypes || ['Dinner'];
     let parsedStartDate = body.startDate || 'Today';
@@ -61148,8 +61335,8 @@ ${rows.map((r: any, idx: number) => {
     let parsedBudget = body.requestedBudget || '$5 - $8 per serving';
 
     for (const item of qaList) {
-      const q = (item.question || '').toLowerCase();
-      const a = (item.answer || '').trim();
+      const q = String((item as any)?.question || '').toLowerCase();
+      const a = String((item as any)?.answer || '').trim();
       if (/\b(how many days|duration|number of days)\b/i.test(q)) {
         const m = a.match(/\d+/);
         if (m) parsedDays = Math.min(14, Math.max(1, parseInt(m[0], 10)));
@@ -61177,13 +61364,14 @@ ${rows.map((r: any, idx: number) => {
     const allergies = Array.isArray(prefs.allergy) ? prefs.allergy : ['Peanuts'];
     const avoid = Array.isArray(prefs.avoid) ? prefs.avoid : ['Oily'];
 
-    // 7. Intelligent Index Link Crawling & Slug Discovery
+    // 5. Intelligent Two-Tier Reference URL Scraping & Crawling
     let scrapedGrounding: any = null;
     if (referenceUrls.length > 0) {
       try {
-        scrapedGrounding = await resolveAndScrapeBestRecipe(prompt || parsedTheme, referenceUrls);
-      } catch (scrapeErr) {
-        console.warn('[AI Route] Web scraper notice:', scrapeErr);
+        const queryTerm = prompt || parsedTheme || topicTitle;
+        scrapedGrounding = await resolveAndScrapeBestRecipe(queryTerm, referenceUrls);
+      } catch (err) {
+        console.warn('[AI Route Scraper]:', err);
       }
     }
 
@@ -61191,47 +61379,47 @@ ${rows.map((r: any, idx: number) => {
     let generatedPlan: any = null;
     let recommendedRecipe: any = null;
 
-    // 8. Query Generative AI with Scraped Source Grounding
+    // 6. Execute AI Synthesis / Hybrid Adaptation
     if (apiKey && apiKey.length > 10 && !apiKey.includes('sample')) {
       const modelsToTry = [activeModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
       const uniqueModels = Array.from(new Set(modelsToTry));
 
+      // Explicitly typed callback parameters satisfying TypeScript strict noImplicitAny rules
       const intakeContext = qaList.length > 0 
         ? qaList.map((pair: any) => `Q: ${pair.question}\nA: ${pair.answer}`).join('\n')
         : Object.entries(answersMap).map(([k, v]: [string, any]) => `Step ${k}: ${v}`).join('\n');
 
       const scrapedGroundingPrompt = scrapedGrounding ? `
-PRIMARY SOURCE RECIPE (CRAWLED & EXTRACTED FROM ADMIN RECOMMENDED URL):
+PRIMARY AUTHENTIC SCRAPED RECIPE (FROM CURATED WEB REFERENCE):
 - Title: ${scrapedGrounding.title}
 - Source URL: ${scrapedGrounding.sourceUrl}
 - Domain: ${scrapedGrounding.sourceName}
-- Ingredients: ${scrapedGrounding.ingredients.join(', ')}
-- Instructions: ${scrapedGrounding.instructions.join(' ')}
-- Prep: ${scrapedGrounding.prepMinutes}m | Cook: ${scrapedGrounding.cookMinutes}m
-MANDATORY: Adapt and recommend this authentic dish as the signature Recommended Recipe, citing the source URL.` : '';
+- Ingredients: ${(scrapedGrounding.ingredients || []).join(', ')}
+- Instructions: ${(scrapedGrounding.instructions || []).join(' ')}
+- Prep: ${scrapedGrounding.prepMinutes || 15}m | Cook: ${scrapedGrounding.cookMinutes || 20}m
+MANDATORY DIRECTIVE: Use this authentic human-tested dish as the ground truth for your Final Recommended Recipe. Adapt ingredient quantities to ${servings} servings and strictly omit all allergies: ${allergies.concat(avoid).join(', ') || 'None'}.` : '';
 
       const fullPrompt = isQuestionnaire
         ? `${systemPrompt}
-${savedRecipesContext}
-You are Chef Foodie. Formulate an accurate ${parsedDays}-day meal plan and a signature Recommended Recipe.
-LOGISTICS & DIET:
+You are Chef Foodie. The user completed the intake questionnaire for "${topicTitle}".
+INTAKE SUMMARY:
 - Total Days: ${parsedDays}
 - Meal Types: ${parsedMealTypes.join(', ')}
 - Theme: ${parsedTheme}
-- Budget: ${parsedBudget}
-- Servings: ${servings} people (${country})
-- Diets: ${diets.join(', ')}
-- Strictly Avoid / Allergies: ${allergies.concat(avoid).join(', ') || 'None'}
-- Pantry In-Stock: ${pantryItems.length > 0 ? pantryItems.join(', ') : 'Standard kitchen staples'}
-${referenceUrls.length > 0 ? `- Primary Sources: ${referenceUrls.join(', ')}` : ''}
+- Budget Target: ${parsedBudget}
+- Household Servings: ${servings} people (${country})
+- Dietary Rules: ${diets.join(', ') || 'Standard'}
+- Prohibited Allergies/Avoid: ${allergies.concat(avoid).join(', ') || 'None'}
+- Pantry In-Stock Items: ${pantryItems.length > 0 ? pantryItems.join(', ') : 'Standard kitchen essentials'}
 ${scrapedGroundingPrompt}
 
-USER INTAKE RESPONSES:
+USER QUESTIONNAIRE RESPONSES:
 ${intakeContext}
 
-Return ONLY valid JSON matching this schema:
+Return ONLY valid JSON with this exact structure:
 {
-  "reply": "Warm culinary message detailing the plan",
+  "reply": "Warm culinary message detailing why this meal plan and recipe suit their questionnaire answers.",
+  "sourcingType": "${scrapedGrounding ? 'scraped_hybrid' : 'ai_generated'}",
   "plan": {
     "title": "${parsedDays}-Day ${parsedTheme} Plan",
     "totalDays": ${parsedDays},
@@ -61244,7 +61432,7 @@ Return ONLY valid JSON matching this schema:
         "dayLabel": "Day 1",
         "dateStr": "${parsedStartDate}",
         "mealType": "${parsedMealTypes[0] || 'Dinner'}",
-        "title": "Dish Name",
+        "title": "Dish Title",
         "description": "Short culinary summary",
         "prepMinutes": 15,
         "cookMinutes": 20,
@@ -61254,9 +61442,9 @@ Return ONLY valid JSON matching this schema:
     ]
   },
   "recommendedRecipe": {
-    "title": "${scrapedGrounding?.title || 'Signature Recipe Name'}",
-    "description": "${scrapedGrounding?.description || 'Detailed chef description'}",
-    "sourceUrl": "${scrapedGrounding?.sourceUrl || referenceUrls[0] || ''}",
+    "title": "${scrapedGrounding?.title || 'Signature Recommended Dish'}",
+    "description": "${scrapedGrounding?.description || 'Chef curated culinary specialty'}",
+    "sourceUrl": "${scrapedGrounding?.sourceUrl || ''}",
     "sourceName": "${scrapedGrounding?.sourceName || ''}",
     "prepMinutes": ${scrapedGrounding?.prepMinutes || 15},
     "cookMinutes": ${scrapedGrounding?.cookMinutes || 20},
@@ -61265,14 +61453,13 @@ Return ONLY valid JSON matching this schema:
     "mealType": "${parsedMealTypes[0] || 'Dinner'}",
     "ingredients": ["ingredient 1", "ingredient 2"],
     "instructions": ["Step 1", "Step 2", "Step 3"],
-    "chefTip": "Technique secret"
+    "chefTip": "Chef seasoning secret",
+    "isScraped": ${Boolean(scrapedGrounding)}
   }
 }`
         : `${systemPrompt}
-${savedRecipesContext}
 User Query: "${prompt}"
 Context: Cooking for ${servings} people in ${country}. Diet: ${diets.join(', ')}. Avoid: ${allergies.concat(avoid).join(', ')}. Pantry items: ${pantryItems.join(', ')}.
-${referenceUrls.length > 0 ? `Primary References: ${referenceUrls.join(', ')}` : ''}
 ${scrapedGroundingPrompt}
 
 Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
@@ -61313,7 +61500,7 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       }
     }
 
-    // 9. Synthetic Fallback if LLM was unavailable
+    // 7. Resilient Fallback Synthesizer if LLM is Offline
     if (!responseText) {
       if (scrapedGrounding) {
         recommendedRecipe = {
@@ -61329,9 +61516,10 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
           ingredients: scrapedGrounding.ingredients,
           instructions: scrapedGrounding.instructions,
           chefTip: 'Rest for 2 minutes before serving so aromas infuse completely.',
-          image: scrapedGrounding.image
+          image: scrapedGrounding.image,
+          isScraped: true
         };
-        responseText = `Here is a curated recipe recommendation derived directly from your primary source (${scrapedGrounding.sourceName || 'web source'}).`;
+        responseText = `Here is your authentic recipe recommendation scraped from your curated web reference (${scrapedGrounding.sourceName || 'web source'}).`;
       } else if (isQuestionnaire) {
         const meals: any[] = [];
         for (let dIdx = 0; dIdx < parsedDays; dIdx++) {
@@ -61393,7 +61581,7 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       }
     }
 
-    // 10. Attach Scraped Image & Outbound Citation
+    // 8. Attach Authentic Photo & Resolve Image Fallbacks
     if (recommendedRecipe) {
       if (scrapedGrounding?.image && !recommendedRecipe.image) {
         recommendedRecipe.image = scrapedGrounding.image;
@@ -61412,13 +61600,13 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       }
     }
 
-    // 11. Record Usage Telemetry
+    // 9. Record Usage Telemetry
     const promptTokens = Math.max(25, Math.ceil((prompt.length + 150) / 4));
     const completionTokens = Math.max(40, Math.ceil(responseText.length / 4) + (recommendedRecipe ? 100 : 0));
 
     recordTokenUsage({
-      userId,
-      userEmail,
+      userId: userId || 'guest',
+      userEmail: userEmail || 'user@zecratary.com',
       promptTokens,
       completionTokens,
       model: activeModel,
@@ -61432,7 +61620,8 @@ Respond with valid JSON containing "reply" and optionally "recommendedRecipe".`;
       recommendedRecipe,
       recipe: recommendedRecipe,
       model: activeModel,
-      consumedSystemTokens: authoritativeCost,
+      resultDisplayMode,
+      consumedSystemTokens: chefCost,
       tokenSymbol: tokenSettings.tokenSymbol,
       remainingBalance: deduction.currentBalance
     }, { headers: { 'Cache-Control': 'no-store' } });
@@ -62311,628 +62500,300 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/wallet/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import Stripe from 'stripe';
-import fs from 'fs';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
+let isDbInitialized = false;
 
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
-
-// Universal query runner supporting PostgreSQL ($1) and MySQL (?)
-async function universalQuery(sql: string, params: any[] = []): Promise<any> {
+async function initWalletDb() {
+  if (isDbInitialized) return;
   try {
-    return await query(sql, params);
-  } catch (err: any) {
-    if (sql.includes('$1') && (err?.message?.includes('syntax') || err?.code === 'ER_PARSE_ERROR')) {
-      let qSql = sql;
-      params.forEach((_, idx) => {
-        qSql = qSql.replace(new RegExp(`\\$${idx + 1}`, 'g'), '?');
-      });
-      return await query(qSql, params);
-    }
-    throw err;
-  }
-}
-
-async function ensureWalletSchema() {
-  try {
-    await universalQuery(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id INT PRIMARY KEY DEFAULT 1,
-        payment_settings TEXT,
-        currency VARCHAR(10) DEFAULT 'USD',
-        site_name VARCHAR(255),
-        theme_colors TEXT,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    await universalQuery(`
+    await query(`
       CREATE TABLE IF NOT EXISTS wallet_settings (
-        id INT PRIMARY KEY DEFAULT 1,
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
+        is_enabled BOOLEAN DEFAULT true,
         currency VARCHAR(10) DEFAULT 'USD',
-        allowed_gateways TEXT,
-        active_gateway VARCHAR(50) DEFAULT 'stripe',
-        min_topup DECIMAL(10,2) DEFAULT 5.00,
-        max_topup DECIMAL(10,2) DEFAULT 1000.00,
-        preset_amounts TEXT,
-        bonus_rules TEXT,
-        allow_site_purchases BOOLEAN DEFAULT TRUE,
-        stripe_config TEXT,
-        paypal_config TEXT,
-        manual_details TEXT,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+        min_topup NUMERIC(10,2) DEFAULT 5.00,
+        max_topup NUMERIC(10,2) DEFAULT 1000.00,
+        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
+        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
+        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
+        allow_site_purchases BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
 
-    await universalQuery(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        email VARCHAR(255) UNIQUE,
-        name VARCHAR(255),
-        wallet_balance DECIMAL(12,2) DEFAULT 0.00,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    await universalQuery(`
       CREATE TABLE IF NOT EXISTS wallet_transactions (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255),
-        user_email VARCHAR(255),
-        amount DECIMAL(12,2) DEFAULT 0.00,
-        balance_after DECIMAL(12,2) DEFAULT 0.00,
-        type VARCHAR(50) DEFAULT 'topup',
-        gateway VARCHAR(50) DEFAULT 'stripe',
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64),
+        user_email VARCHAR(255) NOT NULL,
+        type VARCHAR(32) NOT NULL,
+        amount NUMERIC(10,2) NOT NULL,
+        balance_after NUMERIC(10,2) NOT NULL,
+        gateway VARCHAR(32) DEFAULT 'stripe',
         gateway_tx_id VARCHAR(255),
-        status VARCHAR(50) DEFAULT 'completed',
+        status VARCHAR(32) DEFAULT 'succeeded',
         description TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
 
-    await universalQuery(`
+      CREATE INDEX IF NOT EXISTS idx_wallet_tx_user ON wallet_transactions(user_id, user_email);
+
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(255) PRIMARY KEY,
-        customer_name VARCHAR(255),
-        customer_email VARCHAR(255),
-        plan_name VARCHAR(255),
-        plan_slug VARCHAR(255),
-        amount DECIMAL(12,2) DEFAULT 0.00,
+        customer_name TEXT,
+        customer_email TEXT,
+        plan_name TEXT,
+        plan_slug TEXT,
+        amount NUMERIC DEFAULT 0,
         currency VARCHAR(10) DEFAULT 'USD',
         gateway VARCHAR(50) DEFAULT 'stripe',
         status VARCHAR(50) DEFAULT 'succeeded',
-        transfer_reference TEXT,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+        test_mode BOOLEAN DEFAULT false,
+        failure_reason TEXT,
+        is_recurring BOOLEAN DEFAULT false,
+        recurring_interval VARCHAR(20) DEFAULT 'ONE_TIME',
+        auto_renew BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        gateway_transaction_id TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ
+      );
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
+
+      INSERT INTO wallet_settings (id, is_enabled, currency, min_topup, max_topup, preset_amounts, bonus_rules, allowed_gateways, allow_site_purchases)
+      VALUES ('current', true, 'USD', 5.00, 1000.00, '[10, 25, 50, 100, 250]', '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]', '["stripe", "paypal", "manual"]', true)
+      ON CONFLICT (id) DO UPDATE SET min_topup = LEAST(wallet_settings.min_topup, 5.00);
     `);
-  } catch (_) {}
+    isDbInitialized = true;
+  } catch (err: any) {
+    console.warn('[Wallet DB init notice]:', err.message);
+    isDbInitialized = true;
+  }
 }
 
-const ZERO_DECIMAL_CURRENCIES = ['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'];
-function isZeroDecimal(currency: string): boolean {
-  return ZERO_DECIMAL_CURRENCIES.includes((currency || '').toUpperCase());
-}
-
-async function getAuthoritativeGatewaySettings() {
-  await ensureWalletSchema();
-
-  let settings: any = {
-    activeGateway: 'stripe',
-    currency: 'USD',
-    testMode: true,
-    stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
-    paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
-    manualSettlement: {
-      enabled: false,
-      bankName: '',
-      accountHolder: '',
-      accountNumber: '',
-      routingNumber: '',
-      swiftBic: '',
-      branchName: '',
-      instructions: 'Please transfer the exact amount and include your reference number.',
-      requireReference: true,
-    }
-  };
-
-  // 1. Fetch from admin_settings
+export async function GET(req: NextRequest) {
   try {
-    const sRes = await universalQuery(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-    const row = parseDbRow(sRes);
-    if (row?.payment_settings) {
-      const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-      if (ps && typeof ps === 'object') settings = { ...settings, ...ps };
-      if (row.currency) settings.currency = row.currency;
-    }
-  } catch (_) {}
+    await initWalletDb();
+    const { searchParams } = new URL(req.url);
+    const email = String(searchParams.get('email') || '').toLowerCase().trim();
+    const userId = String(searchParams.get('userId') || '').trim();
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
+    const offset = (page - 1) * limit;
+    const search = String(searchParams.get('search') || '').toLowerCase().trim();
+    const typeFilter = String(searchParams.get('type') || 'all').toLowerCase().trim();
 
-  // 2. Fetch from wallet_settings (reconcile manual_details)
-  try {
-    const wRes = await universalQuery(`SELECT * FROM wallet_settings WHERE id = 1 LIMIT 1`);
-    const wRow = parseDbRow(wRes);
-    if (wRow) {
-      if (wRow.manual_details) {
-        const md = typeof wRow.manual_details === 'string' ? JSON.parse(wRow.manual_details) : wRow.manual_details;
-        if (md && typeof md === 'object') {
-          settings.manualSettlement = { ...settings.manualSettlement, ...md };
-        }
-      }
-      if (wRow.currency) settings.currency = wRow.currency;
-    }
-  } catch (_) {}
-
-  // 3. Fallback filesystem mirror
-  try {
-    const fp = path.join(process.cwd(), 'data', 'admin_settings.json');
-    if (fs.existsSync(fp)) {
-      const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
-      if (fd.paymentSettings && typeof fd.paymentSettings === 'object') {
-        settings = { ...settings, ...fd.paymentSettings };
-      }
-      if (fd.currency) settings.currency = fd.currency;
-    }
-  } catch (_) {}
-
-  // 4. Fallback credentials from environment variables
-  if (!settings.stripe.publishableKey) {
-    settings.stripe.publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
-  }
-  if (!settings.stripe.secretKey) {
-    settings.stripe.secretKey = process.env.STRIPE_SECRET_KEY || '';
-  }
-  if (!settings.paypal.clientId) {
-    settings.paypal.clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
-  }
-  if (!settings.paypal.clientSecret) {
-    settings.paypal.clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
-  }
-
-  // 5. Strict Compound Gating Engine
-  const activeMode = String(settings.activeGateway || 'stripe').toLowerCase();
-
-  const stripeRaw = settings.stripe?.enabled ?? settings.stripe?.is_enabled;
-  const isStripeSwitchOn = stripeRaw !== undefined ? Boolean(stripeRaw) : true;
-  const stripePermittedByMode = (activeMode === 'stripe' || activeMode === 'both');
-  const stripeEnabled = isStripeSwitchOn && stripePermittedByMode;
-
-  const paypalRaw = settings.paypal?.enabled ?? settings.paypal?.is_enabled;
-  const isPaypalSwitchOn = paypalRaw !== undefined ? Boolean(paypalRaw) : false;
-  const paypalPermittedByMode = (activeMode === 'paypal' || activeMode === 'both');
-  const paypalEnabled = isPaypalSwitchOn && paypalPermittedByMode;
-
-  // Bank Wire is offline manual settlement: active whenever manualSettlement.enabled or manual.enabled is TRUE
-  const manualRaw = settings.manualSettlement?.enabled ?? settings.manual?.enabled ?? settings.manual_details?.enabled ?? false;
-  const manualEnabled = Boolean(manualRaw);
-
-  const allowedGateways: string[] = [];
-  if (stripeEnabled) allowedGateways.push('stripe');
-  if (paypalEnabled) allowedGateways.push('paypal');
-  if (manualEnabled) allowedGateways.push('manual');
-
-  // Synchronize computed allowed_gateways back to wallet_settings
-  try {
-    const allowedJson = JSON.stringify(allowedGateways);
-    const manualJson = JSON.stringify(settings.manualSettlement || {});
-    await universalQuery(
-      `UPDATE wallet_settings 
-       SET allowed_gateways = $1, manual_details = $2, currency = $3, updated_at = NOW() 
-       WHERE id = 1`,
-      [allowedJson, manualJson, settings.currency || 'USD']
-    );
-  } catch (_) {}
-
-  return {
-    rawSettings: settings,
-    allowedGateways,
-    stripeEnabled,
-    paypalEnabled,
-    manualEnabled,
-    currency: settings.currency || 'USD',
-    testMode: Boolean(settings.testMode),
-  };
-}
-
-export async function GET(req: Request) {
-  try {
-    const gwData = await getAuthoritativeGatewaySettings();
-    const url = new URL(req.url);
-    const userId = url.searchParams.get('userId') || '';
-    const userEmail = (url.searchParams.get('email') || '').toLowerCase().trim();
-    const page = parseInt(url.searchParams.get('page') || '1', 10);
-    const limit = parseInt(url.searchParams.get('limit') || '10', 10);
-    const search = (url.searchParams.get('search') || '').toLowerCase().trim();
-    const typeFilter = url.searchParams.get('type') || 'all';
-
-    let balance = 0;
-    let transactions: any[] = [];
-    let totalCount = 0;
-    let totalDeposited = 0;
-    let totalSpent = 0;
-
-    if (userId || userEmail) {
-      try {
-        const uRes = await universalQuery(
-          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-          [userId, userEmail]
-        );
-        const uRow = parseDbRow(uRes);
-        if (uRow && uRow.wallet_balance !== undefined) {
-          balance = Number(uRow.wallet_balance || 0);
-        }
-
-        let queryParams: any[] = [userId, userEmail];
-        let whereClauses = [`((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`];
-
-        if (typeFilter && typeFilter !== 'all') {
-          queryParams.push(typeFilter);
-          whereClauses.push(`type = $${queryParams.length}`);
-        }
-
-        if (search) {
-          queryParams.push(`%${search}%`);
-          whereClauses.push(`(LOWER(description) LIKE $${queryParams.length} OR LOWER(gateway_tx_id) LIKE $${queryParams.length} OR LOWER(id) LIKE $${queryParams.length})`);
-        }
-
-        const whereSql = whereClauses.join(' AND ');
-        const countRes = await universalQuery(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, queryParams);
-        const countRow = parseDbRow(countRes);
-        totalCount = parseInt(countRow?.count || '0', 10);
-
-        const offset = (page - 1) * limit;
-        queryParams.push(limit, offset);
-        const tRes = await universalQuery(
-          `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
-          queryParams
-        );
-        transactions = parseDbRows(tRes);
-
-        const statsRes = await universalQuery(
-          `SELECT 
-            SUM(CASE WHEN amount > 0 AND (status = 'succeeded' OR status = 'completed') THEN amount ELSE 0 END) as total_dep,
-            SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as total_sp
-           FROM wallet_transactions 
-           WHERE ((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`,
-          [userId, userEmail]
-        );
-        const statsRow = parseDbRow(statsRes);
-        totalDeposited = Number(statsRow?.total_dep || 0);
-        totalSpent = Number(statsRow?.total_sp || 0);
-      } catch (dbErr) {
-        console.warn('[Wallet API] Query notice:', dbErr);
-      }
-    }
-
-    let walletRules: any = {
+    // 1. Fetch Wallet Settings with explicit string literals
+    let settings = {
       is_enabled: true,
-      min_topup: 5.00,
-      max_topup: 1000.00,
+      currency: 'USD',
+      min_topup: 5,
+      max_topup: 1000,
       preset_amounts: [10, 25, 50, 100, 250],
-      bonus_rules: [
-        { threshold: 50, bonus_percent: 5 },
-        { threshold: 100, bonus_percent: 10 }
-      ],
+      bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
+      allowed_gateways: ['stripe', 'paypal', 'manual'],
       allow_site_purchases: true
     };
 
     try {
-      const wRes = await universalQuery(`SELECT * FROM wallet_settings WHERE id = 1 LIMIT 1`);
-      const wRow = parseDbRow(wRes);
-      if (wRow) {
-        walletRules = {
-          ...walletRules,
-          min_topup: parseFloat(wRow.min_topup || 5),
-          max_topup: parseFloat(wRow.max_topup || 1000),
-          preset_amounts: typeof wRow.preset_amounts === 'string' ? JSON.parse(wRow.preset_amounts) : (wRow.preset_amounts || walletRules.preset_amounts),
-          bonus_rules: typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : (wRow.bonus_rules || walletRules.bonus_rules),
-          allow_site_purchases: wRow.allow_site_purchases !== false,
+      const sRes: any = await query(`
+        SELECT * FROM wallet_settings 
+        WHERE id::text = 'current' OR id::text = '1'
+        LIMIT 1;
+      `);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        settings = {
+          is_enabled: sRow.is_enabled !== false,
+          currency: sRow.currency || 'USD',
+          min_topup: Number(sRow.min_topup || 5),
+          max_topup: Number(sRow.max_topup || 1000),
+          preset_amounts: Array.isArray(sRow.preset_amounts) ? sRow.preset_amounts : (typeof sRow.preset_amounts === 'string' ? JSON.parse(sRow.preset_amounts) : [10, 25, 50, 100, 250]),
+          bonus_rules: Array.isArray(sRow.bonus_rules) ? sRow.bonus_rules : (typeof sRow.bonus_rules === 'string' ? JSON.parse(sRow.bonus_rules) : []),
+          allowed_gateways: Array.isArray(sRow.allowed_gateways) ? sRow.allowed_gateways : ['stripe', 'paypal', 'manual'],
+          allow_site_purchases: sRow.allow_site_purchases !== false
         };
       }
     } catch (_) {}
 
-    const rawManual = gwData.rawSettings.manualSettlement || gwData.rawSettings.manual || {};
-    const manualDetails = {
-      enabled: gwData.manualEnabled,
-      bankName: rawManual.bankName || '',
-      accountHolder: rawManual.accountHolder || '',
-      accountNumber: rawManual.accountNumber || '',
-      routingNumber: rawManual.routingNumber || '',
-      swiftBic: rawManual.swiftBic || '',
-      branchName: rawManual.branchName || '',
-      instructions: rawManual.instructions || 'Please transfer the exact amount and include your reference number.',
-      requireReference: rawManual.requireReference ?? true,
-    };
+    // 2. Fetch User & Wallet Balance with strict text casting
+    let userRow: any = null;
+    let walletBalance = 0.00;
 
-    const structuredSettings = {
-      is_enabled: true,
-      currency: gwData.currency,
-      min_topup: walletRules.min_topup,
-      max_topup: walletRules.max_topup,
-      preset_amounts: walletRules.preset_amounts,
-      bonus_rules: walletRules.bonus_rules,
-      allowed_gateways: gwData.allowedGateways,
-      active_gateway: gwData.allowedGateways[0] || null,
-      allow_site_purchases: walletRules.allow_site_purchases,
-      stripe_configured: Boolean(gwData.rawSettings.stripe?.publishableKey),
-      paypal_configured: Boolean(gwData.rawSettings.paypal?.clientId),
-      test_mode: gwData.testMode,
-      manual_details: manualDetails,
-    };
+    if (userId || email) {
+      try {
+        const uRes: any = await query(`
+          SELECT id, email, name, wallet_balance, token_balance, role 
+          FROM users 
+          WHERE (id::text = $1::text AND $1::text != '') 
+             OR (email IS NOT NULL AND LOWER(email) = LOWER($2::text) AND $2::text != '')
+          LIMIT 1;
+        `, [userId, email]);
+        userRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
+        if (userRow) {
+          walletBalance = parseFloat(userRow.wallet_balance || 0);
+        }
+      } catch (_) {}
+    }
+
+    // 3. Query User Transaction Ledger with Type-Safe Conditionals
+    const conditions: string[] = [];
+    const values: any[] = [];
+
+    const identityClauses: string[] = [];
+    if (email) {
+      values.push(email);
+      identityClauses.push(`LOWER(TRIM(user_email)) = LOWER(TRIM($${values.length}::text))`);
+    }
+    if (userId) {
+      values.push(userId);
+      identityClauses.push(`user_id::text = $${values.length}::text`);
+    }
+    if (userRow?.id && userRow.id !== userId) {
+      values.push(String(userRow.id));
+      identityClauses.push(`user_id::text = $${values.length}::text`);
+    }
+
+    if (identityClauses.length > 0) {
+      conditions.push(`(${identityClauses.join(' OR ')})`);
+    } else {
+      conditions.push(`(user_id::text = 'usr_admin_1' OR user_id IS NULL)`);
+    }
+
+    if (typeFilter && typeFilter !== 'all') {
+      values.push(typeFilter);
+      conditions.push(`type = $${values.length}::text`);
+    }
+
+    if (search) {
+      values.push(`%${search}%`);
+      const sIdx = values.length;
+      conditions.push(`(
+        LOWER(COALESCE(description, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(id, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(gateway_tx_id, '')) LIKE $${sIdx}::text OR 
+        LOWER(COALESCE(gateway, '')) LIKE $${sIdx}::text
+      )`);
+    }
+
+    const whereSql = conditions.join(' AND ');
+
+    let totalCount = 0;
+    try {
+      const countRes: any = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, values);
+      const cRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
+      totalCount = parseInt(cRow?.count || '0', 10);
+    } catch (_) {}
+
+    const pageValues = [...values, limit, offset];
+    let transactions: any[] = [];
+    try {
+      const rowsRes: any = await query(`
+        SELECT * FROM wallet_transactions 
+        WHERE ${whereSql} 
+        ORDER BY created_at DESC 
+        LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}
+      `, pageValues);
+      transactions = Array.isArray(rowsRes) ? rowsRes : (rowsRes?.rows || []);
+    } catch (_) {}
+
+    let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
+    try {
+      const statsRes: any = await query(`
+        SELECT 
+          COALESCE(SUM(CASE WHEN amount > 0 AND status IN ('succeeded', 'successful', 'completed', 'paid') THEN amount ELSE 0 END), 0) as total_deposited,
+          COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
+          COUNT(*) as total_events
+        FROM wallet_transactions 
+        WHERE ${whereSql} AND status IN ('succeeded', 'successful', 'completed', 'paid')
+      `, values);
+      const stRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+      if (stRow) {
+        stats = {
+          totalDeposited: parseFloat(stRow.total_deposited || 0),
+          totalSpent: parseFloat(stRow.total_spent || 0),
+          totalEvents: parseInt(stRow.total_events || 0, 10)
+        };
+      }
+    } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      balance,
-      wallet_balance: balance,
-      currency: gwData.currency,
-      allowed_gateways: gwData.allowedGateways,
-      allowedGateways: gwData.allowedGateways,
-      active_gateway: gwData.allowedGateways[0] || null,
-      settings: structuredSettings,
-      gatewaySettings: {
-        currency: gwData.currency,
-        testMode: gwData.testMode,
-        stripe: {
-          enabled: gwData.stripeEnabled,
-          publishableKey: gwData.rawSettings.stripe?.publishableKey || ''
-        },
-        paypal: {
-          enabled: gwData.paypalEnabled,
-          clientId: gwData.rawSettings.paypal?.clientId || '',
-          environment: gwData.rawSettings.paypal?.environment || 'sandbox'
-        },
-        manualSettlement: manualDetails,
-      },
+      balance: walletBalance,
+      wallet_balance: walletBalance,
+      walletBalance: walletBalance,
+      user: userRow ? {
+        id: userRow.id,
+        email: userRow.email,
+        name: userRow.name || 'Chef',
+        wallet_balance: walletBalance
+      } : null,
+      settings,
       transactions,
       totalCount,
       totalPages: Math.max(1, Math.ceil(totalCount / limit)),
       page,
-      stats: { totalDeposited, totalSpent, totalEvents: totalCount }
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
-      }
-    });
+      limit,
+      stats
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message, balance: 0, wallet_balance: 0 }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const gwData = await getAuthoritativeGatewaySettings();
+    await initWalletDb();
     const body = await req.json();
-    const action = body.action || '';
-    const gateway = (body.gateway || '').toLowerCase();
-    const userId = String(body.userId || '').trim();
-    const userEmail = (body.email || body.userEmail || '').toLowerCase().trim();
-    const depositAmt = parseFloat(String(body.amount || 0));
+    const { action, amount, bonus, gateway, email, userId, gatewayTxId } = body;
 
-    // 1. Reconcile Balance
-    if (action === 'reconcile_wallet') {
-      const uRes = await universalQuery(
-        `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-        [userId, userEmail]
-      );
-      const curBal = Number(parseDbRow(uRes)?.wallet_balance || 0);
-      return NextResponse.json({
-        success: true,
-        message: 'Wallet balance reconciled with payment provider.',
-        wallet_balance: curBal
-      });
+    const depositAmount = parseFloat(amount || 0);
+    const bonusAmount = parseFloat(bonus || 0);
+    const totalToAdd = depositAmount + bonusAmount;
+
+    if (isNaN(depositAmount) || depositAmount <= 0) {
+      return NextResponse.json({ success: false, error: 'Invalid deposit amount' }, { status: 400 });
     }
 
-    // 2. Stripe Checkout Verification
-    if (action === 'verify_stripe_session') {
-      const sessionId = body.sessionId?.trim();
-      if (!sessionId) {
-        return NextResponse.json({ success: false, error: 'Session ID is required.' }, { status: 400 });
-      }
+    const targetEmail = String(email || 'admin@zecratary.com').toLowerCase().trim();
+    const targetUserId = String(userId || 'usr_admin_1').trim();
 
-      const existRes = await universalQuery(`SELECT * FROM wallet_transactions WHERE gateway_tx_id = $1 LIMIT 1`, [sessionId]);
-      if (parseDbRow(existRes)) {
-        const uRes = await universalQuery(`SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`, [userId, userEmail]);
-        return NextResponse.json({ success: true, message: 'Session already credited.', wallet_balance: Number(parseDbRow(uRes)?.wallet_balance || 0) });
-      }
+    const updateRes: any = await query(`
+      UPDATE users 
+      SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+      WHERE (id::text = $2::text AND $2::text != '') 
+         OR (email IS NOT NULL AND LOWER(email) = LOWER($3::text))
+      RETURNING id, email, wallet_balance;
+    `, [totalToAdd, targetUserId, targetEmail]);
 
-      let totalAddition = depositAmt > 0 ? depositAmt : 50;
-      const secretKey = gwData.rawSettings.stripe?.secretKey;
+    const userRow = Array.isArray(updateRes) ? updateRes[0] : updateRes?.rows?.[0];
+    const newBalance = userRow ? parseFloat(userRow.wallet_balance) : totalToAdd;
 
-      if (secretKey && secretKey.startsWith('sk_')) {
-        try {
-          const sRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${sessionId}`, {
-            headers: { Authorization: `Bearer ${secretKey}` },
-          });
-          const sessionData = await sRes.json();
-          if (sessionData && sessionData.id) {
-            const metaTotal = parseFloat(sessionData.metadata?.totalAddition || '0');
-            if (metaTotal > 0) totalAddition = metaTotal;
-          }
-        } catch (_) {}
-      }
+    const txId = 'wtx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+    const desc = bonusAmount > 0 
+      ? `Wallet Deposit ($${depositAmount.toFixed(2)} + $${bonusAmount.toFixed(2)} Bonus)`
+      : `Wallet Deposit ($${depositAmount.toFixed(2)})`;
 
-      await universalQuery(
-        `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-         WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
-        [totalAddition, userId, userEmail]
-      );
+    await query(`
+      INSERT INTO wallet_transactions (
+        id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, created_at
+      ) VALUES ($1::text, $2::text, $3::text, 'topup', $4, $5, $6::text, $7::text, 'succeeded', $8::text, NOW());
+    `, [txId, targetUserId, targetEmail, totalToAdd, newBalance, gateway || 'manual', gatewayTxId || txId, desc]);
 
-      const balRes = await universalQuery(
-        `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-        [userId, userEmail]
-      );
-      const newBal = Number(parseDbRow(balRes)?.wallet_balance || 0);
+    return NextResponse.json({
+      success: true,
+      wallet_balance: newBalance,
+      balance: newBalance,
+      message: `Successfully deposited $${depositAmount.toFixed(2)} into your wallet!`
+    });
 
-      const txId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      await universalQuery(
-        `INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, created_at)
-         VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'completed', $7, NOW())`,
-        [txId, userId, userEmail, totalAddition, newBal, sessionId, `Deposit Top-Up via Stripe (${gwData.currency} ${totalAddition.toFixed(2)})`]
-      );
-
-      return NextResponse.json({
-        success: true,
-        message: 'Top-up confirmed! Store credit added to your account.',
-        wallet_balance: newBal
-      });
-    }
-
-    // 3. Bank Wire / Manual Settlement Submission (Placed in Pending Approval Queue)
-    if (gateway === 'manual' || gateway === 'manualsettlement' || action === 'submit_manual_settlement') {
-      if (!gwData.manualEnabled) {
-        return NextResponse.json({ success: false, error: 'Bank Wire settlement is currently disabled in Payment Gateway.' }, { status: 400 });
-      }
-
-      const txId = 'wire_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const ref = (body.transferReference || body.transfer_reference || '').trim();
-      const notes = body.notes || '';
-      const userName = body.userName || body.name || 'Customer';
-
-      if (!ref) {
-        return NextResponse.json({ success: false, error: 'Reference code is required for bank wire transfers.' }, { status: 400 });
-      }
-
-      await universalQuery(
-        `INSERT INTO payment_transactions (
-          id, customer_name, customer_email, plan_name, plan_slug,
-          amount, currency, gateway, status, transfer_reference, notes, created_at, updated_at
-        ) VALUES ($1, $2, $3, 'Wallet Top-Up', 'wallet_topup', $4, $5, 'manual_settlement', 'pending', $6, $7, NOW(), NOW())`,
-        [txId, userName, userEmail, depositAmt, gwData.currency, ref, notes]
-      );
-
-      await universalQuery(
-        `INSERT INTO wallet_transactions (
-          id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at
-        ) VALUES ($1, $2, $3, $4, 0, 'topup', 'manual', $5, 'pending', $6, NOW())`,
-        [txId, userId, userEmail, depositAmt, txId, `Bank Wire Transfer: ${ref}`]
-      );
-
-      return NextResponse.json({
-        success: true,
-        message: 'Bank wire transfer submitted! It will be credited once verified by administrators.',
-        transactionId: txId
-      });
-    }
-
-    // 4. Stripe Checkout Session Initiation
-    if (gateway === 'stripe') {
-      if (!gwData.stripeEnabled) {
-        return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled in Payment Gateway settings.' }, { status: 400 });
-      }
-
-      const secretKey = gwData.rawSettings.stripe?.secretKey;
-      const origin = body.origin || (typeof process.env.NEXTAUTH_URL === 'string' ? process.env.NEXTAUTH_URL : 'http://localhost:3000');
-
-      let bonusPercent = 0;
-      if (depositAmt >= 100) bonusPercent = 10;
-      else if (depositAmt >= 50) bonusPercent = 5;
-
-      const bonusCredit = (depositAmt * bonusPercent) / 100;
-      const totalAddition = depositAmt + bonusCredit;
-
-      if (secretKey && secretKey.startsWith('sk_')) {
-        try {
-          const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
-          const unitAmount = isZeroDecimal(gwData.currency) ? Math.round(depositAmt) : Math.round(depositAmt * 100);
-
-          const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [{
-              price_data: {
-                currency: gwData.currency.toLowerCase(),
-                unit_amount: unitAmount,
-                product_data: { name: `Store Credit Deposit (${gwData.currency.toUpperCase()} ${depositAmt.toFixed(2)})` },
-              },
-              quantity: 1,
-            }],
-            mode: 'payment',
-            success_url: `${origin}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${origin}/wallet?status=cancelled`,
-            customer_email: userEmail || undefined,
-            metadata: {
-              type: 'wallet_topup',
-              userId,
-              userEmail,
-              baseAmount: String(depositAmt),
-              bonusCredit: String(bonusCredit),
-              totalAddition: String(totalAddition),
-              currency: gwData.currency,
-            }
-          });
-
-          return NextResponse.json({ success: true, checkoutUrl: session.url, sessionId: session.id });
-        } catch (e: any) {
-          if (!gwData.testMode) return NextResponse.json({ success: false, error: e.message }, { status: 400 });
-        }
-      }
-
-      if (gwData.testMode) {
-        const mockSessionId = `cs_test_mock_${Date.now()}`;
-        return NextResponse.json({
-          success: true,
-          checkoutUrl: `${origin}/wallet?status=success&session_id=${mockSessionId}&amount=${totalAddition}`
-        });
-      }
-
-      return NextResponse.json({ success: false, error: 'Stripe Secret Key is not configured in Payment Gateway.' }, { status: 400 });
-    }
-
-    // 5. PayPal Checkout Initiation
-    if (gateway === 'paypal') {
-      if (!gwData.paypalEnabled) {
-        return NextResponse.json({ success: false, error: 'PayPal digital wallet is currently disabled in Payment Gateway settings.' }, { status: 400 });
-      }
-
-      if (gwData.testMode) {
-        let bonusPercent = depositAmt >= 100 ? 10 : (depositAmt >= 50 ? 5 : 0);
-        const totalAddition = depositAmt + (depositAmt * bonusPercent) / 100;
-
-        await universalQuery(
-          `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-           WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
-          [totalAddition, userId, userEmail]
-        );
-
-        const balRes = await universalQuery(
-          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
-          [userId, userEmail]
-        );
-        const newBal = Number(parseDbRow(balRes)?.wallet_balance || 0);
-
-        const mockId = 'sbx_pp_' + Date.now().toString(36);
-        await universalQuery(
-          `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at)
-           VALUES ($1, $2, $3, $4, $5, 'topup', 'paypal', $6, 'completed', $7, NOW())`,
-          [mockId, userId, userEmail, totalAddition, newBal, mockId, `Sandbox PayPal Top-Up (${gwData.currency} ${totalAddition.toFixed(2)})`]
-        );
-
-        return NextResponse.json({
-          success: true,
-          simulated: true,
-          wallet_balance: newBal,
-          message: `Sandbox Test: ${gwData.currency} ${totalAddition.toFixed(2)} credited via PayPal.`,
-        });
-      }
-
-      return NextResponse.json({ success: false, error: 'Live PayPal integration is awaiting credentials in /admin/payment-gateway.' }, { status: 400 });
-    }
-
-    return NextResponse.json({ success: true, message: 'Operation acknowledged.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -63277,84 +63138,122 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/tokens/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { getTokenSettings, purchaseTokenPackage, initTokenTables } from '@/lib/tokenService';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-
-export async function GET(req: NextRequest) {
-  try {
-    await initTokenTables();
-    const settings = await getTokenSettings();
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
-    const email = searchParams.get('email');
-
-    let balance = 0;
-    if (userId || email) {
-      const rows = await query('SELECT token_balance FROM users WHERE id = $1 OR LOWER(email) = LOWER($2) LIMIT 1', [userId || '', (email || '').trim()]);
-      if (rows && rows.length > 0) balance = Number(rows[0].token_balance || 0);
-    }
-
-    return NextResponse.json({
-      success: true,
-      balance,
-      tokenBalance: balance,
-      chefCost: settings.chefCost,
-      aiChefCost: settings.chefCost,
-      tokenSymbol: settings.tokenSymbol,
-      tokenName: settings.tokenName,
-      isEnabled: settings.isEnabled,
-      packages: settings.packages,
-      costs: {
-        chef: settings.chefCost,
-        aiChef: settings.chefCost,
-        'AI Chef Recipe Generation': settings.chefCost,
-        importUrl: settings.importUrlCost,
-        importText: settings.importTextCost,
-        importPhoto: settings.importPhotoCost
-      },
-      settings
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    await initTokenTables();
-    const body = await req.json();
-    const { action, packageId, userId, userEmail, tokens, price, packageName, paymentMethod } = body;
-
-    if (action === 'purchase' || packageId) {
-      const result = await purchaseTokenPackage({
-        userId,
-        userEmail,
-        packageId,
-        tokens,
-        price,
-        packageName,
-        paymentMethod: paymentMethod || 'wallet'
-      });
-      return NextResponse.json(result, { status: result.success ? 200 : 400 });
-    }
-
-    return NextResponse.json({ success: false, error: 'Unrecognized token action' }, { status: 400 });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
+export const revalidate = 0;
 
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
     headers: {
+      'Allow': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-    }
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
   });
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = String(searchParams.get('userId') || '').trim();
+    const email = String(searchParams.get('email') || '').toLowerCase().trim();
+
+    let tokenBalance = 500;
+    let userRow: any = null;
+
+    if (userId || email) {
+      try {
+        const uRes: any = await query(`
+          SELECT id, email, name, token_balance, wallet_balance, role
+          FROM users
+          WHERE (id::text = $1::text AND $1::text != '')
+             OR (email IS NOT NULL AND LOWER(email) = LOWER($2::text) AND $2::text != '')
+          LIMIT 1;
+        `, [userId, email]);
+        userRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
+        if (userRow) {
+          tokenBalance = parseInt(userRow.token_balance ?? 500, 10);
+        }
+      } catch (_) {}
+    }
+
+    let settings = {
+      is_enabled: true,
+      default_free_tokens: 500,
+      tokens_per_request: 1,
+      cost_per_1k_tokens: 0.002,
+    };
+
+    try {
+      const sRes: any = await query(`
+        SELECT * FROM token_settings 
+        WHERE id::text = 'current' OR id::text = '1' 
+        LIMIT 1;
+      `);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        settings = {
+          is_enabled: sRow.is_enabled !== false,
+          default_free_tokens: Number(sRow.default_free_tokens ?? 500),
+          tokens_per_request: Number(sRow.tokens_per_request ?? 1),
+          cost_per_1k_tokens: Number(sRow.cost_per_1k_tokens ?? 0.002),
+        };
+      }
+    } catch (_) {}
+
+    return NextResponse.json({
+      success: true,
+      tokens: tokenBalance,
+      token_balance: tokenBalance,
+      balance: tokenBalance,
+      user: userRow ? {
+        id: userRow.id,
+        email: userRow.email,
+        name: userRow.name || 'Chef',
+        token_balance: tokenBalance,
+      } : null,
+      settings,
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message, tokens: 500 }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { userId, email, amount, action = 'deduct' } = body;
+    const delta = parseInt(amount || '1', 10);
+
+    const targetUserId = String(userId || '').trim();
+    const targetEmail = String(email || '').toLowerCase().trim();
+    const sign = action === 'deduct' ? -1 : 1;
+
+    const updateRes: any = await query(`
+      UPDATE users
+      SET token_balance = GREATEST(0, COALESCE(token_balance, 500) + $1),
+          updated_at = NOW()
+      WHERE (id::text = $2::text AND $2::text != '')
+         OR (email IS NOT NULL AND LOWER(email) = LOWER($3::text) AND $3::text != '')
+      RETURNING id, email, token_balance;
+    `, [delta * sign, targetUserId, targetEmail]);
+
+    const updated = Array.isArray(updateRes) ? updateRes[0] : updateRes?.rows?.[0];
+    const newBal = updated ? parseInt(updated.token_balance, 10) : 500;
+
+    return NextResponse.json({
+      success: true,
+      tokens: newBal,
+      token_balance: newBal,
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
 }
 
 ```
