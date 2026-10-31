@@ -1,0 +1,9 @@
+
+exclude:
+  - CODEBASE_SOURCE.md
+  - generate_CODEBASE_source.py
+  - node_modules/
+  - .next/
+  - .turbo/
+  - apps/
+  - packages/

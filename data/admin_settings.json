@@ -12,7 +12,7 @@
   "socialLogin": {
     "googleEnabled": true,
     "googleClientId": "479443923058-jeajhc080ad3kb0b57ighm8k101ip7q6.apps.googleusercontent.com",
-    "googleClientSecret": "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",
+    "googleClientSecret": "",
     "facebookEnabled": false,
     "facebookAppId": "",
     "facebookAppSecret": "",

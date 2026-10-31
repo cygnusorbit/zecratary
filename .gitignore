@@ -33,3 +33,4 @@ apps/web/.env
 !scripts/schema.sql
 !scripts/schema.mysql.sql
 !scripts/*.sql
+backups/*.sql
